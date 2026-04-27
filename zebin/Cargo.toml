@@ -1,0 +1,18 @@
+[package]
+name = "zebin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+zebin-macros.workspace = true
+memoffset = "0.9"
+memmap2 = { version = "0.9", optional = true }
+
+[features]
+default = []
+mmap = ["dep:memmap2"]
+
+[lints]
+workspace = true

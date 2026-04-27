@@ -1,0 +1,7 @@
+namespace user_system;
+
+struct UserProfile {
+    @id(1) id: u64;
+    @id(2) username: string;
+    @id(3) tags: [string];
+}

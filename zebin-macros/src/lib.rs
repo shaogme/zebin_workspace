@@ -1,0 +1,14 @@
+mod archive;
+mod serialize;
+
+use proc_macro::TokenStream;
+
+#[proc_macro_derive(ZebinArchive, attributes(zebin))]
+pub fn derive_zebin_archive(input: TokenStream) -> TokenStream {
+    archive::derive(input)
+}
+
+#[proc_macro_derive(ZebinSerialize, attributes(zebin))]
+pub fn derive_zebin_serialize(input: TokenStream) -> TokenStream {
+    serialize::derive(input)
+}

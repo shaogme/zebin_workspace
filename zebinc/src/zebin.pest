@@ -1,0 +1,18 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT    = _{ "//" ~ (!"\n" ~ ANY)* }
+
+schema = { SOI ~ (namespace | struct_def)* ~ EOI }
+
+namespace = { "namespace" ~ ident ~ ";" }
+
+struct_def = { "struct" ~ ident ~ "{" ~ field_def* ~ "}" }
+
+field_def = { attribute* ~ ident ~ ":" ~ type_name ~ ";" }
+
+attribute = { "@" ~ ident ~ "(" ~ (ident | literal) ~ ")" }
+
+ident = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+
+type_name = { "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "string" | "[" ~ type_name ~ "]" }
+
+literal = { ASCII_DIGIT+ }

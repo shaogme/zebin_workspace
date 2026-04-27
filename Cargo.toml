@@ -1,0 +1,22 @@
+[workspace]
+members = [
+    "zebin",
+    "zebin-macros",
+    "zebinc",
+]
+exclude = [
+    "docs",
+]
+resolver = "3"
+
+[workspace.lints.rust]
+warnings = "deny"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Shao G. <shaog.me@gmail.com>"]
+
+[workspace.dependencies]
+zebin-macros = { path = "zebin-macros" }
