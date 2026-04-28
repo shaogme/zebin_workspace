@@ -2,7 +2,8 @@ use std::{fs::File, path::Path};
 
 use memmap2::{Mmap as RawMmap, MmapOptions};
 
-use crate::ZebinError;
+use crate::error::ZebinError;
+use crate::io::storage::Storage;
 
 /// Memory-mapped storage backend for read-only archive access.
 pub struct Mmap {
@@ -21,7 +22,7 @@ impl Mmap {
     }
 }
 
-impl crate::storage::Storage for Mmap {
+impl Storage for Mmap {
     fn len(&self) -> usize {
         self.data.len()
     }

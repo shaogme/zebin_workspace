@@ -3,7 +3,7 @@ use core::num::{NonZeroU32, NonZeroUsize};
 
 use alloc::format;
 
-use crate::traits::ZebinError;
+use crate::error::ZebinError;
 
 pub(crate) fn read_fixed<const N: usize>(
     bytes: &[u8],

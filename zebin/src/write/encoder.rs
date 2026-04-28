@@ -1,14 +1,12 @@
-use core::convert::TryFrom;
-use core::num::NonZeroUsize;
-
 use alloc::vec::Vec;
+use core::num::NonZeroUsize;
 
 use crate::{
     ZebinError,
     core::schema::{
         LayoutDescriptor, LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey,
     },
-    traits::{ByteSink, LayoutSink},
+    io::sink::{ByteSink, LayoutSink},
     utils::{byteops, num::usize_to_u32},
 };
 
@@ -203,61 +201,4 @@ impl<'a> LayoutSink for SliceEncoder<'a> {
         self.layouts
             .register(stable_schema_key, schema_revision, encoding, layout)
     }
-}
-
-fn layout_section_len(layouts: &[LayoutDescriptor]) -> Result<usize, ZebinError> {
-    let mut len = 4usize
-        .checked_add(layouts.len().checked_mul(4).ok_or(ZebinError::WriteError)?)
-        .ok_or(ZebinError::WriteError)?;
-    for layout in layouts {
-        len = len
-            .checked_add(16)
-            .and_then(|v| v.checked_add(layout.fields.len().checked_mul(8)?))
-            .ok_or(ZebinError::WriteError)?;
-    }
-    Ok(len)
-}
-
-pub(crate) fn build_layout_section_bytes(
-    layouts: &[LayoutDescriptor],
-) -> Result<Vec<u8>, ZebinError> {
-    let total_len = layout_section_len(layouts)?;
-    let mut bytes = Vec::with_capacity(total_len);
-    let layout_count = usize_to_u32(layouts.len(), || ZebinError::WriteError)?;
-    bytes.extend_from_slice(&layout_count.to_le_bytes());
-
-    let mut offsets = Vec::with_capacity(layouts.len());
-    let mut cursor = 4usize
-        .checked_add(layouts.len().checked_mul(4).ok_or(ZebinError::WriteError)?)
-        .ok_or(ZebinError::WriteError)?;
-    for layout in layouts {
-        offsets.push(usize_to_u32(cursor, || ZebinError::WriteError)?);
-        cursor = cursor
-            .checked_add(16)
-            .and_then(|v| v.checked_add(layout.fields.len().checked_mul(8)?))
-            .ok_or(ZebinError::WriteError)?;
-    }
-
-    for offset in offsets {
-        bytes.extend_from_slice(&offset.to_le_bytes());
-    }
-
-    for layout in layouts {
-        bytes.extend_from_slice(&layout.stable_schema_key.to_le_bytes());
-        bytes.extend_from_slice(&layout.schema_revision.to_le_bytes());
-        let field_count = u16::try_from(layout.fields.len()).map_err(|_| ZebinError::WriteError)?;
-        bytes.extend_from_slice(&field_count.to_le_bytes());
-        bytes.push(layout.encoding as u8);
-        bytes.push(0);
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        for field in &layout.fields {
-            bytes.extend_from_slice(&field.field_id.to_le_bytes());
-            bytes.extend_from_slice(&field.offset.to_le_bytes());
-            bytes.push(field.encoding as u8);
-            bytes.push(0);
-        }
-    }
-
-    debug_assert_eq!(bytes.len(), total_len);
-    Ok(bytes)
 }

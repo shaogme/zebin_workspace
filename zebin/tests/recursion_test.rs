@@ -1,4 +1,4 @@
-use zebin::{ZebinArchive, ZebinSerialize, ZebinError};
+use zebin::{ZebinArchive, ZebinError, ZebinSerialize};
 
 #[derive(ZebinArchive, ZebinSerialize)]
 pub struct Node {

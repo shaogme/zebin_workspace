@@ -3,7 +3,7 @@ use core::num::NonZeroI64;
 
 use alloc::string::ToString;
 
-use crate::traits::ZebinError;
+use crate::error::ZebinError;
 
 /// Zebin core: relative pointer.
 /// Stores a 64-bit signed offset from the pointer's own location.

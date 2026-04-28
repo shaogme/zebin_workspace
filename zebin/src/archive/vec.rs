@@ -2,17 +2,18 @@ use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
-    ZebinError,
     core::rel_ptr::RelPtr,
+    error::ZebinError,
+    io::sink::{ByteSink, LayoutSink},
     traits::{
-        Access, Archive, SequenceResolverBuffer, SequenceSource, ValidationPathSegment,
-        archived_bytes,
+        Access, Archive, Layout, SequenceResolverBuffer, SequenceSource, Serialize, SerializeState,
+        Validate, archived_bytes,
     },
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
     },
+    validation::context::{ValidationContext, ValidationPathSegment},
 };
 
 /// An archived vector that uses a relative pointer.
@@ -324,10 +325,7 @@ where
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
         encoder.align(<T::Archived as Layout>::ALIGNMENT)?;
-        if !encoder
-            .pos()
-            .is_multiple_of(<T::Archived as Layout>::ALIGNMENT.get())
-        {
+        if encoder.pos() % <T::Archived as Layout>::ALIGNMENT.get() != 0 {
             return Ok(Poll::Pending);
         }
         self.data_pos = Some(encoder.pos());

@@ -1,19 +1,18 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{string::ToString, vec, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use wide::u8x16;
 
 use crate::{
-    ZebinError,
     core::rel_ptr::RelPtr,
-    traits::{
-        Access, Archive, ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate,
-        ValidationContext,
-    },
+    error::ZebinError,
+    io::sink::{ByteSink, LayoutSink},
+    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
     },
+    validation::context::ValidationContext,
 };
 
 fn packed_byte_len(value_count: usize, bits_per_value: usize) -> Result<usize, ZebinError> {
@@ -426,7 +425,6 @@ impl<T, const BITS: u8> PackedVec<T, BITS> {
     pub fn new(values: Vec<T>) -> Self {
         Self { values }
     }
-
 
     pub fn values(&self) -> &[T] {
         self.values.as_slice()

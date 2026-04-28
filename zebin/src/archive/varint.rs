@@ -1,12 +1,13 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{string::ToString, vec, vec::Vec};
 use core::{marker::PhantomData, num::NonZeroUsize, ops::Deref, task::Poll};
 
 use crate::{
-    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
-    ZebinError,
     core::rel_ptr::RelPtr,
     core::schema::ObjectEncoding,
-    traits::{Access, Archive},
+    error::ZebinError,
+    io::sink::{ByteSink, LayoutSink},
+    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
+    validation::context::ValidationContext,
 };
 
 /// Unsigned integers that are serialized with a variable-length encoding.
@@ -250,7 +251,7 @@ where
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
-        let (view, _) = unsafe { Self::access(ptr as *const u8, context)? };
+        let (view, _) = unsafe { <Self as Access>::access(ptr as *const u8, context)? };
         let _ = view.get();
         Ok(())
     }
@@ -494,7 +495,7 @@ impl<'a, T: VarIntNumber + 'a> Access<'a> for ArchivedVarIntVec<T> {
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            Self::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }

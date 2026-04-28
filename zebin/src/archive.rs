@@ -1,6 +1,8 @@
-pub mod archived_option;
-pub mod archived_result;
-pub mod archived_string;
-pub mod archived_vec;
+mod option;
+mod result;
+mod string;
+mod vec;
+mod container;
 pub mod packed;
+mod primitive;
 pub mod varint;

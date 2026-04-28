@@ -3,14 +3,15 @@ use core::{num::NonZeroUsize, str, task::Poll};
 use alloc::string::{String, ToString};
 
 use crate::{
-    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
-    ZebinError,
     core::rel_ptr::RelPtr,
-    traits::{Access, Archive},
+    error::ZebinError,
+    io::sink::{ByteSink, LayoutSink},
+    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
     },
+    validation::context::ValidationContext,
 };
 
 /// An archived string that uses a relative pointer.

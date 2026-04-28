@@ -2,10 +2,11 @@ use alloc::string::ToString;
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
-    ZebinError,
-    traits::{Access, Archive, ValidationPathSegment},
+    error::ZebinError,
+    io::sink::{ByteSink, LayoutSink},
+    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::byteops,
+    validation::context::{ValidationContext, ValidationPathSegment},
 };
 
 /// Archived representation for `Result<T, E>`.

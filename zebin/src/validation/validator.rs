@@ -4,9 +4,9 @@ use alloc::string::ToString;
 
 use crate::{
     ZebinError,
-    access::ResolvedLayout,
     core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
-    traits::{ValidationContext, ValidationPathSegment},
+    read::view::ResolvedLayout,
+    validation::context::{ValidationContext, ValidationPathSegment},
 };
 
 /// Validator for byte streams to ensure safety before access.

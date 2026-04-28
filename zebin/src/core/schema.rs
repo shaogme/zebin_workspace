@@ -1,5 +1,5 @@
 use crate::{
-    ZebinError,
+    error::ZebinError,
     utils::num::{read_fixed, u32_to_usize},
 };
 use core::num::NonZeroUsize;
