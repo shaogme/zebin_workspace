@@ -2,9 +2,8 @@ use alloc::{boxed::Box, string::ToString};
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    byteops,
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError, traits::Archive,
+    ByteSink, LayoutSink, ZebinError, byteops, traits::Archive,
 };
 
 /// Archived representation for `Option<T>`.

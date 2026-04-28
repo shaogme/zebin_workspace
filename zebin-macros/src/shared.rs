@@ -1,5 +1,6 @@
+use core::convert::TryFrom;
 use proc_macro2::Span;
-use quote::format_ident;
+use quote::{ToTokens, format_ident, quote};
 use syn::{
     Data, DataEnum, DataStruct, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed, Ident,
     Index, Member, Result, Type, spanned::Spanned,
@@ -19,6 +20,7 @@ pub struct FieldSpec<'a> {
     pub state_ident: Ident,
     pub ty: &'a Type,
     pub field_id: Option<u16>,
+    pub packed_bits: Option<u8>,
 }
 
 /// Specification of a struct or enum variant.
@@ -149,6 +151,199 @@ fn parse_field_id(field: &Field) -> Result<Option<u16>> {
     Ok(field_id)
 }
 
+fn parse_uint_after_token(text: &str, token: &str) -> Option<u32> {
+    let start = text.find(token)?;
+    let text = &text[start + token.len()..];
+    let eq = text.find('=')?;
+    let text = text[eq + 1..].trim_start();
+    let mut end = 0usize;
+    for ch in text.chars() {
+        if ch.is_ascii_hexdigit() || ch == 'x' || ch == 'X' || ch == '_' {
+            end += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        return None;
+    }
+    let value = text[..end].replace('_', "");
+    if let Some(rest) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        u32::from_str_radix(rest, 16).ok()
+    } else {
+        value.parse::<u32>().ok()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackedElementKind {
+    Bool,
+    U8,
+}
+
+pub fn packed_element_kind(ty: &Type) -> Option<PackedElementKind> {
+    match ty {
+        Type::Path(path) => {
+            let segment = path.path.segments.last()?;
+            let ident = segment.ident.to_string();
+            if ident != "Vec" {
+                return None;
+            }
+            let inner = match &segment.arguments {
+                syn::PathArguments::AngleBracketed(args) => {
+                    args.args.iter().find_map(|arg| match arg {
+                        syn::GenericArgument::Type(inner) => Some(inner),
+                        _ => None,
+                    })?
+                }
+                _ => return None,
+            };
+            match inner {
+                Type::Path(inner_path) if inner_path.path.is_ident("bool") => {
+                    Some(PackedElementKind::Bool)
+                }
+                Type::Path(inner_path) if inner_path.path.is_ident("u8") => {
+                    Some(PackedElementKind::U8)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn packed_type_name(ty: &Type) -> String {
+    ty.to_token_stream().to_string()
+}
+
+fn packed_error(field: &Field, detail: &str) -> syn::Error {
+    syn::Error::new_spanned(
+        &field.ty,
+        format!("{detail}；当前字段类型是 `{}`", packed_type_name(&field.ty)),
+    )
+}
+
+fn parse_packed_bits(field: &Field) -> Result<Option<u8>> {
+    let mut packed_bits: Option<u8> = None;
+    let kind = packed_element_kind(&field.ty);
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("zebin") {
+            continue;
+        }
+        let tokens = attr.meta.require_list()?.tokens.to_string();
+        if !tokens.contains("packed") && !tokens.contains("bits") {
+            continue;
+        }
+
+        let explicit = parse_uint_after_token(&tokens, "packed")
+            .or_else(|| parse_uint_after_token(&tokens, "bits"));
+
+        let bits = match explicit {
+            Some(bits) => bits,
+            None => match kind {
+                Some(PackedElementKind::Bool) => 1,
+                Some(PackedElementKind::U8) => {
+                    return Err(syn::Error::new(
+                        field.span(),
+                        "u8 packed 字段需要显式提供 bits",
+                    ));
+                }
+                None => {
+                    return Err(packed_error(
+                        field,
+                        "packed 只能用于 `Vec<bool>` 或 `Vec<u8>`",
+                    ));
+                }
+            },
+        };
+
+        let bits = u8::try_from(bits)
+            .map_err(|_| syn::Error::new(field.span(), "packed bits exceeds u8 range"))?;
+        packed_bits = Some(bits);
+    }
+
+    if let Some(bits) = packed_bits {
+        match kind {
+            Some(PackedElementKind::Bool) if bits != 1 => {
+                return Err(syn::Error::new(
+                    field.span(),
+                    "bool packed 字段只能使用 1 bit",
+                ));
+            }
+            Some(PackedElementKind::U8) if bits == 0 || bits > 8 => {
+                return Err(syn::Error::new(
+                    field.span(),
+                    "u8 packed 字段的 bits 必须在 1..=8",
+                ));
+            }
+            Some(_) => {}
+            None => {
+                return Err(packed_error(
+                    field,
+                    "packed 只能用于 `Vec<bool>` 或 `Vec<u8>`",
+                ));
+            }
+        }
+    }
+
+    Ok(packed_bits)
+}
+
+pub fn packed_info(field: &FieldSpec<'_>) -> Option<(PackedElementKind, u8)> {
+    let bits = field.packed_bits?;
+    let kind = packed_element_kind(field.ty)?;
+    Some((kind, bits))
+}
+
+pub fn packed_wrapper_type(field: &FieldSpec<'_>) -> Option<proc_macro2::TokenStream> {
+    let (kind, bits) = packed_info(field)?;
+    Some(match kind {
+        PackedElementKind::Bool => quote! { zebin::PackedSlice<'a, bool, 1> },
+        PackedElementKind::U8 => quote! { zebin::PackedSlice<'a, u8, #bits> },
+    })
+}
+
+pub fn packed_wrapper_type_expr(field: &FieldSpec<'_>) -> Option<proc_macro2::TokenStream> {
+    let (kind, bits) = packed_info(field)?;
+    Some(match kind {
+        PackedElementKind::Bool => quote! { zebin::PackedSlice<'_, bool, 1> },
+        PackedElementKind::U8 => quote! { zebin::PackedSlice<'_, u8, #bits> },
+    })
+}
+
+pub fn packed_archived_type(field: &FieldSpec<'_>) -> Option<proc_macro2::TokenStream> {
+    let (kind, bits) = packed_info(field)?;
+    Some(match kind {
+        PackedElementKind::Bool => quote! { zebin::ArchivedPackedBoolSlice },
+        PackedElementKind::U8 => quote! { zebin::ArchivedPackedU8Slice<#bits> },
+    })
+}
+
+pub fn packed_begin_expr(
+    field: &FieldSpec<'_>,
+    value: proc_macro2::TokenStream,
+) -> Option<proc_macro2::TokenStream> {
+    let wrapper = packed_wrapper_type_expr(field)?;
+    Some(quote! {
+        <#wrapper as zebin::ArchiveBuilder>::begin(
+            &<#wrapper>::new(#value.as_ref())
+        )?
+    })
+}
+
+pub fn field_resolver_type(field: &FieldSpec<'_>) -> proc_macro2::TokenStream {
+    if field.packed_bits.is_some() {
+        quote! { usize }
+    } else {
+        let ty = field.ty;
+        quote! { <#ty as zebin::Archive>::Resolver }
+    }
+}
+
 fn parse_schema_key(attrs: &[syn::Attribute]) -> Result<Option<u32>> {
     let mut stable_schema_key: Option<u32> = None;
     for attr in attrs {
@@ -178,6 +373,7 @@ fn parse_fields_named(fields: &FieldsNamed) -> Result<RecordSpec<'_>> {
             state_ident: field_state_ident(ident, index),
             ty: &field.ty,
             field_id: parse_field_id(field)?,
+            packed_bits: parse_packed_bits(field)?,
         });
     }
     Ok(RecordSpec {
@@ -196,6 +392,7 @@ fn parse_fields_unnamed(fields: &FieldsUnnamed) -> Result<RecordSpec<'_>> {
             state_ident: field_state_ident(None, index),
             ty: &field.ty,
             field_id: parse_field_id(field)?,
+            packed_bits: parse_packed_bits(field)?,
         });
     }
     Ok(RecordSpec {

@@ -9,9 +9,9 @@ compile_error!(
 pub extern crate alloc;
 
 mod access;
+mod archive;
 #[doc(hidden)]
 pub mod byteops;
-mod archive;
 mod core;
 mod format;
 mod layout;
@@ -20,6 +20,10 @@ mod storage;
 mod traits;
 
 pub mod prelude {
+    pub use crate::archive::packed::{
+        ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
+        PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
+    };
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{
@@ -37,6 +41,10 @@ pub mod prelude {
 
 pub use crate::access::ArchiveView;
 pub use crate::access::ResolvedLayout;
+pub use crate::archive::packed::{
+    ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec, PackedSlice,
+    PackedU8Slice, PackedU8Vec, PackedVec,
+};
 pub use crate::core::rel_ptr::RelPtr;
 pub use crate::core::schema::{
     LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, SchemaRevision, StableSchemaKey,

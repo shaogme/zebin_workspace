@@ -3,9 +3,8 @@ use core::{num::NonZeroUsize, str, task::Poll};
 use alloc::string::{String, ToString};
 
 use crate::{
-    byteops,
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError,
+    ByteSink, LayoutSink, ZebinError, byteops,
     core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
     traits::Archive,

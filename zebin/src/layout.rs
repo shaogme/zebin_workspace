@@ -4,8 +4,7 @@ use core::num::NonZeroUsize;
 use alloc::vec::Vec;
 
 use crate::{
-    byteops,
-    ZebinError,
+    ZebinError, byteops,
     core::schema::{LayoutDescriptor, LayoutField, SchemaRevision, StableSchemaKey},
     num::usize_to_u32,
     traits::{ByteSink, LayoutSink},

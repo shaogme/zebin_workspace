@@ -4,8 +4,8 @@ use syn::{DeriveInput, Member};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, VariantSpec, archived_name, has_schema, input_member,
-    layout_field_entries, parse_item, payload_name, user_member, variant_archived_name,
-    variant_field_name, variant_method_name,
+    layout_field_entries, packed_archived_type, packed_wrapper_type_expr, parse_item, payload_name,
+    user_member, variant_archived_name, variant_field_name, variant_method_name,
 };
 
 // --- Helper Functions for Code Generation ---
@@ -22,17 +22,20 @@ fn record_schema_field(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStre
     })
 }
 
-fn record_field_decl(
-    record: &RecordSpec<'_>,
-    ty: &syn::Type,
-    index: usize,
-) -> proc_macro2::TokenStream {
+fn record_field_decl(record: &RecordSpec<'_>, index: usize) -> proc_macro2::TokenStream {
+    let field = &record.fields[index];
+    let archived_ty = if let Some(archived) = packed_archived_type(field) {
+        archived
+    } else {
+        let ty = field.ty;
+        quote! { <#ty as zebin::Archive>::Archived }
+    };
     match record.style {
         RecordStyle::Named => {
             let ident = record.fields[index].ident.expect("named field has ident");
-            quote! { pub #ident: <#ty as zebin::Archive>::Archived }
+            quote! { pub #ident: #archived_ty }
         }
-        RecordStyle::Unnamed => quote! { <#ty as zebin::Archive>::Archived },
+        RecordStyle::Unnamed => quote! { #archived_ty },
         RecordStyle::Unit => unreachable!("unit has no fields"),
     }
 }
@@ -70,14 +73,19 @@ fn record_field_inits(
         .iter()
         .enumerate()
         .map(|(index, field)| {
-            let ty = field.ty;
+            let ty = if let Some(archived) = packed_archived_type(field) {
+                archived
+            } else {
+                let ty = field.ty;
+                quote! { <#ty as zebin::Archive>::Archived }
+            };
             let member = record_field_member(record, index);
             let offset = record_field_offset_expr(archived_name, record, index);
             quote! {
                 {
                     let offset = #offset;
-                    let size = ::core::mem::size_of::<<#ty as zebin::Archive>::Archived>();
-                    <<#ty as zebin::Archive>::Archived as zebin::ArchivedLayout>::write_archived_bytes(
+                    let size = ::core::mem::size_of::<#ty>();
+                    <#ty as zebin::ArchivedLayout>::write_archived_bytes(
                         &archived.#member,
                         &mut out[offset..offset + size],
                     );
@@ -119,20 +127,25 @@ fn helper_accessors(
 
     let layout_fields = layout_field_entries(record, archived_name);
     let methods = record.fields.iter().enumerate().map(|(index, field)| {
-        let ty = field.ty;
         let field_id = field.field_id.expect("field ids are validated above");
         let method = record_field_method_name(record, index);
+        let ty = if let Some(archived) = packed_archived_type(field) {
+            archived
+        } else {
+            let ty = field.ty;
+            quote! { <#ty as zebin::Archive>::Archived }
+        };
         quote! {
             pub unsafe fn #method<'a>(
                 &'a self,
                 layout: &'a zebin::ResolvedLayout<'a>,
-            ) -> Result<&'a <#ty as zebin::Archive>::Archived, zebin::ZebinError> {
+            ) -> Result<&'a #ty, zebin::ZebinError> {
                 let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ZebinError::ValidationError {
                     message: format!("Field ID {} not found in layout", #field_id),
                     pos: self as *const _ as usize,
                 })?;
                 let base = self as *const _ as *const u8;
-                Ok(&*(((base.add(offset as usize)) as *const <#ty as zebin::Archive>::Archived)))
+                Ok(&*(((base.add(offset as usize)) as *const #ty)))
             }
         }
     });
@@ -181,12 +194,17 @@ fn helper_bytes_impl(
     };
 
     let field_validations = record.fields.iter().enumerate().map(|(index, field)| {
-        let ty = field.ty;
+        let ty = if let Some(archived) = packed_archived_type(field) {
+            archived
+        } else {
+            let ty = field.ty;
+            quote! { <#ty as zebin::Archive>::Archived }
+        };
         let member = record_field_member(record, index);
         quote! {
             {
                 let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
-                unsafe { <<#ty as zebin::Archive>::Archived as zebin::ArchivedValidate>::validate(field_ptr, context)?; }
+                unsafe { <#ty as zebin::ArchivedValidate>::validate(field_ptr, context)?; }
             }
         }
     });
@@ -224,8 +242,8 @@ fn helper_record(archived_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_ma
     if let Some(schema) = record_schema_field(record) {
         fields.push(schema);
     }
-    for (index, field) in record.fields.iter().enumerate() {
-        fields.push(record_field_decl(record, field.ty, index));
+    for (index, _field) in record.fields.iter().enumerate() {
+        fields.push(record_field_decl(record, index));
     }
     let bytes_impl = helper_bytes_impl(archived_name, record);
     let accessors = helper_accessors(archived_name, record);
@@ -282,12 +300,22 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
                 let ident = field.ident.expect("named field has ident");
                 let source_member = input_member(record, index);
                 let archived_member = user_member(record, index);
-                fields.push(quote! {
-                    #ident: self.#source_member.resolve(
-                        pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
-                        resolver.#ident
-                    )?
-                });
+                if let Some(wrapper) = packed_wrapper_type_expr(field) {
+                    fields.push(quote! {
+                        #ident: <#wrapper as zebin::Archive>::resolve(
+                            &<#wrapper>::new(self.#source_member.as_ref()),
+                            pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
+                            resolver.#ident
+                        )?
+                    });
+                } else {
+                    fields.push(quote! {
+                        #ident: self.#source_member.resolve(
+                            pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
+                            resolver.#ident
+                        )?
+                    });
+                }
             }
             quote! { #archived_name { #(#fields),* } }
         }
@@ -296,15 +324,25 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
             if let Some(stable_schema_key) = &stable_schema_key {
                 items.push(quote! { #stable_schema_key });
             }
-            for (index, _field) in record.fields.iter().enumerate() {
+            for (index, field) in record.fields.iter().enumerate() {
                 let source_member = input_member(record, index);
                 let archived_member = user_member(record, index);
-                items.push(quote! {
-                    self.#source_member.resolve(
-                        pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
-                        resolver.#source_member
-                    )?
-                });
+                if let Some(wrapper) = packed_wrapper_type_expr(field) {
+                    items.push(quote! {
+                        <#wrapper as zebin::Archive>::resolve(
+                            &<#wrapper>::new(self.#source_member.as_ref()),
+                            pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
+                            resolver.#source_member
+                        )?
+                    });
+                } else {
+                    items.push(quote! {
+                        self.#source_member.resolve(
+                            pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
+                            resolver.#source_member
+                        )?
+                    });
+                }
             }
             quote! { #archived_name( #(#items),* ) }
         }
@@ -440,22 +478,42 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 RecordStyle::Named => {
                     let ident = field.ident.expect("named field has ident");
                     let resolver_member = input_member(record, field_index);
-                    fields.push(quote! {
-                        #ident: #ident.resolve(
-                            pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
-                            resolver.#resolver_member
-                        )?
-                    });
+                    if let Some(wrapper) = packed_wrapper_type_expr(field) {
+                        fields.push(quote! {
+                            #ident: <#wrapper as zebin::Archive>::resolve(
+                                &<#wrapper>::new(#ident.as_ref()),
+                                pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
+                                resolver.#resolver_member
+                            )?
+                        });
+                    } else {
+                        fields.push(quote! {
+                            #ident: #ident.resolve(
+                                pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
+                                resolver.#resolver_member
+                            )?
+                        });
+                    }
                 }
                 RecordStyle::Unnamed => {
                     let value_ident = format_ident!("field{}", field_index);
                     let source_member = input_member(record, field_index);
-                    fields.push(quote! {
-                        #value_ident.resolve(
-                            pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
-                            resolver.#source_member
-                        )?
-                    });
+                    if let Some(wrapper) = packed_wrapper_type_expr(field) {
+                        fields.push(quote! {
+                            <#wrapper as zebin::Archive>::resolve(
+                                &<#wrapper>::new(#value_ident.as_ref()),
+                                pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
+                                resolver.#source_member
+                            )?
+                        });
+                    } else {
+                        fields.push(quote! {
+                            #value_ident.resolve(
+                                pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
+                                resolver.#source_member
+                            )?
+                        });
+                    }
                 }
                 RecordStyle::Unit => {}
             }

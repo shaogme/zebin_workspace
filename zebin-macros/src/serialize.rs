@@ -3,9 +3,10 @@ use quote::{format_ident, quote};
 use syn::DeriveInput;
 
 use crate::shared::{
-    ItemSpec, RecordSpec, RecordStyle, VariantSpec, binder_slot_ident, has_schema, input_member,
-    layout_field_entries, parse_item, resolver_name, resolver_slot_ident, state_name,
-    state_slot_ident, variant_resolver_name, variant_state_name,
+    ItemSpec, RecordSpec, RecordStyle, VariantSpec, binder_slot_ident, field_resolver_type,
+    has_schema, input_member, layout_field_entries, packed_begin_expr, packed_wrapper_type,
+    parse_item, resolver_name, resolver_slot_ident, state_name, state_slot_ident,
+    variant_resolver_name, variant_state_name,
 };
 
 // --- Helper Functions for Code Generation ---
@@ -16,16 +17,16 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
             let mut fields = Vec::new();
             for field in &record.fields {
                 let ident = field.ident.expect("named field has ident");
-                let ty = field.ty;
-                fields.push(quote! { pub #ident: <#ty as zebin::Archive>::Resolver });
+                let ty = field_resolver_type(field);
+                fields.push(quote! { pub #ident: #ty });
             }
             quote! { pub struct #resolver_name { #(#fields,)* } }
         }
         RecordStyle::Unnamed => {
             let mut fields = Vec::new();
             for field in &record.fields {
-                let ty = field.ty;
-                fields.push(quote! { <#ty as zebin::Archive>::Resolver });
+                let ty = field_resolver_type(field);
+                fields.push(quote! { #ty });
             }
             quote! { pub struct #resolver_name( #(#fields,)* ); }
         }
@@ -36,11 +37,22 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
 fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let fields = record.fields.iter().enumerate().map(|(index, field)| {
         let state_ident = &field.state_ident;
-        let ty = field.ty;
+        let state_ty = if let Some(wrapper) = packed_wrapper_type(field) {
+            quote! { <#wrapper as zebin::ArchiveBuilder>::State<'a> }
+        } else {
+            let ty = field.ty;
+            quote! { <#ty as zebin::ArchiveBuilder>::State<'a> }
+        };
+        let resolver_ty = if let Some(wrapper) = packed_wrapper_type(field) {
+            quote! { <#wrapper as zebin::Archive>::Resolver }
+        } else {
+            let ty = field.ty;
+            quote! { <#ty as zebin::Archive>::Resolver }
+        };
         let resolver_ident = resolver_slot_ident(record, index);
         quote! {
-            pub #state_ident: <#ty as zebin::ArchiveBuilder>::State<'a>,
-            pub #resolver_ident: ::core::option::Option<<#ty as zebin::Archive>::Resolver>,
+            pub #state_ident: #state_ty,
+            pub #resolver_ident: ::core::option::Option<#resolver_ty>,
         }
     });
 
@@ -55,11 +67,18 @@ fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::T
 fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let fields = record.fields.iter().enumerate().map(|(index, field)| {
         let state_ident = &field.state_ident;
-        let ty = field.ty;
         let resolver_ident = resolver_slot_ident(record, index);
         let input_member = input_member(record, index);
+        let init = if let Some(init) = packed_begin_expr(field, quote! { self.#input_member }) {
+            init
+        } else {
+            let ty = field.ty;
+            quote! {
+                <#ty as zebin::ArchiveBuilder>::begin(&self.#input_member)?
+            }
+        };
         quote! {
-            #state_ident: <#ty as zebin::ArchiveBuilder>::begin(&self.#input_member)?,
+            #state_ident: #init,
             #resolver_ident: ::core::option::Option::None,
         }
     });
@@ -296,8 +315,15 @@ fn variant_begin_arm(
                 let ident = field.ident.expect("named field has ident");
                 let state_ident = &field.state_ident;
                 let ty = field.ty;
+                let begin = if let Some(begin) = packed_begin_expr(field, quote! { #ident }) {
+                    begin
+                } else {
+                    quote! {
+                        <#ty as zebin::ArchiveBuilder>::begin(&#ident)?
+                    }
+                };
                 quote! {
-                    #state_ident: <#ty as zebin::ArchiveBuilder>::begin(&#ident)?,
+                    #state_ident: #begin,
                     #ident: ::core::option::Option::None,
                 }
             });
@@ -328,8 +354,15 @@ fn variant_begin_arm(
                     let binder = format_ident!("field{}", index);
                     let state_ident = &field.state_ident;
                     let ty = field.ty;
+                    let begin = if let Some(begin) = packed_begin_expr(field, quote! { #binder }) {
+                        begin
+                    } else {
+                        quote! {
+                            <#ty as zebin::ArchiveBuilder>::begin(&#binder)?
+                        }
+                    };
                     quote! {
-                        #state_ident: <#ty as zebin::ArchiveBuilder>::begin(&#binder)?,
+                        #state_ident: #begin,
                         #binder: ::core::option::Option::None,
                     }
                 });

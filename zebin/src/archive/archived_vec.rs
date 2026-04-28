@@ -2,9 +2,8 @@ use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
-    byteops,
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError,
+    ByteSink, LayoutSink, ZebinError, byteops,
     core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
     traits::{Archive, SequenceResolverBuffer, SequenceSource, archived_bytes},
