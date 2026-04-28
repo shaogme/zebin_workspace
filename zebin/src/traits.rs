@@ -415,23 +415,11 @@ where
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        let ptr = if self.is_empty() {
-            None
-        } else {
-            Some(crate::core::rel_ptr::RelPtr::new(pos, resolver)?)
-        };
-        Ok(crate::archive::archived_vec::ArchivedVec {
-            ptr,
-            len: crate::num::usize_to_u32(self.len(), || ZebinError::WriteError)?,
-        })
+        crate::archive::archived_vec::resolve_sequence_archive(self, pos, resolver)
     }
 
     fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        out.fill(0);
-        if let Some(ptr) = &archived.ptr {
-            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
-        }
-        <u32 as Archive>::write_archived_bytes(&archived.len, &mut out[8..12]);
+        crate::archive::archived_vec::write_sequence_archive_bytes(archived, out);
     }
 }
 
@@ -440,18 +428,18 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = crate::archive::archived_vec::VecSerializeState<'a, T>
+        = crate::archive::archived_vec::SliceSerializeState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        crate::archive::archived_vec::VecSerializeState::new(self)
+        crate::archive::archived_vec::SliceSerializeState::new(self)
     }
 }
 
 pub struct ArraySerializeState<'a, T, const N: usize>
 where
-    T: Serialize + Archive,
+    T: Serialize + Archive + 'a,
 {
     items: &'a [T; N],
     index: usize,
@@ -461,7 +449,7 @@ where
 
 impl<'a, T, const N: usize> ArraySerializeState<'a, T, N>
 where
-    T: Serialize + Archive,
+    T: Serialize + Archive + 'a,
 {
     fn new(items: &'a [T; N]) -> Result<Self, ZebinError> {
         Ok(Self {
@@ -475,7 +463,7 @@ where
 
 impl<'a, T, const N: usize> SerializeState for ArraySerializeState<'a, T, N>
 where
-    T: Serialize + Archive,
+    T: Serialize + Archive + 'a,
 {
     type Resolver = [T::Resolver; N];
 
