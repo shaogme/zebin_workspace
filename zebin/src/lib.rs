@@ -18,7 +18,7 @@ mod storage;
 mod traits;
 
 pub mod prelude {
-    #[cfg(all(feature = "mmap", feature = "std"))]
+    #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{ByteState, Encoder, Serialize, Validate, ZebinError};
     pub use crate::{
@@ -36,7 +36,7 @@ pub use crate::core::schema::{LayoutDescriptor, LayoutDirectory, LayoutField, La
 pub use crate::core::validator::Validator;
 pub use crate::format::{ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::storage::Storage;
-#[cfg(all(feature = "mmap", feature = "std"))]
+#[cfg(feature = "mmap")]
 pub use crate::storage::mmap::Mmap;
 pub use crate::traits::*;
 pub use memoffset;

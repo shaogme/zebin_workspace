@@ -16,7 +16,7 @@ ahash = { version = "0.8", default-features = false, optional = true }
 default = ["std"]
 no_std = ["dep:hashbrown", "dep:ahash"]
 std = []
-mmap = ["dep:memmap2"]
+mmap = ["dep:memmap2", "std"]
 
 [lints]
 workspace = true
