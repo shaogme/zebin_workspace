@@ -1,18 +1,18 @@
-use zebin::{ArchiveHeader, ZebinArchive, ZebinError, ZebinSerialize};
+use zebin::{ArchiveHeader, ZebinArchive, ZebinArchiveBuilder, ZebinError};
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinArchiveBuilder)]
 enum UnitMode {
     Idle,
     Busy,
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinArchiveBuilder)]
 enum TuplePacket {
     Empty,
     Data(#[zebin(id = 0)] u32, #[zebin(id = 1)] String),
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinArchiveBuilder)]
 enum StructPacket {
     Ping,
     Data {
@@ -23,7 +23,7 @@ enum StructPacket {
     },
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinArchiveBuilder)]
 enum RecursiveNode {
     Leaf,
     Branch { children: Vec<RecursiveNode> },

@@ -205,7 +205,7 @@ pub fn parse_item(input: &DeriveInput) -> Result<ItemSpec<'_>> {
         }
         _ => Err(syn::Error::new(
             input.span(),
-            "ZebinArchive 和 ZebinSerialize 只支持 struct 与 enum",
+            "ZebinArchive 和 ZebinArchiveBuilder 只支持 struct 与 enum",
         )),
     }
 }

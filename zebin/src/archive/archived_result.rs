@@ -2,8 +2,8 @@ use alloc::{boxed::Box, string::ToString};
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
-    ZebinError, traits::Archive,
+    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
+    ByteSink, LayoutSink, ZebinError, traits::Archive,
 };
 
 /// Archived representation for `Result<T, E>`.
@@ -123,17 +123,17 @@ where
 /// Resumable serialization state for `Result<T, E>`.
 pub enum ResultArchiveState<'a, T, E>
 where
-    T: Serialize + Archive + 'a,
-    E: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
+    E: ArchiveBuilder + Archive + 'a,
 {
-    Ok(Box<<T as Serialize>::State<'a>>),
-    Err(Box<<E as Serialize>::State<'a>>),
+    Ok(Box<<T as ArchiveBuilder>::State<'a>>),
+    Err(Box<<E as ArchiveBuilder>::State<'a>>),
 }
 
 impl<'a, T, E> ResultArchiveState<'a, T, E>
 where
-    T: Serialize + Archive + 'a,
-    E: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
+    E: ArchiveBuilder + Archive + 'a,
 {
     pub(crate) fn new(value: Result<&'a T, &'a E>) -> Result<Self, ZebinError> {
         match value {
@@ -145,12 +145,12 @@ where
 
 impl<'a, T, E> ArchiveState for ResultArchiveState<'a, T, E>
 where
-    T: Serialize + Archive + 'a,
-    E: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
+    E: ArchiveBuilder + Archive + 'a,
 {
     type Resolver = Result<T::Resolver, E::Resolver>;
 
-    fn poll<R: Encoder + ?Sized>(
+    fn poll<R: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut R,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -175,7 +175,11 @@ where
     type Archived = ArchivedResult<T::Archived, E::Archived>;
     type Resolver = Result<T::Resolver, E::Resolver>;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         match (self, resolver) {
             (Ok(value), Ok(resolver)) => {
                 let value_offset =
@@ -202,10 +206,10 @@ where
     }
 }
 
-impl<T, E> Serialize for Result<T, E>
+impl<T, E> ArchiveBuilder for Result<T, E>
 where
-    T: Serialize + Archive,
-    E: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
+    E: ArchiveBuilder + Archive,
 {
     type State<'a>
         = ResultArchiveState<'a, T, E>

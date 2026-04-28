@@ -125,7 +125,7 @@
 
 ### 9. 过程宏行为
 
-`ZebinArchive` 和 `ZebinSerialize` 现在围绕布局语义工作。
+`ZebinArchive` 和 `ZebinArchiveBuilder` 现在围绕布局语义工作。
 
 当前规则是：
 
@@ -134,7 +134,7 @@
 - 一旦进入可演进模式，所有字段都必须带 `id`
 - 可演进类型会自动生成 `schema_id` 字段和按 schema 查询的访问器
 
-`ZebinSerialize` 会为结构体生成一个独立的 `State<'a>`：
+`ZebinArchiveBuilder` 会为结构体生成一个独立的 `State<'a>`：
 
 - 每个字段有自己的子状态
 - 每个字段有自己的 resolver 槽位

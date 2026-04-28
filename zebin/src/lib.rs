@@ -21,15 +21,16 @@ pub mod prelude {
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{
-        Archive, ArchivedDepthGuard, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-        ByteState, Encoder, Serialize, ZebinError, archived_bytes,
+        Archive, ArchiveBuilder, ArchiveState, ArchivedDepthGuard, ArchivedLayout,
+        ArchivedValidate, ArchivedValidationContext, ByteSink, ByteState, LayoutSink, ZebinError,
+        archived_bytes,
     };
     pub use crate::{
-        ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader, ArchiveState,
-        ArchiveView, ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView,
-        RelPtr, Storage, Validator, decode, encode, encode_chunked, encode_into, validate,
+        ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader, ArchiveView,
+        ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr, Storage,
+        Validator, decode, encode, encode_chunked, encode_into, validate,
     };
-    pub use zebin_macros::{ZebinArchive, ZebinSerialize};
+    pub use zebin_macros::{ZebinArchive, ZebinArchiveBuilder};
 }
 
 pub use crate::access::ArchiveView;
@@ -41,8 +42,8 @@ pub use crate::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::storage::mmap::Mmap;
 pub use crate::traits::{
-    Archive, ArchiveState, ArchivedDepthGuard, ArchivedLayout, ArchivedValidate,
-    ArchivedValidationContext, ByteState, Encoder, Serialize, ZebinError, archived_bytes,
+    Archive, ArchiveBuilder, ArchiveState, ArchivedDepthGuard, ArchivedLayout, ArchivedValidate,
+    ArchivedValidationContext, ByteSink, ByteState, LayoutSink, ZebinError, archived_bytes,
 };
 pub use memoffset;
 pub use zebin_macros::*;
@@ -66,7 +67,7 @@ struct EncodePlan {
 
 fn measure_plan<T>(value: &T) -> Result<EncodePlan, ZebinError>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     let mut encoder = MeasureEncoder::new(ARCHIVE_HEADER_SIZE);
     let mut state = value.begin()?;
@@ -139,13 +140,13 @@ impl RootWriteState {
 
 enum EncodePhase<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     Header {
         cursor: usize,
     },
     Body {
-        state: <T as Serialize>::State<'a>,
+        state: <T as ArchiveBuilder>::State<'a>,
     },
     RootAlign {
         resolver: Option<<T as Archive>::Resolver>,
@@ -162,11 +163,11 @@ where
 /// Stateful archive writer that can stream into caller-provided buffers.
 pub struct ArchiveWriter<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     value: &'a T,
     plan: EncodePlan,
-    body_state: Option<<T as Serialize>::State<'a>>,
+    body_state: Option<<T as ArchiveBuilder>::State<'a>>,
     phase: EncodePhase<'a, T>,
     archive_pos: usize,
     layouts: layout::LayoutRegistry,
@@ -174,7 +175,7 @@ where
 
 impl<'a, T> ArchiveWriter<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     pub fn new(value: &'a T) -> Result<Self, ZebinError> {
         let plan = measure_plan(value)?;
@@ -318,15 +319,15 @@ where
 /// Create a chunked archive writer that can be resumed with caller-provided buffers.
 pub fn encode_chunked<T>(value: &T) -> Result<ArchiveWriter<'_, T>, ZebinError>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     ArchiveWriter::new(value)
 }
 
-/// Serialize a value into a newly allocated byte vector.
+/// Archive a value into a newly allocated byte vector.
 pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     let mut writer = encode_chunked(value)?;
     let mut buf = vec![0u8; writer.total_len()];
@@ -334,10 +335,10 @@ where
     Ok(buf)
 }
 
-/// Serialize a value into an existing vector, replacing its contents.
+/// Archive a value into an existing vector, replacing its contents.
 pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     let mut writer = encode_chunked(value)?;
     buf.clear();

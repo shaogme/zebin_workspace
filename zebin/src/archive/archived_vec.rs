@@ -2,8 +2,8 @@ use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
-    ZebinError,
+    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
+    ByteSink, LayoutSink, ZebinError,
     core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
     traits::{Archive, SequenceResolverBuffer, SequenceSource, archived_bytes},
@@ -184,20 +184,20 @@ impl<T: Archive, const N: usize> SequenceResolverBuffer<T> for SequenceResolverA
 struct SequenceChildDriver<'a, S, T, B>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
     B: SequenceResolverBuffer<T>,
 {
     source: &'a S,
     len: usize,
     index: usize,
-    current_state: Option<Box<<T as Serialize>::State<'a>>>,
+    current_state: Option<Box<<T as ArchiveBuilder>::State<'a>>>,
     resolvers: B,
 }
 
 impl<'a, S, T, B> SequenceChildDriver<'a, S, T, B>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
     B: SequenceResolverBuffer<T>,
 {
     fn new(source: &'a S) -> Self {
@@ -211,7 +211,7 @@ where
         }
     }
 
-    fn poll_children<E: Encoder + ?Sized>(
+    fn poll_children<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
@@ -258,7 +258,7 @@ where
 pub struct SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     children: SequenceChildDriver<'a, S, T, SequenceResolverVec<T>>,
     phase: SequencePhase,
@@ -271,7 +271,7 @@ where
 impl<'a, S, T> SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     pub(crate) fn new(source: &'a S) -> Self {
         Self {
@@ -284,14 +284,14 @@ where
         }
     }
 
-    fn poll_serializing<E: Encoder + ?Sized>(
+    fn poll_serializing<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
         self.children.poll_children(encoder)
     }
 
-    fn poll_aligning<E: Encoder + ?Sized>(
+    fn poll_aligning<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
@@ -306,7 +306,7 @@ where
         Ok(Poll::Ready(()))
     }
 
-    fn poll_writing<E: Encoder + ?Sized>(
+    fn poll_writing<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<usize>, ZebinError> {
@@ -348,11 +348,11 @@ where
 impl<'a, S, T> ArchiveState for SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     type Resolver = usize;
 
-    fn poll<E: Encoder + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -390,14 +390,14 @@ where
 
 pub struct ArrayArchiveState<'a, T, const N: usize>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     children: SequenceChildDriver<'a, [T; N], T, SequenceResolverArray<T, N>>,
 }
 
 impl<'a, T, const N: usize> ArrayArchiveState<'a, T, N>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     pub(crate) fn new(items: &'a [T; N]) -> Self {
         Self {
@@ -417,11 +417,11 @@ where
 
 impl<'a, T, const N: usize> ArchiveState for ArrayArchiveState<'a, T, N>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     type Resolver = [T::Resolver; N];
 
-    fn poll<E: Encoder + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -460,14 +460,18 @@ impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         resolve_sequence_archive(self.as_slice(), archive_pos, resolver)
     }
 }
 
-impl<T> Serialize for Vec<T>
+impl<T> ArchiveBuilder for Vec<T>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
         = VecArchiveState<'a, T>
@@ -486,14 +490,18 @@ where
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         resolve_sequence_archive(self, archive_pos, resolver)
     }
 }
 
-impl<T> Serialize for VecDeque<T>
+impl<T> ArchiveBuilder for VecDeque<T>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
         = VecDequeArchiveState<'a, T>
@@ -512,14 +520,18 @@ where
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         resolve_sequence_archive(self, archive_pos, resolver)
     }
 }
 
-impl<T> Serialize for [T]
+impl<T> ArchiveBuilder for [T]
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
         = SliceArchiveState<'a, T>
@@ -538,7 +550,11 @@ where
     type Archived = [T::Archived; N];
     type Resolver = [T::Resolver; N];
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         let elem_size = core::mem::size_of::<T::Archived>();
         let mut out = core::mem::MaybeUninit::<[T::Archived; N]>::uninit();
         let out_ptr = out.as_mut_ptr() as *mut T::Archived;
@@ -559,9 +575,9 @@ where
     }
 }
 
-impl<T, const N: usize> Serialize for [T; N]
+impl<T, const N: usize> ArchiveBuilder for [T; N]
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
         = ArrayArchiveState<'a, T, N>

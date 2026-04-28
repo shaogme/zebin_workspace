@@ -2,8 +2,8 @@ use alloc::{boxed::Box, string::ToString};
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
-    ZebinError, traits::Archive,
+    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
+    ByteSink, LayoutSink, ZebinError, traits::Archive,
 };
 
 /// Archived representation for `Option<T>`.
@@ -89,15 +89,15 @@ where
 /// Resumable serialization state for `Option<T>`.
 pub struct OptionArchiveState<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     is_some: bool,
-    inner: Option<Box<<T as Serialize>::State<'a>>>,
+    inner: Option<Box<<T as ArchiveBuilder>::State<'a>>>,
 }
 
 impl<'a, T> OptionArchiveState<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     fn new(value: Option<&'a T>) -> Result<Self, ZebinError> {
         match value {
@@ -115,11 +115,11 @@ where
 
 impl<'a, T> ArchiveState for OptionArchiveState<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: ArchiveBuilder + Archive + 'a,
 {
     type Resolver = Option<T::Resolver>;
 
-    fn poll<E: Encoder + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -150,7 +150,11 @@ where
     type Archived = ArchivedOption<T::Archived>;
     type Resolver = Option<T::Resolver>;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         match (self, resolver) {
             (Some(value), Some(resolver)) => {
                 let value_offset = crate::memoffset::offset_of!(ArchivedOption<T::Archived>, value);
@@ -169,9 +173,9 @@ where
     }
 }
 
-impl<T> Serialize for Option<T>
+impl<T> ArchiveBuilder for Option<T>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
         = OptionArchiveState<'a, T>

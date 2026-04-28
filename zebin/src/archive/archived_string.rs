@@ -3,8 +3,8 @@ use core::{num::NonZeroUsize, str, task::Poll};
 use alloc::string::{String, ToString};
 
 use crate::{
-    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
-    ZebinError,
+    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
+    ByteSink, LayoutSink, ZebinError,
     core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
     traits::Archive,
@@ -108,7 +108,7 @@ impl<'a> StringArchiveState<'a> {
 impl<'a> ArchiveState for StringArchiveState<'a> {
     type Resolver = usize;
 
-    fn poll<E: Encoder + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -130,7 +130,11 @@ impl Archive for String {
     type Archived = ArchivedString;
     type Resolver = usize;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         let ptr = if self.is_empty() {
             None
         } else {
@@ -143,7 +147,7 @@ impl Archive for String {
     }
 }
 
-impl Serialize for String {
+impl ArchiveBuilder for String {
     type State<'a>
         = StringArchiveState<'a>
     where
@@ -158,7 +162,11 @@ impl Archive for str {
     type Archived = ArchivedString;
     type Resolver = usize;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         let ptr = if self.is_empty() {
             None
         } else {
@@ -171,7 +179,7 @@ impl Archive for str {
     }
 }
 
-impl Serialize for str {
+impl ArchiveBuilder for str {
     type State<'a>
         = StringArchiveState<'a>
     where

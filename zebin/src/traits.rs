@@ -3,7 +3,7 @@ use alloc::{
     boxed::Box,
     collections::VecDeque,
     rc::Rc,
-    string::String,
+    string::{String, ToString},
     sync::Arc,
     vec,
     vec::Vec,
@@ -53,7 +53,11 @@ pub trait Archive {
     type Resolver;
 
     /// Resolve the archived version using the given resolver.
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError>;
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError>;
 }
 
 /// Convert an archived value to a freshly allocated byte vector.
@@ -152,8 +156,8 @@ impl From<core::convert::Infallible> for ZebinError {
     }
 }
 
-/// Trait for layout-aware encoders.
-pub trait Encoder {
+/// Byte-stream sink used by archive state machines.
+pub trait ByteSink {
     fn pos(&self) -> usize;
 
     /// Write as many bytes as possible and return the amount consumed.
@@ -161,23 +165,26 @@ pub trait Encoder {
 
     /// Write as many alignment bytes as possible and return the amount consumed.
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError>;
+}
 
+/// Layout registration sink used by archive state machines.
+pub trait LayoutSink {
     /// Register a layout descriptor for the current object and return its schema id.
     fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError>;
 }
 
-/// Trait for resumable serialization states.
+/// Trait for resumable archive construction states.
 pub trait ArchiveState {
     type Resolver;
 
-    fn poll<E: Encoder + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError>;
 }
 
-/// Trait for types that can create resumable serialization states.
-pub trait Serialize: Archive {
+/// Trait for types that can create resumable archive states.
+pub trait ArchiveBuilder: Archive {
     type State<'a>: ArchiveState<Resolver = Self::Resolver>
     where
         Self: 'a;
@@ -316,7 +323,7 @@ impl<const N: usize> ByteState<N> {
 impl<const N: usize> ArchiveState for ByteState<N> {
     type Resolver = ();
 
-    fn poll<E: Encoder + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -362,7 +369,7 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl Serialize for $t {
+            impl ArchiveBuilder for $t {
                 type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
 
                 fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
@@ -417,7 +424,7 @@ impl Archive for bool {
     }
 }
 
-impl Serialize for bool {
+impl ArchiveBuilder for bool {
     type State<'a>
         = ByteState<1>
     where
@@ -435,17 +442,21 @@ where
     type Archived = T::Archived;
     type Resolver = T::Resolver;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
-impl<T> Serialize for Box<T>
+impl<T> ArchiveBuilder for Box<T>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
-        = <T as Serialize>::State<'a>
+        = <T as ArchiveBuilder>::State<'a>
     where
         Self: 'a;
 
@@ -461,17 +472,21 @@ where
     type Archived = T::Archived;
     type Resolver = T::Resolver;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
-impl<T> Serialize for Rc<T>
+impl<T> ArchiveBuilder for Rc<T>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
-        = <T as Serialize>::State<'a>
+        = <T as ArchiveBuilder>::State<'a>
     where
         Self: 'a;
 
@@ -487,17 +502,21 @@ where
     type Archived = T::Archived;
     type Resolver = T::Resolver;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
-impl<T> Serialize for Arc<T>
+impl<T> ArchiveBuilder for Arc<T>
 where
-    T: Serialize + Archive,
+    T: ArchiveBuilder + Archive,
 {
     type State<'a>
-        = <T as Serialize>::State<'a>
+        = <T as ArchiveBuilder>::State<'a>
     where
         Self: 'a;
 
@@ -513,17 +532,21 @@ where
     type Archived = B::Archived;
     type Resolver = B::Resolver;
 
-    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        archive_pos: usize,
+        resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
-impl<'a, B> Serialize for Cow<'a, B>
+impl<'a, B> ArchiveBuilder for Cow<'a, B>
 where
-    B: ?Sized + ToOwned + Serialize + Archive,
+    B: ?Sized + ToOwned + ArchiveBuilder + Archive,
 {
     type State<'b>
-        = <B as Serialize>::State<'b>
+        = <B as ArchiveBuilder>::State<'b>
     where
         Self: 'b;
 

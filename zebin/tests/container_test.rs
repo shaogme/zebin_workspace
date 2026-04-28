@@ -1,8 +1,8 @@
 use std::{borrow::Cow, collections::VecDeque};
 
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinArchive, ZebinArchiveBuilder};
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinArchiveBuilder)]
 struct NativeContainers {
     maybe_name: Option<String>,
     boxed_name: Box<String>,
@@ -12,7 +12,7 @@ struct NativeContainers {
     queue: VecDeque<String>,
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinArchiveBuilder)]
 struct BorrowedContainers {
     borrowed_text: Cow<'static, str>,
     owned_text: Cow<'static, str>,

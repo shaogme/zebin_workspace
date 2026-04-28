@@ -47,7 +47,7 @@ fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::T
         let ty = field.ty;
         let resolver_ident = resolver_slot_ident(record, index);
         quote! {
-            pub #state_ident: <#ty as zebin::Serialize>::State<'a>,
+            pub #state_ident: <#ty as zebin::ArchiveBuilder>::State<'a>,
             pub #resolver_ident: ::core::option::Option<<#ty as zebin::Archive>::Resolver>,
         }
     });
@@ -81,7 +81,7 @@ fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
         let resolver_ident = resolver_slot_ident(record, index);
         let input_member = input_member(record, index);
         quote! {
-            #state_ident: <#ty as zebin::Serialize>::begin(&self.#input_member)?,
+            #state_ident: <#ty as zebin::ArchiveBuilder>::begin(&self.#input_member)?,
             #resolver_ident: ::core::option::Option::None,
         }
     });
@@ -195,7 +195,7 @@ fn record_state_impl(
             impl<'a> zebin::ArchiveState for #state_name<'a> {
                 type Resolver = #resolver_name;
 
-                fn poll<E: zebin::Encoder + ?Sized>(
+                fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
                     &mut self,
                     encoder: &mut E,
                 ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
@@ -212,7 +212,7 @@ fn record_state_impl(
             impl<'a> zebin::ArchiveState for #state_name<'a> {
                 type Resolver = #resolver_name;
 
-                fn poll<E: zebin::Encoder + ?Sized>(
+                fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
                     &mut self,
                     encoder: &mut E,
                 ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
@@ -242,7 +242,7 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
         #resolver_def
         #state_impl
 
-        impl zebin::Serialize for #name {
+        impl zebin::ArchiveBuilder for #name {
             type State<'a> = #state_name<'a> where Self: 'a;
 
             fn begin(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
@@ -301,7 +301,7 @@ fn variant_begin_arm(
                 let state_ident = &field.state_ident;
                 let ty = field.ty;
                 quote! {
-                    #state_ident: <#ty as zebin::Serialize>::begin(&#ident)?,
+                    #state_ident: <#ty as zebin::ArchiveBuilder>::begin(&#ident)?,
                     #ident: ::core::option::Option::None,
                 }
             });
@@ -347,7 +347,7 @@ fn variant_begin_arm(
                     let state_ident = &field.state_ident;
                     let ty = field.ty;
                     quote! {
-                        #state_ident: <#ty as zebin::Serialize>::begin(&#binder)?,
+                        #state_ident: <#ty as zebin::ArchiveBuilder>::begin(&#binder)?,
                         #binder: ::core::option::Option::None,
                     }
                 });
@@ -447,7 +447,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         impl<'a> zebin::ArchiveState for #state_name<'a> {
             type Resolver = #resolver_name;
 
-            fn poll<E: zebin::Encoder + ?Sized>(
+            fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
                 &mut self,
                 encoder: &mut E,
             ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
@@ -458,7 +458,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             }
         }
 
-        impl zebin::Serialize for #name {
+        impl zebin::ArchiveBuilder for #name {
             type State<'a> = #state_name<'a> where Self: 'a;
 
             fn begin(&self) -> Result<Self::State<'_>, zebin::ZebinError> {

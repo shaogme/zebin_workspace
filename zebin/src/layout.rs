@@ -7,7 +7,7 @@ use crate::{
     ZebinError,
     core::schema::{LayoutDescriptor, LayoutField},
     num::usize_to_u32,
-    traits::Encoder,
+    traits::{ByteSink, LayoutSink},
 };
 
 #[cfg(feature = "no_std")]
@@ -64,7 +64,7 @@ impl MeasureEncoder {
     }
 }
 
-impl Encoder for MeasureEncoder {
+impl ByteSink for MeasureEncoder {
     fn pos(&self) -> usize {
         self.pos
     }
@@ -87,7 +87,9 @@ impl Encoder for MeasureEncoder {
             .ok_or(ZebinError::WriteError)?;
         Ok(padding)
     }
+}
 
+impl LayoutSink for MeasureEncoder {
     fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError> {
         self.layouts.register(layout)
     }
@@ -120,7 +122,7 @@ impl<'a> SliceEncoder<'a> {
     }
 }
 
-impl<'a> Encoder for SliceEncoder<'a> {
+impl<'a> ByteSink for SliceEncoder<'a> {
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -160,7 +162,9 @@ impl<'a> Encoder for SliceEncoder<'a> {
         }
         Ok(written)
     }
+}
 
+impl<'a> LayoutSink for SliceEncoder<'a> {
     fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError> {
         self.layouts.register(layout)
     }
