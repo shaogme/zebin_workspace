@@ -185,7 +185,7 @@ fn helper_bytes_impl(
 
         quote! {
             let archived = unsafe { &*ptr };
-            let layout = context.resolved_layout(#stable_schema_key, #schema_revision)?;
+            let layout = guard.resolved_layout(#stable_schema_key, #schema_revision)?;
             let layout = layout.layout();
             #(#checks)*
         }
@@ -204,7 +204,7 @@ fn helper_bytes_impl(
         quote! {
             {
                 let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
-                unsafe { <#ty as zebin::ArchivedValidate>::validate(field_ptr, context)?; }
+                unsafe { <#ty as zebin::ArchivedValidate>::validate(field_ptr, &mut *guard)?; }
             }
         }
     });
@@ -226,9 +226,9 @@ fn helper_bytes_impl(
                 ptr: *const Self,
                 context: &mut C,
             ) -> Result<(), zebin::ZebinError> {
-                let _guard = context.guard()?;
-                context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
-                context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                let mut guard = context.guard()?;
+                guard.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
+                guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
                 #layout_checks
                 #(#field_validations)*
                 Ok(())
@@ -438,7 +438,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         variant_validate_arms.push(quote! {
             #idx_lit => {
                 let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                unsafe { #helper_name::validate(ptr, context)?; }
+                unsafe { #helper_name::validate(ptr, &mut *guard)?; }
             }
         });
 
@@ -573,9 +573,9 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                     ptr: *const Self,
                     context: &mut C,
                 ) -> Result<(), zebin::ZebinError> {
-                    let _guard = context.guard()?;
-                    context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
-                    context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                    let mut guard = context.guard()?;
+                    guard.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
+                    guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
                     Ok(())
                 }
             }
@@ -606,9 +606,9 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                     ptr: *const Self,
                     context: &mut C,
                 ) -> Result<(), zebin::ZebinError> {
-                    let _guard = context.guard()?;
-                    context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
-                    context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                    let mut guard = context.guard()?;
+                    guard.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
+                    guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
                     let archived = unsafe { &*ptr };
                     match archived.tag {
                         #(#variant_validate_arms)*

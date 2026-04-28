@@ -60,9 +60,9 @@ impl ArchivedValidate for ArchivedString {
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
-        let _guard = context.guard()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let mut guard = context.guard()?;
+        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
 
         let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
@@ -78,7 +78,7 @@ impl ArchivedValidate for ArchivedString {
                     pos: ptr as usize,
                 })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
-            context.check_range(data_ptr, len)?;
+            guard.check_range(data_ptr, len)?;
 
             let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
             str::from_utf8(bytes).map_err(|_| ZebinError::ValidationError {

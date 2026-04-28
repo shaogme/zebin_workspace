@@ -89,26 +89,26 @@ where
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
-        let _guard = context.guard()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let mut guard = context.guard()?;
+        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
         match archived.tag {
             0 => {
                 let value_ptr = archived.ok.as_ptr();
-                context.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                context.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
+                guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
+                guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
                 unsafe {
-                    T::validate(value_ptr, context)?;
+                    T::validate(value_ptr, &mut *guard)?;
                 }
                 Ok(())
             }
             1 => {
                 let value_ptr = archived.err.as_ptr();
-                context.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
-                context.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
+                guard.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
+                guard.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
                 unsafe {
-                    E::validate(value_ptr, context)?;
+                    E::validate(value_ptr, &mut *guard)?;
                 }
                 Ok(())
             }

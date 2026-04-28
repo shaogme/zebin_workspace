@@ -118,7 +118,7 @@ pub trait ArchivedValidationContext {
 
     fn pop_depth(&mut self);
 
-    fn guard(&mut self) -> Result<ArchivedDepthGuard<Self>, ZebinError> {
+    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self>, ZebinError> {
         ArchivedDepthGuard::new(self)
     }
 
@@ -134,26 +134,46 @@ pub trait ArchivedValidationContext {
 }
 
 /// RAII guard that restores validation depth when dropped.
-pub struct ArchivedDepthGuard<C: ArchivedValidationContext + ?Sized> {
-    context: *mut C,
-    _marker: core::marker::PhantomData<*mut C>,
+pub struct ArchivedDepthGuard<'a, C: ArchivedValidationContext + ?Sized> {
+    context: &'a mut C,
 }
 
-impl<C: ArchivedValidationContext + ?Sized> ArchivedDepthGuard<C> {
-    pub fn new(context: &mut C) -> Result<Self, ZebinError> {
+impl<'a, C: ArchivedValidationContext + ?Sized> ArchivedDepthGuard<'a, C> {
+    pub fn new(context: &'a mut C) -> Result<Self, ZebinError> {
         context.push_depth()?;
-        Ok(Self {
-            context,
-            _marker: core::marker::PhantomData,
-        })
+        Ok(Self { context })
+    }
+
+    pub fn check_range(&mut self, ptr: *const u8, size: usize) -> Result<(), ZebinError> {
+        self.context.check_range(ptr, size)
+    }
+
+    pub fn check_alignment(
+        &mut self,
+        ptr: *const u8,
+        alignment: NonZeroUsize,
+    ) -> Result<(), ZebinError> {
+        self.context.check_alignment(ptr, alignment)
     }
 }
 
-impl<C: ArchivedValidationContext + ?Sized> Drop for ArchivedDepthGuard<C> {
+impl<'a, C: ArchivedValidationContext + ?Sized> core::ops::Deref for ArchivedDepthGuard<'a, C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        self.context
+    }
+}
+
+impl<'a, C: ArchivedValidationContext + ?Sized> core::ops::DerefMut for ArchivedDepthGuard<'a, C> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.context
+    }
+}
+
+impl<'a, C: ArchivedValidationContext + ?Sized> Drop for ArchivedDepthGuard<'a, C> {
     fn drop(&mut self) {
-        unsafe {
-            (*self.context).pop_depth();
-        }
+        self.context.pop_depth();
     }
 }
 
@@ -322,9 +342,9 @@ impl<T: ArchivedLayout + ArchivedValidate, const N: usize> ArchivedValidate for 
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
-        let _guard = context.guard()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let mut guard = context.guard()?;
+        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let data_ptr = ptr as *const T;
         let elem_size = core::mem::size_of::<T>();
 
@@ -335,7 +355,7 @@ impl<T: ArchivedLayout + ArchivedValidate, const N: usize> ArchivedValidate for 
                 unsafe { data_ptr.add(index) }
             };
             unsafe {
-                T::validate(element_ptr, context)?;
+                T::validate(element_ptr, &mut *guard)?;
             }
         }
 

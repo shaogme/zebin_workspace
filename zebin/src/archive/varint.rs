@@ -105,7 +105,8 @@ macro_rules! impl_varint_number {
                 ptr: *const Self,
                 context: &mut C,
             ) -> Result<(), ZebinError> {
-                context.check_range(ptr as *const u8, $max_bytes)?;
+                let mut guard = context.guard()?;
+                guard.check_range(ptr as *const u8, $max_bytes)?;
                 Ok(())
             }
         }
@@ -118,7 +119,9 @@ macro_rules! impl_varint_number {
                 context: &mut C,
             ) -> Result<(Self::View, usize), ZebinError> {
                 let typed_ptr = ptr as *const Self;
-                unsafe { <Self as ArchivedValidate>::validate(typed_ptr, context)?; }
+                unsafe {
+                    <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+                }
                 Ok((unsafe { &*typed_ptr }, $max_bytes))
             }
         }
@@ -190,6 +193,7 @@ fn decode_u64<T: VarIntNumber, C: ArchivedValidationContext + ?Sized>(
     bytes: *const u8,
     context: &mut C,
 ) -> Result<(T, usize), ZebinError> {
+    let mut guard = context.guard()?;
     let mut value = 0u64;
     let mut shift = 0u32;
     let mut consumed = 0usize;
@@ -201,7 +205,7 @@ fn decode_u64<T: VarIntNumber, C: ArchivedValidationContext + ?Sized>(
             });
         }
         let byte_ptr = unsafe { bytes.add(consumed) };
-        context.check_range(byte_ptr, 1)?;
+        guard.check_range(byte_ptr, 1)?;
         let byte = unsafe { *byte_ptr };
         let payload = u64::from(byte & 0x7F);
         value |= payload << shift;
@@ -391,7 +395,7 @@ impl<T: VarIntNumber> ArchivedVarIntVec<T> {
             let offsets = core::slice::from_raw_parts(offsets_ptr.as_ptr(), self.len() + 1);
             let start = offsets[index] as usize;
             let end = offsets[index + 1] as usize;
-            
+
             // We need a context for decoding, but since we've already validated...
             // decode_u64 requires a context. We can use a dummy one or a safe decoder.
             let mut value = 0u64;
@@ -453,22 +457,29 @@ impl<T: VarIntNumber> ArchivedValidate for ArchivedVarIntVec<T> {
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
-        let _guard = context.guard()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        
+        let mut guard = context.guard()?;
+        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+
         let archived = unsafe { &*ptr };
         if archived.len > 0 {
             let data_ptr = archived.data_ptr.as_ref().ok_or(ZebinError::WriteError)?;
-            let offsets_ptr = archived.offsets_ptr.as_ref().ok_or(ZebinError::WriteError)?;
-            
+            let offsets_ptr = archived
+                .offsets_ptr
+                .as_ref()
+                .ok_or(ZebinError::WriteError)?;
+
             unsafe {
-                context.check_range(offsets_ptr.as_ptr() as *const u8, (archived.len as usize + 1) * 4)?;
-                
-                let offsets = core::slice::from_raw_parts(offsets_ptr.as_ptr(), archived.len as usize + 1);
+                guard.check_range(
+                    offsets_ptr.as_ptr() as *const u8,
+                    (archived.len as usize + 1) * 4,
+                )?;
+
+                let offsets =
+                    core::slice::from_raw_parts(offsets_ptr.as_ptr(), archived.len as usize + 1);
                 let total_data_len = offsets[archived.len as usize] as usize;
-                
-                context.check_range(data_ptr.as_ptr(), total_data_len)?;
+
+                guard.check_range(data_ptr.as_ptr(), total_data_len)?;
             }
         }
         Ok(())
@@ -483,7 +494,9 @@ impl<'a, T: VarIntNumber + 'a> ArchivedDecode<'a> for ArchivedVarIntVec<T> {
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
-        unsafe { Self::validate(typed_ptr, context)?; }
+        unsafe {
+            Self::validate(typed_ptr, context)?;
+        }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
@@ -503,8 +516,16 @@ impl<T: VarIntNumber> Archive for VarIntVec<T> {
         resolver: Self::Resolver,
     ) -> Result<Self::Archived, ZebinError> {
         Ok(ArchivedVarIntVec {
-            data_ptr: if self.values.is_empty() { None } else { Some(RelPtr::new(archive_pos, resolver.data_pos)?) },
-            offsets_ptr: if self.values.is_empty() { None } else { Some(RelPtr::new(archive_pos + 8, resolver.offsets_pos)?) },
+            data_ptr: if self.values.is_empty() {
+                None
+            } else {
+                Some(RelPtr::new(archive_pos, resolver.data_pos)?)
+            },
+            offsets_ptr: if self.values.is_empty() {
+                None
+            } else {
+                Some(RelPtr::new(archive_pos + 8, resolver.offsets_pos)?)
+            },
             len: self.values.len() as u32,
             _marker: PhantomData,
         })
@@ -532,7 +553,7 @@ impl<T: VarIntNumber> VarIntVecBuilderState<T> {
         let mut data = Vec::new();
         let mut offsets = Vec::with_capacity(values.len() + 1);
         let mut current_offset = 0u32;
-        
+
         for &val in values {
             offsets.push(current_offset);
             let val_u64 = val.to_u64();
@@ -543,7 +564,7 @@ impl<T: VarIntNumber> VarIntVecBuilderState<T> {
             current_offset += len as u32;
         }
         offsets.push(current_offset);
-        
+
         Self {
             data,
             offsets,
@@ -583,12 +604,12 @@ impl<T: VarIntNumber> ArchiveState for VarIntVecBuilderState<T> {
                     if self.offsets_pos.is_none() {
                         self.offsets_pos = Some(encoder.pos());
                     }
-                    
+
                     let mut offset_bytes = Vec::with_capacity(self.offsets.len() * 4);
                     for &off in &self.offsets {
                         offset_bytes.extend_from_slice(&off.to_le_bytes());
                     }
-                    
+
                     let written = encoder.write(&offset_bytes[self.cursor..])?;
                     self.cursor += written;
                     if self.cursor >= offset_bytes.len() {
@@ -609,7 +630,10 @@ impl<T: VarIntNumber> ArchiveState for VarIntVecBuilderState<T> {
 }
 
 impl<T: VarIntNumber> ArchiveBuilder for VarIntVec<T> {
-    type State<'a> = VarIntVecBuilderState<T> where Self: 'a;
+    type State<'a>
+        = VarIntVecBuilderState<T>
+    where
+        Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntVecBuilderState::new(&self.values))
@@ -626,8 +650,16 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
         resolver: Self::Resolver,
     ) -> Result<Self::Archived, ZebinError> {
         Ok(ArchivedVarIntVec {
-            data_ptr: if self.values.is_empty() { None } else { Some(RelPtr::new(archive_pos, resolver.data_pos)?) },
-            offsets_ptr: if self.values.is_empty() { None } else { Some(RelPtr::new(archive_pos + 8, resolver.offsets_pos)?) },
+            data_ptr: if self.values.is_empty() {
+                None
+            } else {
+                Some(RelPtr::new(archive_pos, resolver.data_pos)?)
+            },
+            offsets_ptr: if self.values.is_empty() {
+                None
+            } else {
+                Some(RelPtr::new(archive_pos + 8, resolver.offsets_pos)?)
+            },
             len: self.values.len() as u32,
             _marker: PhantomData,
         })
@@ -635,7 +667,10 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
 }
 
 impl<'a, T: VarIntNumber> ArchiveBuilder for PackedVarIntSlice<'a, T> {
-    type State<'b> = VarIntVecBuilderState<T> where Self: 'b;
+    type State<'b>
+        = VarIntVecBuilderState<T>
+    where
+        Self: 'b;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntVecBuilderState::new(self.values))
