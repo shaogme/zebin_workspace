@@ -1,8 +1,8 @@
 use proc_macro2::Span;
 use quote::format_ident;
 use syn::{
-    spanned::Spanned, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, FieldsNamed,
-    FieldsUnnamed, Ident, Index, Member, Result, Type,
+    Data, DataEnum, DataStruct, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed, Ident,
+    Index, Member, Result, Type, spanned::Spanned,
 };
 
 /// Represents the style of a struct or enum variant.

@@ -155,9 +155,8 @@ where
                     }
 
                     if self.current_state.is_none() {
-                        self.current_state = Some(Box::new(
-                            self.items[self.serialize_index].begin()?,
-                        ));
+                        self.current_state =
+                            Some(Box::new(self.items[self.serialize_index].begin()?));
                     }
 
                     match self

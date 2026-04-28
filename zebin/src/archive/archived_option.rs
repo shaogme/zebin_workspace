@@ -128,7 +128,10 @@ where
         if archived.tag == 1 {
             let value_offset = crate::memoffset::offset_of!(ArchivedOption<T::Archived>, value);
             let value = unsafe { archived.value.assume_init_ref() };
-            T::write_archived_bytes(value, &mut out[value_offset..value_offset + core::mem::size_of::<T::Archived>()]);
+            T::write_archived_bytes(
+                value,
+                &mut out[value_offset..value_offset + core::mem::size_of::<T::Archived>()],
+            );
         }
     }
 }
@@ -164,7 +167,9 @@ where
                 let value_ptr = archived.value.as_ptr();
                 context.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
                 context.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
-                unsafe { T::validate(value_ptr, context)?; }
+                unsafe {
+                    T::validate(value_ptr, context)?;
+                }
                 Ok(())
             }
             _ => Err(ZebinError::ValidationError {

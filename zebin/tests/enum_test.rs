@@ -9,10 +9,7 @@ enum UnitMode {
 #[derive(ZebinArchive, ZebinSerialize)]
 enum TuplePacket {
     Empty,
-    Data(
-        #[zebin(id = 0)] u32,
-        #[zebin(id = 1)] String,
-    ),
+    Data(#[zebin(id = 0)] u32, #[zebin(id = 1)] String),
 }
 
 #[derive(ZebinArchive, ZebinSerialize)]
@@ -29,9 +26,7 @@ enum StructPacket {
 #[derive(ZebinArchive, ZebinSerialize)]
 enum RecursiveNode {
     Leaf,
-    Branch {
-        children: Vec<RecursiveNode>,
-    },
+    Branch { children: Vec<RecursiveNode> },
 }
 
 #[test]
@@ -138,7 +133,8 @@ fn test_enum_layout_mismatch_rejected() {
             .try_into()
             .unwrap(),
     );
-    buf[field0_offset_pos..field0_offset_pos + 2].copy_from_slice(&(field0_offset + 1).to_le_bytes());
+    buf[field0_offset_pos..field0_offset_pos + 2]
+        .copy_from_slice(&(field0_offset + 1).to_le_bytes());
 
     let err = zebin::validate::<StructPacket>(&buf).unwrap_err();
     assert!(matches!(err, ZebinError::ValidationError { .. }));

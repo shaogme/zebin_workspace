@@ -3,10 +3,9 @@ use quote::{format_ident, quote};
 use syn::{DeriveInput, Index, Member};
 
 use crate::shared::{
-    archived_name, has_schema, parse_item, payload_name, user_member, variant_archived_name,
-    variant_method_name, ItemSpec, RecordSpec, RecordStyle, VariantSpec,
+    ItemSpec, RecordSpec, RecordStyle, VariantSpec, archived_name, has_schema, parse_item,
+    payload_name, user_member, variant_archived_name, variant_method_name,
 };
-
 
 // --- Helper Functions for Code Generation ---
 

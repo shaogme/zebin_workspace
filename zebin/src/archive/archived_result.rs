@@ -116,7 +116,8 @@ where
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         match (self, resolver) {
             (Ok(value), Ok(resolver)) => {
-                let value_offset = crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, ok);
+                let value_offset =
+                    crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, ok);
                 let archived = value.resolve(pos + value_offset, resolver)?;
                 Ok(ArchivedResult {
                     tag: 0,
@@ -125,7 +126,8 @@ where
                 })
             }
             (Err(value), Err(resolver)) => {
-                let value_offset = crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, err);
+                let value_offset =
+                    crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, err);
                 let archived = value.resolve(pos + value_offset, resolver)?;
                 Ok(ArchivedResult {
                     tag: 1,
@@ -141,13 +143,21 @@ where
         out.fill(0);
         out[0] = archived.tag;
         if archived.tag == 0 {
-            let value_offset = crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, ok);
+            let value_offset =
+                crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, ok);
             let value = unsafe { archived.ok.assume_init_ref() };
-            T::write_archived_bytes(value, &mut out[value_offset..value_offset + core::mem::size_of::<T::Archived>()]);
+            T::write_archived_bytes(
+                value,
+                &mut out[value_offset..value_offset + core::mem::size_of::<T::Archived>()],
+            );
         } else if archived.tag == 1 {
-            let value_offset = crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, err);
+            let value_offset =
+                crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, err);
             let value = unsafe { archived.err.assume_init_ref() };
-            E::write_archived_bytes(value, &mut out[value_offset..value_offset + core::mem::size_of::<E::Archived>()]);
+            E::write_archived_bytes(
+                value,
+                &mut out[value_offset..value_offset + core::mem::size_of::<E::Archived>()],
+            );
         }
     }
 }
@@ -188,14 +198,18 @@ where
                 let value_ptr = archived.ok.as_ptr();
                 context.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
                 context.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
-                unsafe { T::validate(value_ptr, context)?; }
+                unsafe {
+                    T::validate(value_ptr, context)?;
+                }
                 Ok(())
             }
             1 => {
                 let value_ptr = archived.err.as_ptr();
                 context.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
                 context.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
-                unsafe { E::validate(value_ptr, context)?; }
+                unsafe {
+                    E::validate(value_ptr, context)?;
+                }
                 Ok(())
             }
             _ => Err(ZebinError::ValidationError {

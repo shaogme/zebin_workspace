@@ -1,7 +1,4 @@
-use std::{
-    borrow::Cow,
-    collections::VecDeque,
-};
+use std::{borrow::Cow, collections::VecDeque};
 
 use zebin::{ZebinArchive, ZebinSerialize};
 
@@ -42,13 +39,19 @@ fn test_native_container_round_trip_some() {
     let archived = zebin::decode::<NativeContainers>(&buf).unwrap();
 
     assert!(archived.maybe_name.is_some());
-    assert_eq!(unsafe { archived.maybe_name.as_ref().unwrap().as_str() }, "Alice");
+    assert_eq!(
+        unsafe { archived.maybe_name.as_ref().unwrap().as_str() },
+        "Alice"
+    );
     assert_eq!(unsafe { archived.boxed_name.as_str() }, "boxed");
     assert_eq!(unsafe { archived.tags[0].as_str() }, "alpha");
     assert_eq!(unsafe { archived.tags[1].as_str() }, "beta");
     assert_eq!(archived.numbers, [1, 2, 3, 4]);
     assert!(archived.outcome.is_ok());
-    assert_eq!(unsafe { archived.outcome.as_ok().unwrap().as_str() }, "success");
+    assert_eq!(
+        unsafe { archived.outcome.as_ok().unwrap().as_str() },
+        "success"
+    );
     let queue = unsafe { archived.queue.as_slice() };
     assert_eq!(queue.len(), 2);
     assert_eq!(unsafe { queue[0].as_str() }, "front");
@@ -79,7 +82,10 @@ fn test_native_container_round_trip_none() {
     assert_eq!(unsafe { archived.tags[1].as_str() }, "two");
     assert_eq!(archived.numbers, [9, 8, 7, 6]);
     assert!(archived.outcome.is_err());
-    assert_eq!(unsafe { archived.outcome.as_err().unwrap().as_str() }, "failure");
+    assert_eq!(
+        unsafe { archived.outcome.as_err().unwrap().as_str() },
+        "failure"
+    );
     let queue = unsafe { archived.queue.as_slice() };
     assert_eq!(queue.len(), 2);
     assert_eq!(unsafe { queue[0].as_str() }, "left");

@@ -2,8 +2,8 @@ use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
     rc::Rc,
-    sync::Arc,
     string::{String, ToString},
+    sync::Arc,
     vec,
     vec::Vec,
 };
@@ -449,7 +449,6 @@ where
     }
 }
 
-
 pub struct ArraySerializeState<'a, T, const N: usize>
 where
     T: Serialize + Archive,
@@ -532,12 +531,12 @@ where
         let out_ptr = out.as_mut_ptr() as *mut T::Archived;
         let mut resolver_iter = resolver.into_iter();
 
-        for index in 0..N {
+        for (index, item) in self.iter().enumerate() {
             let item_resolver = resolver_iter.next().expect("array resolver length matches");
             let item_pos = pos
                 .checked_add(index.checked_mul(elem_size).ok_or(ZebinError::WriteError)?)
                 .ok_or(ZebinError::WriteError)?;
-            let item = self[index].resolve(item_pos, item_resolver)?;
+            let item = item.resolve(item_pos, item_resolver)?;
             unsafe {
                 out_ptr.add(index).write(item);
             }
@@ -575,7 +574,6 @@ where
     }
 }
 
-
 impl<'v, T, const N: usize> Validate<Validator<'v>> for [T; N]
 where
     T: Validate<Validator<'v>>,
@@ -595,7 +593,9 @@ where
             } else {
                 unsafe { data_ptr.add(index) }
             };
-            unsafe { T::validate(element_ptr, context)?; }
+            unsafe {
+                T::validate(element_ptr, context)?;
+            }
         }
 
         Ok(())

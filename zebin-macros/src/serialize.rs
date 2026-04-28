@@ -3,10 +3,9 @@ use quote::{format_ident, quote};
 use syn::DeriveInput;
 
 use crate::shared::{
-    has_schema, input_member, parse_item, resolver_name, state_name, user_member,
-    variant_resolver_name, variant_state_name, ItemSpec, RecordSpec, RecordStyle, VariantSpec,
+    ItemSpec, RecordSpec, RecordStyle, VariantSpec, has_schema, input_member, parse_item,
+    resolver_name, state_name, user_member, variant_resolver_name, variant_state_name,
 };
-
 
 // --- Helper Functions for Code Generation ---
 
@@ -102,10 +101,7 @@ fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     }
 }
 
-fn layout_fields(
-    record: &RecordSpec<'_>,
-    archived_name: &syn::Ident,
-) -> proc_macro2::TokenStream {
+fn layout_fields(record: &RecordSpec<'_>, archived_name: &syn::Ident) -> proc_macro2::TokenStream {
     if !has_schema(record) {
         return quote! {};
     }
@@ -179,7 +175,9 @@ fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_ma
         RecordStyle::Unnamed => {
             let mut fields = Vec::new();
             if include_schema {
-                fields.push(quote! { self.schema_id.expect("schema_id registered before resolution") });
+                fields.push(
+                    quote! { self.schema_id.expect("schema_id registered before resolution") },
+                );
             }
             for (index, _field) in record.fields.iter().enumerate() {
                 let resolver_ident = format_ident!("field{}", index);
@@ -275,7 +273,10 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
     }
 }
 
-fn variant_state_def(enum_name: &syn::Ident, variant: &VariantSpec<'_>) -> proc_macro2::TokenStream {
+fn variant_state_def(
+    enum_name: &syn::Ident,
+    variant: &VariantSpec<'_>,
+) -> proc_macro2::TokenStream {
     let name = variant_state_name(enum_name, variant.ident);
     state_def(&name, &variant.record)
 }
@@ -290,7 +291,10 @@ fn variant_state_impl(
     record_state_impl(&state, &resolver, &variant.record, &archived_name)
 }
 
-fn variant_resolver_def(enum_name: &syn::Ident, variant: &VariantSpec<'_>) -> proc_macro2::TokenStream {
+fn variant_resolver_def(
+    enum_name: &syn::Ident,
+    variant: &VariantSpec<'_>,
+) -> proc_macro2::TokenStream {
     let name = variant_resolver_name(enum_name, variant.ident);
     resolver_def(&name, &variant.record)
 }
@@ -310,7 +314,7 @@ fn variant_begin_arm(
                 .fields
                 .iter()
                 .map(|field| field.ident.expect("named field has ident").clone());
-            let init_fields = variant.record.fields.iter().enumerate().map(|(_index, field)| {
+            let init_fields = variant.record.fields.iter().map(|field| {
                 let ident = field.ident.expect("named field has ident");
                 let state_ident = &field.state_ident;
                 let ty = field.ty;
@@ -351,15 +355,20 @@ fn variant_begin_arm(
                 .iter()
                 .enumerate()
                 .map(|(index, _)| format_ident!("field{}", index));
-            let init_fields = variant.record.fields.iter().enumerate().map(|(index, field)| {
-                let binder = format_ident!("field{}", index);
-                let state_ident = &field.state_ident;
-                let ty = field.ty;
-                quote! {
-                    #state_ident: <#ty as zebin::Serialize>::begin(&#binder)?,
-                    #binder: ::core::option::Option::None,
-                }
-            });
+            let init_fields = variant
+                .record
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    let binder = format_ident!("field{}", index);
+                    let state_ident = &field.state_ident;
+                    let ty = field.ty;
+                    quote! {
+                        #state_ident: <#ty as zebin::Serialize>::begin(&#binder)?,
+                        #binder: ::core::option::Option::None,
+                    }
+                });
             if include_schema {
                 quote! {
                     Self::#variant_ident( #(#binders),* ) => {
@@ -402,9 +411,15 @@ fn variant_begin_arm(
 fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::TokenStream {
     let state_name = state_name(name);
     let resolver_name = resolver_name(name);
-    let variant_state_defs = variants.iter().map(|variant| variant_state_def(name, variant));
-    let variant_state_impls = variants.iter().map(|variant| variant_state_impl(name, variant));
-    let variant_resolver_defs = variants.iter().map(|variant| variant_resolver_def(name, variant));
+    let variant_state_defs = variants
+        .iter()
+        .map(|variant| variant_state_def(name, variant));
+    let variant_state_impls = variants
+        .iter()
+        .map(|variant| variant_state_impl(name, variant));
+    let variant_resolver_defs = variants
+        .iter()
+        .map(|variant| variant_resolver_def(name, variant));
 
     let state_enum_variants = variants.iter().map(|variant| {
         let variant_state = variant_state_name(name, variant.ident);

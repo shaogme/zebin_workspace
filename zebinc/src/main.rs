@@ -40,13 +40,10 @@ fn main() {
                 .unwrap();
 
             for record in file.into_inner() {
-                match record.as_rule() {
-                    Rule::struct_def => {
-                        let mut inner = record.into_inner();
-                        let name = inner.next().unwrap().as_str();
-                        println!("Found struct: {}", name);
-                    }
-                    _ => {}
+                if record.as_rule() == Rule::struct_def {
+                    let mut inner = record.into_inner();
+                    let name = inner.next().unwrap().as_str();
+                    println!("Found struct: {}", name);
                 }
             }
         }
