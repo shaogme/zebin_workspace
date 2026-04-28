@@ -95,7 +95,7 @@ impl<'a> Validator<'a> {
     ) -> Result<(), ZebinError> {
         let alignment_value = alignment.get();
         let addr = ptr as usize;
-        if addr % alignment_value != 0 {
+        if !addr.is_multiple_of(alignment_value) {
             return Err(ZebinError::AlignmentError {
                 expected: alignment,
                 actual: unsafe { NonZeroUsize::new_unchecked(addr % alignment_value) },

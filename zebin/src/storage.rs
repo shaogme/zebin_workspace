@@ -9,6 +9,9 @@ use crate::ZebinError;
 /// Storage layer: byte-backed sequential write capabilities.
 pub trait Storage {
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn extend(&mut self, bytes: &[u8]) -> Result<usize, ZebinError>;
     fn align(&mut self, alignment: NonZeroUsize) -> Result<(), ZebinError> {
         let alignment = alignment.get();

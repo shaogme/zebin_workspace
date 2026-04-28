@@ -227,7 +227,7 @@ where
                 },
                 EncodePhase::RootAlign { resolver } => {
                     let _ = encoder.align(T::ALIGNMENT)?;
-                    if encoder.pos() % T::ALIGNMENT.get() != 0 {
+                    if !encoder.pos().is_multiple_of(T::ALIGNMENT.get()) {
                         break;
                     }
                     if encoder.pos() != self.plan.root_pos {

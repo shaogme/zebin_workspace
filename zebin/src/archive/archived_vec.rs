@@ -139,7 +139,7 @@ where
                 }
                 VecPhase::Aligning => {
                     let _ = encoder.align(T::ALIGNMENT)?;
-                    if encoder.pos() % T::ALIGNMENT.get() != 0 {
+                    if !encoder.pos().is_multiple_of(T::ALIGNMENT.get()) {
                         return Ok(SerializePoll::Pending);
                     }
                     self.data_pos = Some(encoder.pos());
@@ -192,7 +192,7 @@ where
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
-    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(8) };
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         let ptr = if self.is_empty() {
@@ -233,7 +233,7 @@ impl<'v, T> Validate<Validator<'v>> for ArchivedVec<T>
 where
     T: Validate<Validator<'v>>,
 {
-    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(8) };
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;

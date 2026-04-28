@@ -85,7 +85,7 @@ impl<'a> SerializeState for StringSerializeState<'a> {
 impl Archive for String {
     type Archived = ArchivedString;
     type Resolver = usize;
-    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(8) };
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         let ptr = if self.is_empty() {
@@ -120,7 +120,7 @@ impl Serialize for String {
 }
 
 impl<'v> Validate<Validator<'v>> for ArchivedString {
-    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(8) };
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;

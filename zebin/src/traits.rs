@@ -169,7 +169,7 @@ impl<const N: usize> SerializeState for ByteState<N> {
     {
         if !self.aligned {
             let _ = encoder.align(self.alignment)?;
-            if encoder.pos() % self.alignment.get() != 0 {
+            if !encoder.pos().is_multiple_of(self.alignment.get()) {
                 return Ok(SerializePoll::Pending);
             }
             self.aligned = true;
@@ -235,7 +235,7 @@ impl_archive_for_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f3
 impl Archive for bool {
     type Archived = bool;
     type Resolver = ();
-    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 
     fn resolve(
         &self,
@@ -264,7 +264,7 @@ impl Serialize for bool {
 }
 
 impl<C: ?Sized> Validate<C> for bool {
-    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 
     unsafe fn validate(ptr: *const Self, _context: &mut C) -> Result<(), ZebinError> {
         let val = unsafe { *(ptr as *const u8) };
