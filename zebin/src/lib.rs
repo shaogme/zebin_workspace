@@ -22,7 +22,7 @@ pub mod prelude {
         ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
         PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
     };
-    pub use crate::archive::varint::{VarInt, VarIntView};
+    pub use crate::archive::varint::{PackedVarIntSlice, VarInt, VarIntVec, VarIntView};
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{
@@ -45,7 +45,7 @@ pub use crate::archive::packed::{
     ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec, PackedSlice,
     PackedU8Slice, PackedU8Vec, PackedVec,
 };
-pub use crate::archive::varint::{VarInt, VarIntView};
+pub use crate::archive::varint::{PackedVarIntSlice, VarInt, VarIntVec, VarIntView};
 pub use crate::core::rel_ptr::RelPtr;
 pub use crate::core::schema::{
     FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
