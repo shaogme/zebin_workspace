@@ -20,7 +20,10 @@ mod traits;
 pub mod prelude {
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
-    pub use crate::traits::{ByteState, Encoder, Serialize, Validate, ZebinError};
+    pub use crate::traits::{
+        ByteState, Encoder, LeafSerialize, SequenceSerialize, Serialize, UnarySerialize, Validate,
+        VariantSerialize, ZebinError,
+    };
     pub use crate::{
         ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, Archive, ArchiveHeader, ArchiveView,
         ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr,

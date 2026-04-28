@@ -241,3 +241,29 @@ pub fn input_member(record: &RecordSpec<'_>, index: usize) -> Member {
         RecordStyle::Unit => unreachable!("unit has no fields"),
     }
 }
+
+fn unnamed_slot_ident(prefix: &str, index: usize) -> Ident {
+    Ident::new(&format!("{prefix}{index}"), Span::call_site())
+}
+
+/// Identifier used for a generated state field at a particular slot.
+pub fn state_slot_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
+    match record.style {
+        RecordStyle::Named => record.fields[index]
+            .ident
+            .expect("named field has ident")
+            .clone(),
+        RecordStyle::Unnamed => unnamed_slot_ident("field", index),
+        RecordStyle::Unit => unreachable!("unit has no fields"),
+    }
+}
+
+/// Identifier used for a generated resolver field at a particular slot.
+pub fn resolver_slot_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
+    state_slot_ident(record, index)
+}
+
+/// Identifier used for a generated input binder at a particular slot.
+pub fn binder_slot_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
+    state_slot_ident(record, index)
+}

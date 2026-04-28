@@ -4,7 +4,8 @@ use core::str;
 use alloc::string::{String, ToString};
 
 use crate::{
-    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
+    Archive, Encoder, LeafSerialize, Serialize, SerializePoll, SerializeState, Validate,
+    ZebinError,
     core::{rel_ptr::RelPtr, validator::Validator},
     num::{u32_to_usize, usize_to_u32},
 };
@@ -108,14 +109,25 @@ impl Archive for String {
     }
 }
 
-impl Serialize for String {
+impl LeafSerialize for String {
     type State<'a>
         = StringSerializeState<'a>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError> {
         StringSerializeState::new(self.as_bytes())
+    }
+}
+
+impl Serialize for String {
+    type State<'a>
+        = <Self as LeafSerialize>::State<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.begin_leaf()
     }
 }
 
@@ -145,14 +157,25 @@ impl Archive for str {
     }
 }
 
-impl Serialize for str {
+impl LeafSerialize for str {
     type State<'a>
         = StringSerializeState<'a>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError> {
         StringSerializeState::new(self.as_bytes())
+    }
+}
+
+impl Serialize for str {
+    type State<'a>
+        = <Self as LeafSerialize>::State<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.begin_leaf()
     }
 }
 

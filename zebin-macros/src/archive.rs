@@ -14,28 +14,103 @@ fn schema_access_expr(record: &RecordSpec<'_>, ident: &syn::Ident) -> proc_macro
     quote! { #ident.#member }
 }
 
-fn field_defs(record: &RecordSpec<'_>, include_schema: bool) -> Vec<proc_macro2::TokenStream> {
-    let mut out = Vec::new();
-    if include_schema {
-        match record.style {
-            RecordStyle::Named => out.push(quote! { pub schema_id: u32 }),
-            RecordStyle::Unnamed => out.push(quote! { pub u32 }),
-            RecordStyle::Unit => {}
-        }
+fn record_schema_field(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStream> {
+    if !has_schema(record) {
+        return None;
     }
 
-    for field in &record.fields {
-        let ty = field.ty;
-        match record.style {
-            RecordStyle::Named => {
-                let ident = field.ident.expect("named field has ident");
-                out.push(quote! { pub #ident: <#ty as zebin::Archive>::Archived });
-            }
-            RecordStyle::Unnamed => out.push(quote! { <#ty as zebin::Archive>::Archived }),
-            RecordStyle::Unit => {}
+    Some(match record.style {
+        RecordStyle::Named => quote! { pub schema_id: u32 },
+        RecordStyle::Unnamed => quote! { pub u32 },
+        RecordStyle::Unit => unreachable!("unit never has schema"),
+    })
+}
+
+fn record_field_decl(
+    record: &RecordSpec<'_>,
+    ty: &syn::Type,
+    index: usize,
+) -> proc_macro2::TokenStream {
+    match record.style {
+        RecordStyle::Named => {
+            let ident = record.fields[index].ident.expect("named field has ident");
+            quote! { pub #ident: <#ty as zebin::Archive>::Archived }
         }
+        RecordStyle::Unnamed => quote! { <#ty as zebin::Archive>::Archived },
+        RecordStyle::Unit => unreachable!("unit has no fields"),
     }
-    out
+}
+
+fn record_field_member(record: &RecordSpec<'_>, index: usize) -> Member {
+    user_member(record, index)
+}
+
+fn record_field_offset_expr(
+    archived_name: &syn::Ident,
+    record: &RecordSpec<'_>,
+    index: usize,
+) -> proc_macro2::TokenStream {
+    let member = record_field_member(record, index);
+    quote! { zebin::memoffset::offset_of!(#archived_name, #member) }
+}
+
+fn record_field_method_name(record: &RecordSpec<'_>, index: usize) -> syn::Ident {
+    match record.style {
+        RecordStyle::Named => record.fields[index]
+            .ident
+            .expect("named field has ident")
+            .clone(),
+        RecordStyle::Unnamed => format_ident!("field{}", index),
+        RecordStyle::Unit => unreachable!("unit has no fields"),
+    }
+}
+
+fn record_field_inits(
+    record: &RecordSpec<'_>,
+    archived_name: &syn::Ident,
+) -> Vec<proc_macro2::TokenStream> {
+    record
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let ty = field.ty;
+            let member = record_field_member(record, index);
+            let offset = record_field_offset_expr(archived_name, record, index);
+            quote! {
+                {
+                    let offset = #offset;
+                    let size = ::core::mem::size_of::<<#ty as zebin::Archive>::Archived>();
+                    <#ty as zebin::Archive>::write_archived_bytes(
+                        &archived.#member,
+                        &mut out[offset..offset + size],
+                    );
+                }
+            }
+        })
+        .collect()
+}
+
+fn record_schema_write(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStream> {
+    if !has_schema(record) {
+        return None;
+    }
+
+    Some(match record.style {
+        RecordStyle::Named => quote! {
+            <u32 as zebin::Archive>::write_archived_bytes(
+                &archived.schema_id,
+                &mut out[0..::core::mem::size_of::<u32>()],
+            );
+        },
+        RecordStyle::Unnamed => quote! {
+            <u32 as zebin::Archive>::write_archived_bytes(
+                &archived.0,
+                &mut out[0..::core::mem::size_of::<u32>()],
+            );
+        },
+        RecordStyle::Unit => unreachable!("unit never has schema"),
+    })
 }
 
 fn helper_accessors(
@@ -50,11 +125,7 @@ fn helper_accessors(
     let methods = record.fields.iter().enumerate().map(|(index, field)| {
         let ty = field.ty;
         let field_id = field.field_id.expect("field ids are validated above");
-        let method = match record.style {
-            RecordStyle::Named => field.ident.expect("named field has ident").clone(),
-            RecordStyle::Unnamed => format_ident!("field{}", index),
-            RecordStyle::Unit => unreachable!("unit has no fields"),
-        };
+        let method = record_field_method_name(record, index);
         quote! {
             pub unsafe fn #method<'a>(
                 &'a self,
@@ -93,7 +164,7 @@ fn helper_validate(
         let schema_expr = schema_access_expr(record, &format_ident!("archived"));
         let checks = record.fields.iter().enumerate().map(|(index, field)| {
             let field_id = field.field_id.expect("field ids are validated above");
-            let member = user_member(record, index);
+            let member = record_field_member(record, index);
             quote! {
                 layout.check_field(#field_id, zebin::memoffset::offset_of!(#archived_name, #member) as u16)?;
             }
@@ -110,7 +181,7 @@ fn helper_validate(
 
     let field_validations = record.fields.iter().enumerate().map(|(index, field)| {
         let ty = field.ty;
-        let member = user_member(record, index);
+        let member = record_field_member(record, index);
         quote! {
             {
                 let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
@@ -144,46 +215,16 @@ fn helper_bytes_impl(
     archived_name: &syn::Ident,
     record: &RecordSpec<'_>,
 ) -> proc_macro2::TokenStream {
-    let write_schema = if has_schema(record) {
-        match record.style {
-            RecordStyle::Named => quote! {
-                <u32 as zebin::Archive>::write_archived_bytes(
-                    &archived.schema_id,
-                    &mut out[0..::core::mem::size_of::<u32>()],
-                );
-            },
-            RecordStyle::Unnamed => quote! {
-                <u32 as zebin::Archive>::write_archived_bytes(
-                    &archived.0,
-                    &mut out[0..::core::mem::size_of::<u32>()],
-                );
-            },
-            RecordStyle::Unit => quote! {},
-        }
-    } else {
-        quote! {}
-    };
-
-    let writes = record.fields.iter().enumerate().map(|(index, field)| {
-        let ty = field.ty;
-        let member = user_member(record, index);
-        quote! {
-            {
-                let offset = zebin::memoffset::offset_of!(#archived_name, #member);
-                let size = ::core::mem::size_of::<<#ty as zebin::Archive>::Archived>();
-                <#ty as zebin::Archive>::write_archived_bytes(
-                    &archived.#member,
-                    &mut out[offset..offset + size],
-                );
-            }
-        }
-    });
+    let mut writes = Vec::new();
+    if let Some(write_schema) = record_schema_write(record) {
+        writes.push(write_schema);
+    }
+    writes.extend(record_field_inits(record, archived_name));
 
     quote! {
         impl #archived_name {
             pub fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
                 out.fill(0);
-                #write_schema
                 #(#writes)*
             }
 
@@ -207,7 +248,13 @@ fn schema_member(record: &RecordSpec<'_>) -> Member {
 }
 
 fn helper_record(archived_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let fields = field_defs(record, has_schema(record));
+    let mut fields = Vec::new();
+    if let Some(schema) = record_schema_field(record) {
+        fields.push(schema);
+    }
+    for (index, field) in record.fields.iter().enumerate() {
+        fields.push(record_field_decl(record, field.ty, index));
+    }
     let bytes_impl = helper_bytes_impl(archived_name, record);
     let validate = helper_validate(archived_name, record);
     let accessors = helper_accessors(archived_name, record);

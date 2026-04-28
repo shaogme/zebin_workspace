@@ -2,8 +2,8 @@ use alloc::{boxed::Box, string::ToString};
 use core::{mem::MaybeUninit, num::NonZeroUsize};
 
 use crate::{
-    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
-    core::validator::Validator,
+    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, VariantSerialize,
+    ZebinError, core::validator::Validator,
 };
 
 /// Archived representation for `Result<T, E>`.
@@ -162,7 +162,7 @@ where
     }
 }
 
-impl<T, E> Serialize for Result<T, E>
+impl<T, E> VariantSerialize for Result<T, E>
 where
     T: Serialize + Archive,
     E: Serialize + Archive,
@@ -172,8 +172,23 @@ where
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_variant(&self) -> Result<Self::State<'_>, ZebinError> {
         ResultSerializeState::new(self.as_ref())
+    }
+}
+
+impl<T, E> Serialize for Result<T, E>
+where
+    T: Serialize + Archive,
+    E: Serialize + Archive,
+{
+    type State<'a>
+        = <Self as VariantSerialize>::State<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.begin_variant()
     }
 }
 

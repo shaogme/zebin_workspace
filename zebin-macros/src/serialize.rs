@@ -3,8 +3,9 @@ use quote::{format_ident, quote};
 use syn::DeriveInput;
 
 use crate::shared::{
-    ItemSpec, RecordSpec, RecordStyle, VariantSpec, has_schema, input_member, parse_item,
-    resolver_name, state_name, user_member, variant_resolver_name, variant_state_name,
+    ItemSpec, RecordSpec, RecordStyle, VariantSpec, binder_slot_ident, has_schema, input_member,
+    parse_item, resolver_name, resolver_slot_ident, state_name, state_slot_ident, user_member,
+    variant_resolver_name, variant_state_name,
 };
 
 // --- Helper Functions for Code Generation ---
@@ -44,11 +45,7 @@ fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::T
     let fields = record.fields.iter().enumerate().map(|(index, field)| {
         let state_ident = &field.state_ident;
         let ty = field.ty;
-        let resolver_ident = match record.style {
-            RecordStyle::Named => field.ident.expect("named field has ident").clone(),
-            RecordStyle::Unnamed => format_ident!("field{}", index),
-            RecordStyle::Unit => unreachable!("unit has no fields"),
-        };
+        let resolver_ident = resolver_slot_ident(record, index);
         quote! {
             pub #state_ident: <#ty as zebin::Serialize>::State<'a>,
             pub #resolver_ident: ::core::option::Option<<#ty as zebin::Archive>::Resolver>,
@@ -81,11 +78,7 @@ fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let fields = record.fields.iter().enumerate().map(|(index, field)| {
         let state_ident = &field.state_ident;
         let ty = field.ty;
-        let resolver_ident = match record.style {
-            RecordStyle::Named => field.ident.expect("named field has ident").clone(),
-            RecordStyle::Unnamed => format_ident!("field{}", index),
-            RecordStyle::Unit => unreachable!("unit has no fields"),
-        };
+        let resolver_ident = resolver_slot_ident(record, index);
         let input_member = input_member(record, index);
         quote! {
             #state_ident: <#ty as zebin::Serialize>::begin(&self.#input_member)?,
@@ -133,11 +126,7 @@ fn poll_steps(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
         .enumerate()
         .map(|(index, field)| {
             let state_ident = &field.state_ident;
-            let resolver_ident = match record.style {
-                RecordStyle::Named => field.ident.expect("named field has ident").clone(),
-                RecordStyle::Unnamed => format_ident!("field{}", index),
-                RecordStyle::Unit => unreachable!("unit has no fields"),
-            };
+            let resolver_ident = resolver_slot_ident(record, index);
             quote! {
                 if self.#resolver_ident.is_none() {
                     match self.#state_ident.poll(encoder)? {
@@ -163,8 +152,8 @@ fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_ma
             if include_schema {
                 fields.push(quote! { schema_id: self.schema_id.expect("schema_id registered before resolution") });
             }
-            for field in &record.fields {
-                let ident = field.ident.expect("named field has ident");
+            for (index, _field) in record.fields.iter().enumerate() {
+                let ident = state_slot_ident(record, index);
                 fields.push(quote! {
                     #ident: self.#ident.take().expect("field resolver available after polling")
                 });
@@ -179,7 +168,7 @@ fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_ma
                 );
             }
             for (index, _field) in record.fields.iter().enumerate() {
-                let resolver_ident = format_ident!("field{}", index);
+                let resolver_ident = resolver_slot_ident(record, index);
                 fields.push(quote! {
                     self.#resolver_ident
                         .take()
@@ -312,7 +301,8 @@ fn variant_begin_arm(
                 .record
                 .fields
                 .iter()
-                .map(|field| field.ident.expect("named field has ident").clone());
+                .enumerate()
+                .map(|(index, _)| binder_slot_ident(&variant.record, index));
             let init_fields = variant.record.fields.iter().map(|field| {
                 let ident = field.ident.expect("named field has ident");
                 let state_ident = &field.state_ident;
@@ -353,7 +343,7 @@ fn variant_begin_arm(
                 .fields
                 .iter()
                 .enumerate()
-                .map(|(index, _)| format_ident!("field{}", index));
+                .map(|(index, _)| binder_slot_ident(&variant.record, index));
             let init_fields = variant
                 .record
                 .fields

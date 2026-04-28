@@ -1,6 +1,7 @@
 use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
+    collections::VecDeque,
     rc::Rc,
     string::{String, ToString},
     sync::Arc,
@@ -9,7 +10,7 @@ use alloc::{
 };
 use core::num::NonZeroUsize;
 
-use crate::core::{schema::LayoutField, validator::Validator};
+use crate::core::schema::LayoutField;
 
 /// Object model layer: type-level archive/serialize/validate contracts.
 pub trait Archive {
@@ -130,6 +131,104 @@ pub trait Serialize: Archive {
     fn begin(&self) -> Result<Self::State<'_>, ZebinError>;
 }
 
+/// Leaf-shaped serializable values.
+pub trait LeafSerialize: Archive {
+    type State<'a>: SerializeState<Resolver = Self::Resolver>
+    where
+        Self: 'a;
+
+    fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError>;
+}
+
+/// Unary wrappers that simply delegate serialization to an inner value.
+pub trait UnarySerialize: Archive {
+    type Inner: ?Sized + Archive + Serialize;
+
+    fn as_inner(&self) -> &Self::Inner;
+}
+
+/// Variant-shaped serializable values such as `Option` and `Result`.
+pub trait VariantSerialize: Archive {
+    type State<'a>: SerializeState<Resolver = Self::Resolver>
+    where
+        Self: 'a;
+
+    fn begin_variant(&self) -> Result<Self::State<'_>, ZebinError>;
+}
+
+/// Source of indexed sequence items.
+pub trait SequenceSource<T> {
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn get(&self, index: usize) -> &T;
+}
+
+impl<T> SequenceSource<T> for [T] {
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+impl<T, const N: usize> SequenceSource<T> for [T; N] {
+    fn len(&self) -> usize {
+        N
+    }
+
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+impl<T> SequenceSource<T> for Vec<T> {
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+impl<T> SequenceSource<T> for VecDeque<T> {
+    fn len(&self) -> usize {
+        VecDeque::len(self)
+    }
+
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+/// Buffer for sequence element resolvers while a sequence is being serialized.
+pub trait SequenceResolverBuffer<T: Archive> {
+    type Resolver;
+
+    fn new(len: usize) -> Self
+    where
+        Self: Sized;
+
+    fn store(&mut self, index: usize, resolver: T::Resolver);
+
+    fn take(&mut self, index: usize) -> T::Resolver;
+
+    fn finish(self, data_pos: usize) -> Self::Resolver;
+}
+
+/// Sequence-shaped serializable values.
+pub trait SequenceSerialize: Archive {
+    type State<'a>: SerializeState<Resolver = Self::Resolver>
+    where
+        Self: 'a;
+
+    fn begin_sequence(&self) -> Result<Self::State<'_>, ZebinError>;
+}
+
 /// Trait for types that can be validated for safety.
 pub trait Validate<C: ?Sized> {
     /// The alignment requirement for the archived representation.
@@ -208,16 +307,24 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl Serialize for $t {
+            impl LeafSerialize for $t {
                 type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
 
-                fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+                fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError> {
                     Ok(ByteState::new(
                         self.to_le_bytes(),
                         unsafe {
                             NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                         },
                     ))
+                }
+            }
+
+            impl Serialize for $t {
+                type State<'a> = <Self as LeafSerialize>::State<'a> where Self: 'a;
+
+                fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+                    self.begin_leaf()
                 }
             }
 
@@ -254,16 +361,27 @@ impl Archive for bool {
     }
 }
 
-impl Serialize for bool {
+impl LeafSerialize for bool {
     type State<'a>
         = ByteState<1>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ByteState::new([*self as u8], unsafe {
             NonZeroUsize::new_unchecked(1)
         }))
+    }
+}
+
+impl Serialize for bool {
+    type State<'a>
+        = <Self as LeafSerialize>::State<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.begin_leaf()
     }
 }
 
@@ -279,6 +397,17 @@ impl<C: ?Sized> Validate<C> for bool {
             });
         }
         Ok(())
+    }
+}
+
+impl<T> UnarySerialize for Box<T>
+where
+    T: Archive + Serialize,
+{
+    type Inner = T;
+
+    fn as_inner(&self) -> &Self::Inner {
+        self.as_ref()
     }
 }
 
@@ -309,7 +438,18 @@ where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
+        self.as_inner().begin()
+    }
+}
+
+impl<T> UnarySerialize for Rc<T>
+where
+    T: Archive + Serialize,
+{
+    type Inner = T;
+
+    fn as_inner(&self) -> &Self::Inner {
+        self.as_ref()
     }
 }
 
@@ -340,7 +480,18 @@ where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
+        self.as_inner().begin()
+    }
+}
+
+impl<T> UnarySerialize for Arc<T>
+where
+    T: Archive + Serialize,
+{
+    type Inner = T;
+
+    fn as_inner(&self) -> &Self::Inner {
+        self.as_ref()
     }
 }
 
@@ -371,7 +522,18 @@ where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
+        self.as_inner().begin()
+    }
+}
+
+impl<'a, B> UnarySerialize for Cow<'a, B>
+where
+    B: ?Sized + ToOwned + Archive + Serialize,
+{
+    type Inner = B;
+
+    fn as_inner(&self) -> &Self::Inner {
+        self.as_ref()
     }
 }
 
@@ -402,190 +564,6 @@ where
         Self: 'b;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
-    }
-}
-
-impl<T> Archive for [T]
-where
-    T: Archive,
-{
-    type Archived = crate::archive::archived_vec::ArchivedVec<T::Archived>;
-    type Resolver = usize;
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
-
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        crate::archive::archived_vec::resolve_sequence_archive(self, pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        crate::archive::archived_vec::write_sequence_archive_bytes(archived, out);
-    }
-}
-
-impl<T> Serialize for [T]
-where
-    T: Serialize + Archive,
-{
-    type State<'a>
-        = crate::archive::archived_vec::SliceSerializeState<'a, T>
-    where
-        Self: 'a;
-
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        crate::archive::archived_vec::SliceSerializeState::new(self)
-    }
-}
-
-pub struct ArraySerializeState<'a, T, const N: usize>
-where
-    T: Serialize + Archive + 'a,
-{
-    items: &'a [T; N],
-    index: usize,
-    current_state: Option<Box<<T as Serialize>::State<'a>>>,
-    resolvers: [Option<T::Resolver>; N],
-}
-
-impl<'a, T, const N: usize> ArraySerializeState<'a, T, N>
-where
-    T: Serialize + Archive + 'a,
-{
-    fn new(items: &'a [T; N]) -> Result<Self, ZebinError> {
-        Ok(Self {
-            items,
-            index: 0,
-            current_state: None,
-            resolvers: core::array::from_fn(|_| None),
-        })
-    }
-}
-
-impl<'a, T, const N: usize> SerializeState for ArraySerializeState<'a, T, N>
-where
-    T: Serialize + Archive + 'a,
-{
-    type Resolver = [T::Resolver; N];
-
-    fn poll<E: Encoder + ?Sized>(
-        &mut self,
-        encoder: &mut E,
-    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
-        loop {
-            if self.index >= N {
-                return Ok(SerializePoll::Ready(core::array::from_fn(|i| {
-                    self.resolvers[i]
-                        .take()
-                        .expect("array resolver stored when element serialization completed")
-                })));
-            }
-
-            if self.current_state.is_none() {
-                self.current_state = Some(Box::new(self.items[self.index].begin()?));
-            }
-
-            match self
-                .current_state
-                .as_mut()
-                .expect("state initialized above")
-                .poll(encoder)?
-            {
-                SerializePoll::Pending => return Ok(SerializePoll::Pending),
-                SerializePoll::Error(err) => return Ok(SerializePoll::Error(err)),
-                SerializePoll::Ready(resolver) => {
-                    self.resolvers[self.index] = Some(resolver);
-                    self.current_state = None;
-                    self.index += 1;
-                }
-            }
-        }
-    }
-}
-
-impl<T, const N: usize> Archive for [T; N]
-where
-    T: Archive,
-{
-    type Archived = [T::Archived; N];
-    type Resolver = [T::Resolver; N];
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
-
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        let elem_size = core::mem::size_of::<T::Archived>();
-        let mut out = core::mem::MaybeUninit::<[T::Archived; N]>::uninit();
-        let out_ptr = out.as_mut_ptr() as *mut T::Archived;
-        let mut resolver_iter = resolver.into_iter();
-
-        for (index, item) in self.iter().enumerate() {
-            let item_resolver = resolver_iter.next().expect("array resolver length matches");
-            let item_pos = pos
-                .checked_add(index.checked_mul(elem_size).ok_or(ZebinError::WriteError)?)
-                .ok_or(ZebinError::WriteError)?;
-            let item = item.resolve(item_pos, item_resolver)?;
-            unsafe {
-                out_ptr.add(index).write(item);
-            }
-        }
-
-        Ok(unsafe { out.assume_init() })
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        out.fill(0);
-        let elem_size = core::mem::size_of::<T::Archived>();
-        if elem_size == 0 {
-            return;
-        }
-
-        for (index, item) in archived.iter().enumerate() {
-            let start = index * elem_size;
-            let end = start + elem_size;
-            T::write_archived_bytes(item, &mut out[start..end]);
-        }
-    }
-}
-
-impl<T, const N: usize> Serialize for [T; N]
-where
-    T: Serialize + Archive,
-{
-    type State<'a>
-        = ArraySerializeState<'a, T, N>
-    where
-        Self: 'a;
-
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        ArraySerializeState::new(self)
-    }
-}
-
-impl<'v, T, const N: usize> Validate<Validator<'v>> for [T; N]
-where
-    T: Validate<Validator<'v>>,
-{
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
-
-    unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
-        let _guard = context.enter()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let data_ptr = ptr as *const T;
-        let elem_size = core::mem::size_of::<T>();
-
-        for index in 0..N {
-            let element_ptr = if elem_size == 0 {
-                data_ptr
-            } else {
-                unsafe { data_ptr.add(index) }
-            };
-            unsafe {
-                T::validate(element_ptr, context)?;
-            }
-        }
-
-        Ok(())
+        self.as_inner().begin()
     }
 }
