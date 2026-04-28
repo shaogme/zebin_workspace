@@ -36,8 +36,8 @@ fn test_unit_enum_round_trip() {
     let value = UnitMode::Busy;
     let buf = zebin::encode(&value).unwrap();
     let archived = zebin::decode::<UnitMode>(&buf).unwrap();
-    assert!(archived.is_Busy());
-    assert!(!archived.is_Idle());
+    assert!(archived.is_busy());
+    assert!(!archived.is_idle());
     assert_eq!(archived.tag(), 1);
 }
 
@@ -48,10 +48,10 @@ fn test_tuple_enum_round_trip() {
     let value = TuplePacket::Data(7, "packet".to_string());
     let buf = zebin::encode(&value).unwrap();
     let archived = zebin::decode::<TuplePacket>(&buf).unwrap();
-    assert!(!archived.is_Empty());
+    assert!(!archived.is_empty());
     assert_eq!(archived.tag(), 1);
 
-    let data = unsafe { archived.as_Data().unwrap() };
+    let data = unsafe { archived.as_data().unwrap() };
     assert_eq!(*unsafe { data.field0(&buf).unwrap() }, 7);
     assert_eq!(unsafe { data.field1(&buf).unwrap().as_str() }, "packet");
 }
@@ -68,7 +68,7 @@ fn test_struct_enum_round_trip() {
     let archived = zebin::decode::<StructPacket>(&buf).unwrap();
     assert_eq!(archived.tag(), 1);
 
-    let data = unsafe { archived.as_Data().unwrap() };
+    let data = unsafe { archived.as_data().unwrap() };
     assert_eq!(*unsafe { data.code(&buf).unwrap() }, 42);
     assert_eq!(unsafe { data.label(&buf).unwrap().as_str() }, "hello");
 }

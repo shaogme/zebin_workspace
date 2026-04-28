@@ -4,7 +4,7 @@ use syn::{DeriveInput, Index, Member};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, VariantSpec, archived_name, has_schema, parse_item,
-    payload_name, user_member, variant_archived_name, variant_method_name,
+    payload_name, user_member, variant_archived_name, variant_field_name, variant_method_name,
 };
 
 // --- Helper Functions for Code Generation ---
@@ -79,7 +79,6 @@ fn helper_accessors(
     });
 
     quote! {
-        #[allow(non_snake_case)]
         impl #archived_name {
             #(#methods)*
         }
@@ -121,7 +120,6 @@ fn helper_validate(
     });
 
     quote! {
-        #[allow(non_snake_case)]
         impl zebin::Validate<zebin::Validator<'_>> for #archived_name {
             const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
                 ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
@@ -182,7 +180,6 @@ fn helper_bytes_impl(
     });
 
     quote! {
-        #[allow(non_snake_case)]
         impl #archived_name {
             pub fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
                 out.fill(0);
@@ -217,21 +214,18 @@ fn helper_record(archived_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_ma
 
     let definition = match record.style {
         RecordStyle::Named => quote! {
-            #[allow(non_snake_case)]
             #[repr(C)]
             pub struct #archived_name {
                 #(#fields,)*
             }
         },
         RecordStyle::Unnamed => quote! {
-            #[allow(non_snake_case)]
             #[repr(C)]
             pub struct #archived_name(
                 #(#fields,)*
             );
         },
         RecordStyle::Unit => quote! {
-            #[allow(non_snake_case)]
             #[repr(C)]
             pub struct #archived_name;
         },
@@ -333,9 +327,9 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
     for (idx, variant) in variants.iter().enumerate() {
         let helper_name = variant_archived_name(name, variant.ident);
         variant_defs.push(helper_record(&helper_name, &variant.record));
-        let variant_ident = variant.ident;
+        let payload_field_ident = variant_field_name(variant.ident);
         variant_payload_fields.push(quote! {
-            #variant_ident: ::core::mem::ManuallyDrop<#helper_name>
+            #payload_field_ident: ::core::mem::ManuallyDrop<#helper_name>
         });
 
         let idx_lit = idx as u32;
@@ -352,26 +346,26 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             });
         } else {
             variant_accessors.push(quote! {
-                pub unsafe fn #accessor_name<'a>(&'a self) -> Option<&'a #helper_name> {
-                    if self.tag != #idx_lit {
-                        return None;
+                    pub unsafe fn #accessor_name<'a>(&'a self) -> Option<&'a #helper_name> {
+                        if self.tag != #idx_lit {
+                            return None;
+                        }
+                        let ptr = unsafe { &self.payload.#payload_field_ident as *const _ as *const #helper_name };
+                        Some(&*ptr)
                     }
-                    let ptr = unsafe { &self.payload.#variant_ident as *const _ as *const #helper_name };
-                    Some(&*ptr)
-                }
-            });
+                });
         }
 
         variant_validate_arms.push(quote! {
             #idx_lit => {
-                let ptr = unsafe { &archived.payload.#variant_ident as *const _ as *const #helper_name };
+                let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
                 unsafe { #helper_name::validate(ptr, context)?; }
             }
         });
 
         variant_write_arms.push(quote! {
             #idx_lit => {
-                let ptr = unsafe { &archived.payload.#variant_ident as *const _ as *const #helper_name };
+                let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
                 let bytes = #helper_name::archived_bytes(unsafe { &*ptr });
                 out[payload_offset..payload_offset + bytes.len()].copy_from_slice(&bytes);
             }
@@ -448,7 +442,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 Ok(#archived_name {
                     tag: #idx_lit,
                     payload: #payload_name {
-                        #variant_ident: ::core::mem::ManuallyDrop::new(archived),
+                        #payload_field_ident: ::core::mem::ManuallyDrop::new(archived),
                     },
                 })
             }
@@ -456,7 +450,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
     }
 
     let payload_struct = quote! {
-        #[allow(non_snake_case)]
         #[repr(C)]
         union #payload_name {
             #(#variant_payload_fields,)*
@@ -464,7 +457,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
     };
 
     let root_accessors = quote! {
-        #[allow(non_snake_case)]
         impl #archived_name {
             pub fn tag(&self) -> u32 {
                 self.tag
@@ -474,7 +466,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
     };
 
     let root_validate = quote! {
-        #[allow(non_snake_case)]
         impl zebin::Validate<zebin::Validator<'_>> for #archived_name {
             const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
                 ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
@@ -504,7 +495,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
 
     let root_archive = if variants.is_empty() {
         quote! {
-            #[allow(non_snake_case)]
             impl zebin::Archive for #name {
                 type Archived = #archived_name;
                 type Resolver = #resolver_name;
@@ -525,7 +515,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         }
     } else {
         quote! {
-            #[allow(non_snake_case)]
             impl zebin::Archive for #name {
                 type Archived = #archived_name;
                 type Resolver = #resolver_name;
@@ -563,14 +552,12 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
     quote! {
         #(#variant_defs)*
 
-        #[allow(non_snake_case)]
         #[repr(C)]
         pub struct #archived_name {
             tag: u32,
             payload: #payload_name,
         }
 
-        #[allow(non_snake_case)]
         #payload_struct
         #root_accessors
         #root_validate

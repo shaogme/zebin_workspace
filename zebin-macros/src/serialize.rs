@@ -22,7 +22,7 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
                 let ty = field.ty;
                 fields.push(quote! { pub #ident: <#ty as zebin::Archive>::Resolver });
             }
-            quote! { #[allow(non_snake_case)] pub struct #resolver_name { #(#fields,)* } }
+            quote! { pub struct #resolver_name { #(#fields,)* } }
         }
         RecordStyle::Unnamed => {
             let mut fields = Vec::new();
@@ -33,9 +33,9 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
                 let ty = field.ty;
                 fields.push(quote! { <#ty as zebin::Archive>::Resolver });
             }
-            quote! { #[allow(non_snake_case)] pub struct #resolver_name( #(#fields,)* ); }
+            quote! { pub struct #resolver_name( #(#fields,)* ); }
         }
-        RecordStyle::Unit => quote! { #[allow(non_snake_case)] pub struct #resolver_name; },
+        RecordStyle::Unit => quote! { pub struct #resolver_name; },
     }
 }
 
@@ -62,7 +62,6 @@ fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::T
     };
 
     quote! {
-        #[allow(non_snake_case)]
         pub struct #state_name<'a> {
             pub _marker: ::core::marker::PhantomData<&'a ()>,
             #schema_field

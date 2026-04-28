@@ -70,7 +70,35 @@ pub fn variant_state_name(enum_name: &Ident, variant: &Ident) -> Ident {
 }
 
 pub fn variant_method_name(prefix: &str, variant: &Ident) -> Ident {
-    format_ident!("{}_{}", prefix, variant)
+    format_ident!("{}_{}", prefix, variant_snake_case(variant))
+}
+
+pub fn variant_field_name(variant: &Ident) -> Ident {
+    format_ident!("{}", variant_snake_case(variant))
+}
+
+fn variant_snake_case(variant: &Ident) -> String {
+    let name = variant.to_string();
+    let mut out = String::with_capacity(name.len() + 4);
+    let mut prev_is_underscore = false;
+    let chars = name.chars().peekable();
+
+    for ch in chars {
+        if ch.is_uppercase() {
+            if !out.is_empty() && !prev_is_underscore {
+                out.push('_');
+            }
+            for lower in ch.to_lowercase() {
+                out.push(lower);
+            }
+            prev_is_underscore = false;
+        } else {
+            prev_is_underscore = ch == '_';
+            out.push(ch);
+        }
+    }
+
+    out
 }
 
 fn parse_field_id(field: &Field) -> Result<Option<u16>> {
