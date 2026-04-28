@@ -35,7 +35,9 @@ pub mod prelude {
 
 pub use crate::access::ArchiveView;
 pub use crate::core::rel_ptr::RelPtr;
-pub use crate::core::schema::{LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView};
+pub use crate::core::schema::{
+    LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, SchemaRevision, StableSchemaKey,
+};
 pub use crate::core::validator::Validator;
 pub use crate::format::{ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::storage::Storage;

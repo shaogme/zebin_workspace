@@ -134,13 +134,14 @@ fn validate_layout_section(bytes: &[u8], layout_offset: NonZeroUsize) -> Result<
                 message: "Layout position overflow".to_string(),
                 pos: offset_pos,
             })?;
-        let entry_header_end =
-            layout_pos
-                .checked_add(8)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout entry overflow".to_string(),
-                    pos: layout_pos,
-                })?;
+
+        let entry_header_len = 12;
+        let entry_header_end = layout_pos.checked_add(entry_header_len).ok_or_else(|| {
+            ZebinError::ValidationError {
+                message: "Layout entry overflow".to_string(),
+                pos: layout_pos,
+            }
+        })?;
         if entry_header_end > bytes.len() {
             return Err(ZebinError::ValidationError {
                 message: "Layout entry out of bounds".to_string(),
@@ -148,30 +149,13 @@ fn validate_layout_section(bytes: &[u8], layout_offset: NonZeroUsize) -> Result<
             });
         }
 
-        let schema_id = u32_to_usize(
-            u32::from_le_bytes(read_fixed::<4>(bytes, layout_pos, "Layout schema id")?),
-            || ZebinError::ValidationError {
-                message: "Layout schema id exceeds usize range".to_string(),
-                pos: layout_pos,
-            },
-        )?;
-        if schema_id != layout_idx {
-            return Err(ZebinError::ValidationError {
-                message: format!(
-                    "Layout schema id mismatch: expected {}, found {}",
-                    layout_idx, schema_id
-                ),
-                pos: layout_pos,
-            });
-        }
-
         let field_count = usize::from(u16::from_le_bytes(read_fixed::<2>(
             bytes,
-            layout_pos + 4,
+            layout_pos + 8,
             "Layout field count",
         )?));
         let entry_size =
-            8usize
+            entry_header_len
                 .checked_add(field_count.checked_mul(4).ok_or_else(|| {
                     ZebinError::ValidationError {
                         message: "Layout field table overflow".to_string(),

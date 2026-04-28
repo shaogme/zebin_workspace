@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use crate::{
     ZebinError,
-    core::schema::{LayoutDescriptor, LayoutField},
+    core::schema::{LayoutDescriptor, LayoutField, SchemaRevision, StableSchemaKey},
     num::usize_to_u32,
     traits::{ByteSink, LayoutSink},
 };
@@ -24,16 +24,30 @@ pub(crate) struct LayoutRegistry {
 }
 
 impl LayoutRegistry {
-    pub fn register(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError> {
-        let descriptor = LayoutDescriptor::new(layout.to_vec())?;
+    pub fn register(
+        &mut self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+        layout: &[LayoutField],
+    ) -> Result<(), ZebinError> {
+        let descriptor =
+            LayoutDescriptor::new(stable_schema_key, schema_revision, layout.to_vec())?;
+        if let Some(existing) = self.layouts.iter().find(|existing| {
+            existing.stable_schema_key == stable_schema_key
+                && existing.schema_revision == schema_revision
+        }) && existing != &descriptor
+        {
+            return Err(ZebinError::LayoutError);
+        }
         if let Some(&id) = self.layout_map.get(&descriptor) {
-            return Ok(id);
+            let _ = id;
+            return Ok(());
         }
 
         let id = usize_to_u32(self.layouts.len(), || ZebinError::LayoutError)?;
         self.layouts.push(descriptor.clone());
         self.layout_map.insert(descriptor, id);
-        Ok(id)
+        Ok(())
     }
 
     pub fn layouts(&self) -> &[LayoutDescriptor] {
@@ -90,8 +104,14 @@ impl ByteSink for MeasureEncoder {
 }
 
 impl LayoutSink for MeasureEncoder {
-    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError> {
-        self.layouts.register(layout)
+    fn register_layout(
+        &mut self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+        layout: &[LayoutField],
+    ) -> Result<(), ZebinError> {
+        self.layouts
+            .register(stable_schema_key, schema_revision, layout)
     }
 }
 
@@ -165,8 +185,14 @@ impl<'a> ByteSink for SliceEncoder<'a> {
 }
 
 impl<'a> LayoutSink for SliceEncoder<'a> {
-    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError> {
-        self.layouts.register(layout)
+    fn register_layout(
+        &mut self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+        layout: &[LayoutField],
+    ) -> Result<(), ZebinError> {
+        self.layouts
+            .register(stable_schema_key, schema_revision, layout)
     }
 }
 
@@ -176,7 +202,7 @@ fn layout_section_len(layouts: &[LayoutDescriptor]) -> Result<usize, ZebinError>
         .ok_or(ZebinError::WriteError)?;
     for layout in layouts {
         len = len
-            .checked_add(8)
+            .checked_add(12)
             .and_then(|v| v.checked_add(layout.fields.len().checked_mul(4)?))
             .ok_or(ZebinError::WriteError)?;
     }
@@ -198,7 +224,7 @@ pub(crate) fn build_layout_section_bytes(
     for layout in layouts {
         offsets.push(usize_to_u32(cursor, || ZebinError::WriteError)?);
         cursor = cursor
-            .checked_add(8)
+            .checked_add(12)
             .and_then(|v| v.checked_add(layout.fields.len().checked_mul(4)?))
             .ok_or(ZebinError::WriteError)?;
     }
@@ -207,9 +233,9 @@ pub(crate) fn build_layout_section_bytes(
         bytes.extend_from_slice(&offset.to_le_bytes());
     }
 
-    for (schema_id, layout) in layouts.iter().enumerate() {
-        let schema_id = usize_to_u32(schema_id, || ZebinError::WriteError)?;
-        bytes.extend_from_slice(&schema_id.to_le_bytes());
+    for layout in layouts {
+        bytes.extend_from_slice(&layout.stable_schema_key.to_le_bytes());
+        bytes.extend_from_slice(&layout.schema_revision.to_le_bytes());
         let field_count = u16::try_from(layout.fields.len()).map_err(|_| ZebinError::WriteError)?;
         bytes.extend_from_slice(&field_count.to_le_bytes());
         bytes.extend_from_slice(&0u16.to_le_bytes());

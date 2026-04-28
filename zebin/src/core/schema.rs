@@ -3,6 +3,12 @@ use core::num::NonZeroUsize;
 
 use alloc::{format, string::ToString, vec::Vec};
 
+/// Stable identifier used to refer to a schema across archive revisions.
+pub type StableSchemaKey = u32;
+
+/// Monotonic schema revision for a stable schema key.
+pub type SchemaRevision = u32;
+
 /// A single field entry inside a layout descriptor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LayoutField {
@@ -13,18 +19,28 @@ pub struct LayoutField {
 /// An owned layout descriptor used while constructing an archive.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LayoutDescriptor {
+    pub stable_schema_key: StableSchemaKey,
+    pub schema_revision: SchemaRevision,
     pub fields: Vec<LayoutField>,
 }
 
 impl LayoutDescriptor {
-    pub fn new(mut fields: Vec<LayoutField>) -> Result<Self, ZebinError> {
+    pub fn new(
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+        mut fields: Vec<LayoutField>,
+    ) -> Result<Self, ZebinError> {
         fields.sort_unstable_by_key(|field| field.field_id);
         for pair in fields.windows(2) {
             if pair[0].field_id == pair[1].field_id {
                 return Err(ZebinError::LayoutError);
             }
         }
-        Ok(Self { fields })
+        Ok(Self {
+            stable_schema_key,
+            schema_revision,
+            fields,
+        })
     }
 
     pub fn field_offset(&self, field_id: u16) -> Option<u16> {
@@ -56,11 +72,18 @@ impl<'a> LayoutView<'a> {
         }
     }
 
-    pub fn schema_id(&self) -> u32 {
+    pub fn stable_schema_key(&self) -> StableSchemaKey {
         let start = self.entry_pos;
-        let mut schema_id_bytes = [0u8; 4];
-        schema_id_bytes.copy_from_slice(&self.bytes[start..start + 4]);
-        u32::from_le_bytes(schema_id_bytes)
+        let mut key_bytes = [0u8; 4];
+        key_bytes.copy_from_slice(&self.bytes[start..start + 4]);
+        u32::from_le_bytes(key_bytes)
+    }
+
+    pub fn schema_revision(&self) -> SchemaRevision {
+        let start = self.entry_pos + 4;
+        let mut revision_bytes = [0u8; 4];
+        revision_bytes.copy_from_slice(&self.bytes[start..start + 4]);
+        u32::from_le_bytes(revision_bytes)
     }
 
     pub fn field_count(&self) -> usize {
@@ -70,7 +93,7 @@ impl<'a> LayoutView<'a> {
     pub fn fields(&self) -> LayoutFieldIter<'a> {
         LayoutFieldIter {
             bytes: self.bytes,
-            cursor: self.entry_pos + 8,
+            cursor: self.entry_pos + 12,
             remaining: self.field_count,
         }
     }
@@ -159,7 +182,11 @@ impl<'a> LayoutDirectory<'a> {
         self.bytes
     }
 
-    pub fn lookup(&self, schema_id: u32) -> Result<LayoutView<'a>, ZebinError> {
+    pub fn lookup(
+        &self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+    ) -> Result<LayoutView<'a>, ZebinError> {
         let section_offset = self.section_offset.get();
         let header_end =
             section_offset
@@ -192,17 +219,6 @@ impl<'a> LayoutDirectory<'a> {
             },
         )?;
 
-        let schema_index = u32_to_usize(schema_id, || ZebinError::ValidationError {
-            message: "Layout schema id overflow".to_string(),
-            pos: section_offset,
-        })?;
-        if schema_index >= num_layouts {
-            return Err(ZebinError::ValidationError {
-                message: "Layout schema id out of range".to_string(),
-                pos: schema_index,
-            });
-        }
-
         let offsets_pos = header_end;
         let offsets_end =
             offsets_pos
@@ -223,68 +239,84 @@ impl<'a> LayoutDirectory<'a> {
             });
         }
 
-        let offset_pos = offsets_pos + schema_index * 4;
-        let layout_rel_offset = u32_to_usize(
-            u32::from_le_bytes(
-                self.bytes
-                    .get(offset_pos..offset_pos + 4)
+        let mut found_entry: Option<(usize, usize)> = None;
+        for layout_index in 0..num_layouts {
+            let offset_pos = offsets_pos + layout_index * 4;
+            let layout_rel_offset = u32_to_usize(
+                u32::from_le_bytes(
+                    self.bytes
+                        .get(offset_pos..offset_pos + 4)
+                        .ok_or_else(|| ZebinError::ValidationError {
+                            message: "Layout offset entry out of bounds".to_string(),
+                            pos: offset_pos,
+                        })?
+                        .try_into()
+                        .map_err(|_| ZebinError::LayoutError)?,
+                ),
+                || ZebinError::ValidationError {
+                    message: "Layout offset entry overflow".to_string(),
+                    pos: offset_pos,
+                },
+            )?;
+
+            let entry_pos = section_offset
+                .checked_add(layout_rel_offset)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout entry overflow".to_string(),
+                    pos: offset_pos,
+                })?;
+
+            let entry_header_end =
+                entry_pos
+                    .checked_add(12)
                     .ok_or_else(|| ZebinError::ValidationError {
-                        message: "Layout offset entry out of bounds".to_string(),
-                        pos: offset_pos,
+                        message: "Layout entry overflow".to_string(),
+                        pos: entry_pos,
+                    })?;
+            if entry_header_end > self.bytes.len() {
+                return Err(ZebinError::ValidationError {
+                    message: "Layout entry out of bounds".to_string(),
+                    pos: entry_pos,
+                });
+            }
+
+            let stored_key = u32::from_le_bytes(
+                self.bytes
+                    .get(entry_pos..entry_pos + 4)
+                    .ok_or_else(|| ZebinError::ValidationError {
+                        message: "Layout stable schema key out of bounds".to_string(),
+                        pos: entry_pos,
                     })?
                     .try_into()
                     .map_err(|_| ZebinError::LayoutError)?,
+            );
+            let stored_revision = u32::from_le_bytes(
+                self.bytes
+                    .get(entry_pos + 4..entry_pos + 8)
+                    .ok_or_else(|| ZebinError::ValidationError {
+                        message: "Layout schema revision out of bounds".to_string(),
+                        pos: entry_pos,
+                    })?
+                    .try_into()
+                    .map_err(|_| ZebinError::LayoutError)?,
+            );
+            if stored_key == stable_schema_key && stored_revision == schema_revision {
+                found_entry = Some((entry_pos, layout_index));
+                break;
+            }
+        }
+
+        let (entry_pos, _) = found_entry.ok_or_else(|| ZebinError::ValidationError {
+            message: format!(
+                "Missing layout entry for stable schema key {} revision {}",
+                stable_schema_key, schema_revision
             ),
-            || ZebinError::ValidationError {
-                message: "Layout offset entry overflow".to_string(),
-                pos: offset_pos,
-            },
-        )?;
-
-        let entry_pos = section_offset
-            .checked_add(layout_rel_offset)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout entry overflow".to_string(),
-                pos: offset_pos,
-            })?;
-
-        let entry_header_end =
-            entry_pos
-                .checked_add(8)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout entry overflow".to_string(),
-                    pos: entry_pos,
-                })?;
-        if entry_header_end > self.bytes.len() {
-            return Err(ZebinError::ValidationError {
-                message: "Layout entry out of bounds".to_string(),
-                pos: entry_pos,
-            });
-        }
-
-        let stored_schema_id = u32::from_le_bytes(
-            self.bytes
-                .get(entry_pos..entry_pos + 4)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout schema id out of bounds".to_string(),
-                    pos: entry_pos,
-                })?
-                .try_into()
-                .map_err(|_| ZebinError::LayoutError)?,
-        );
-        if stored_schema_id != schema_id {
-            return Err(ZebinError::ValidationError {
-                message: format!(
-                    "Layout schema id mismatch: expected {}, found {}",
-                    schema_id, stored_schema_id
-                ),
-                pos: entry_pos,
-            });
-        }
+            pos: section_offset,
+        })?;
 
         let field_count = usize::from(u16::from_le_bytes(
             self.bytes
-                .get(entry_pos + 4..entry_pos + 6)
+                .get(entry_pos + 8..entry_pos + 10)
                 .ok_or_else(|| ZebinError::ValidationError {
                     message: "Layout field count out of bounds".to_string(),
                     pos: entry_pos,
@@ -293,7 +325,7 @@ impl<'a> LayoutDirectory<'a> {
                 .map_err(|_| ZebinError::LayoutError)?,
         ));
         let entry_end = entry_pos
-            .checked_add(8)
+            .checked_add(12)
             .and_then(|pos| pos.checked_add(field_count.checked_mul(4)?))
             .ok_or_else(|| ZebinError::ValidationError {
                 message: "Layout field table overflow".to_string(),

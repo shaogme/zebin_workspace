@@ -11,13 +11,9 @@ use crate::shared::{
 // --- Helper Functions for Code Generation ---
 
 fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let include_schema = has_schema(record);
     match record.style {
         RecordStyle::Named => {
             let mut fields = Vec::new();
-            if include_schema {
-                fields.push(quote! { pub schema_id: u32 });
-            }
             for field in &record.fields {
                 let ident = field.ident.expect("named field has ident");
                 let ty = field.ty;
@@ -27,9 +23,6 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
         }
         RecordStyle::Unnamed => {
             let mut fields = Vec::new();
-            if include_schema {
-                fields.push(quote! { pub u32 });
-            }
             for field in &record.fields {
                 let ty = field.ty;
                 fields.push(quote! { <#ty as zebin::Archive>::Resolver });
@@ -41,7 +34,6 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
 }
 
 fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let include_schema = has_schema(record);
     let fields = record.fields.iter().enumerate().map(|(index, field)| {
         let state_ident = &field.state_ident;
         let ty = field.ty;
@@ -52,29 +44,15 @@ fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::T
         }
     });
 
-    let schema_field = if include_schema {
-        quote! { pub schema_id: ::core::option::Option<u32>, }
-    } else {
-        quote! {}
-    };
-
     quote! {
         pub struct #state_name<'a> {
             pub _marker: ::core::marker::PhantomData<&'a ()>,
-            #schema_field
             #(#fields)*
         }
     }
 }
 
 fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let include_schema = has_schema(record);
-    let schema_init = if include_schema {
-        quote! { schema_id: ::core::option::Option::None, }
-    } else {
-        quote! {}
-    };
-
     let fields = record.fields.iter().enumerate().map(|(index, field)| {
         let state_ident = &field.state_ident;
         let ty = field.ty;
@@ -87,13 +65,17 @@ fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     });
 
     quote! {
-        #schema_init
         _marker: ::core::marker::PhantomData,
         #(#fields)*
     }
 }
 
-fn layout_fields(record: &RecordSpec<'_>, archived_name: &syn::Ident) -> proc_macro2::TokenStream {
+fn layout_fields(
+    record: &RecordSpec<'_>,
+    archived_name: &syn::Ident,
+    stable_schema_key: &proc_macro2::TokenStream,
+    schema_revision: u32,
+) -> proc_macro2::TokenStream {
     if !has_schema(record) {
         return quote! {};
     }
@@ -113,9 +95,7 @@ fn layout_fields(record: &RecordSpec<'_>, archived_name: &syn::Ident) -> proc_ma
         let layout: &[zebin::LayoutField] = &[
             #(#entries),*
         ];
-        if self.schema_id.is_none() {
-            self.schema_id = Some(encoder.register_layout(layout)?);
-        }
+        encoder.register_layout(#stable_schema_key, #schema_revision, layout)?;
     }
 }
 
@@ -142,13 +122,9 @@ fn poll_steps(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
 }
 
 fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_macro2::TokenStream {
-    let include_schema = has_schema(record);
     match record.style {
         RecordStyle::Named => {
             let mut fields = Vec::new();
-            if include_schema {
-                fields.push(quote! { schema_id: self.schema_id.expect("schema_id registered before resolution") });
-            }
             for (index, _field) in record.fields.iter().enumerate() {
                 let ident = state_slot_ident(record, index);
                 fields.push(quote! {
@@ -159,11 +135,6 @@ fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_ma
         }
         RecordStyle::Unnamed => {
             let mut fields = Vec::new();
-            if include_schema {
-                fields.push(
-                    quote! { self.schema_id.expect("schema_id registered before resolution") },
-                );
-            }
             for (index, _field) in record.fields.iter().enumerate() {
                 let resolver_ident = resolver_slot_ident(record, index);
                 fields.push(quote! {
@@ -185,8 +156,14 @@ fn record_state_impl(
     resolver_name: &syn::Ident,
     record: &RecordSpec<'_>,
     archived_name: &syn::Ident,
+    stable_schema_key: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    let layout = layout_fields(record, archived_name);
+    let layout = layout_fields(
+        record,
+        archived_name,
+        stable_schema_key,
+        record.schema_revision,
+    );
     let polls = poll_steps(record);
     let resolver_expr = resolver_expr(record, resolver_name);
 
@@ -234,7 +211,21 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
     let state_name = state_name(name);
     let resolver_def = resolver_def(&resolver_name, record);
     let state_def = state_def(&state_name, record);
-    let state_impl = record_state_impl(&state_name, &resolver_name, record, &archived_name);
+    let stable_schema_key = if has_schema(record) {
+        let stable_schema_key = record
+            .stable_schema_key
+            .expect("schema-bearing records require an explicit stable schema key");
+        Some(quote! { #stable_schema_key })
+    } else {
+        None
+    };
+    let state_impl = record_state_impl(
+        &state_name,
+        &resolver_name,
+        record,
+        &archived_name,
+        &stable_schema_key.unwrap_or_else(|| quote! { 0 }),
+    );
     let init_fields = state_init(record);
 
     quote! {
@@ -269,7 +260,22 @@ fn variant_state_impl(
     let state = variant_state_name(enum_name, variant.ident);
     let resolver = variant_resolver_name(enum_name, variant.ident);
     let archived_name = crate::shared::variant_archived_name(enum_name, variant.ident);
-    record_state_impl(&state, &resolver, &variant.record, &archived_name)
+    let stable_schema_key = if has_schema(&variant.record) {
+        let stable_schema_key = variant
+            .record
+            .stable_schema_key
+            .expect("schema-bearing records require an explicit stable schema key");
+        Some(quote! { #stable_schema_key })
+    } else {
+        None
+    };
+    record_state_impl(
+        &state,
+        &resolver,
+        &variant.record,
+        &archived_name,
+        &stable_schema_key.unwrap_or_else(|| quote! { 0 }),
+    )
 }
 
 fn variant_resolver_def(
@@ -287,7 +293,6 @@ fn variant_begin_arm(
 ) -> proc_macro2::TokenStream {
     let state = variant_state_name(enum_name, variant.ident);
     let variant_ident = variant.ident;
-    let include_schema = has_schema(&variant.record);
     match variant.record.style {
         RecordStyle::Named => {
             let binders = variant
@@ -305,28 +310,14 @@ fn variant_begin_arm(
                     #ident: ::core::option::Option::None,
                 }
             });
-            if include_schema {
-                quote! {
-                    Self::#variant_ident { #(#binders),* } => {
-                        Ok(#state_name::#variant_ident(
-                            #state {
-                                _marker: ::core::marker::PhantomData,
-                                schema_id: ::core::option::Option::None,
-                                #(#init_fields)*
-                            }
-                        ))
-                    }
-                }
-            } else {
-                quote! {
-                    Self::#variant_ident { #(#binders),* } => {
-                        Ok(#state_name::#variant_ident(
-                            #state {
-                                _marker: ::core::marker::PhantomData,
-                                #(#init_fields)*
-                            }
-                        ))
-                    }
+            quote! {
+                Self::#variant_ident { #(#binders),* } => {
+                    Ok(#state_name::#variant_ident(
+                        #state {
+                            _marker: ::core::marker::PhantomData,
+                            #(#init_fields)*
+                        }
+                    ))
                 }
             }
         }
@@ -351,28 +342,14 @@ fn variant_begin_arm(
                         #binder: ::core::option::Option::None,
                     }
                 });
-            if include_schema {
-                quote! {
-                    Self::#variant_ident( #(#binders),* ) => {
-                        Ok(#state_name::#variant_ident(
-                            #state {
-                                _marker: ::core::marker::PhantomData,
-                                schema_id: ::core::option::Option::None,
-                                #(#init_fields)*
-                            }
-                        ))
-                    }
-                }
-            } else {
-                quote! {
-                    Self::#variant_ident( #(#binders),* ) => {
-                        Ok(#state_name::#variant_ident(
-                            #state {
-                                _marker: ::core::marker::PhantomData,
-                                #(#init_fields)*
-                            }
-                        ))
-                    }
+            quote! {
+                Self::#variant_ident( #(#binders),* ) => {
+                    Ok(#state_name::#variant_ident(
+                        #state {
+                            _marker: ::core::marker::PhantomData,
+                            #(#init_fields)*
+                        }
+                    ))
                 }
             }
         }

@@ -10,7 +10,7 @@ use alloc::{
 };
 use core::{num::NonZeroUsize, task::Poll};
 
-use crate::core::schema::LayoutField;
+use crate::core::schema::{LayoutField, SchemaRevision, StableSchemaKey};
 
 /// Archived-side binary layout contract.
 pub trait ArchivedLayout {
@@ -79,7 +79,11 @@ pub trait ArchivedValidationContext {
 
     fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError>;
 
-    fn layout(&self, schema_id: u32) -> Result<crate::core::schema::LayoutView<'_>, ZebinError>;
+    fn layout(
+        &self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+    ) -> Result<crate::core::schema::LayoutView<'_>, ZebinError>;
 }
 
 /// RAII guard that restores validation depth when dropped.
@@ -169,8 +173,13 @@ pub trait ByteSink {
 
 /// Layout registration sink used by archive state machines.
 pub trait LayoutSink {
-    /// Register a layout descriptor for the current object and return its schema id.
-    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError>;
+    /// Register a layout descriptor for the current object.
+    fn register_layout(
+        &mut self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+        layout: &[LayoutField],
+    ) -> Result<(), ZebinError>;
 }
 
 /// Trait for resumable archive construction states.

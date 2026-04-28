@@ -4,7 +4,7 @@ use alloc::string::ToString;
 
 use crate::{
     ZebinError,
-    core::schema::{LayoutDirectory, LayoutView},
+    core::schema::{LayoutDirectory, LayoutView, SchemaRevision, StableSchemaKey},
     traits::ArchivedValidationContext,
 };
 
@@ -126,12 +126,16 @@ impl<'a> Validator<'a> {
         self.data
     }
 
-    pub fn layout(&self, schema_id: u32) -> Result<LayoutView<'a>, ZebinError> {
+    pub fn layout(
+        &self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+    ) -> Result<LayoutView<'a>, ZebinError> {
         let layouts = self.layouts.ok_or_else(|| ZebinError::ValidationError {
             message: "Missing layout directory".to_string(),
             pos: 0,
         })?;
-        layouts.lookup(schema_id)
+        layouts.lookup(stable_schema_key, schema_revision)
     }
 }
 
@@ -152,7 +156,11 @@ impl<'a> ArchivedValidationContext for Validator<'a> {
         Validator::check_alignment(self, ptr, alignment)
     }
 
-    fn layout(&self, schema_id: u32) -> Result<LayoutView<'a>, ZebinError> {
-        Validator::layout(self, schema_id)
+    fn layout(
+        &self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+    ) -> Result<LayoutView<'a>, ZebinError> {
+        Validator::layout(self, stable_schema_key, schema_revision)
     }
 }

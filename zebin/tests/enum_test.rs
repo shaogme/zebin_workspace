@@ -9,12 +9,14 @@ enum UnitMode {
 #[derive(ZebinArchive, ZebinArchiveBuilder)]
 enum TuplePacket {
     Empty,
+    #[zebin(schema_key = 573785173)]
     Data(#[zebin(id = 0)] u32, #[zebin(id = 1)] String),
 }
 
 #[derive(ZebinArchive, ZebinArchiveBuilder)]
 enum StructPacket {
     Ping,
+    #[zebin(schema_key = 1432778632)]
     Data {
         #[zebin(id = 0)]
         code: u32,
@@ -127,7 +129,7 @@ fn test_enum_layout_mismatch_rejected() {
             .unwrap(),
     ) as usize;
     let layout0_pos = layout_offset + layout0_offset;
-    let field0_offset_pos = layout0_pos + 10;
+    let field0_offset_pos = layout0_pos + 14;
     let field0_offset = u16::from_le_bytes(
         buf[field0_offset_pos..field0_offset_pos + 2]
             .try_into()

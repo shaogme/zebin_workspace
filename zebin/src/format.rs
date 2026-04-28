@@ -70,6 +70,7 @@ impl ArchiveHeader {
         }
 
         let version = bytes[2];
+        let flags = bytes[3];
         if version != ARCHIVE_VERSION {
             return Err(ZebinError::ValidationError {
                 message: format!("Unsupported archive version {}", version),
@@ -77,7 +78,6 @@ impl ArchiveHeader {
             });
         }
 
-        let flags = bytes[3];
         let layout_offset = NonZeroU32::new(u32::from_le_bytes(read_fixed::<4>(
             bytes,
             4,

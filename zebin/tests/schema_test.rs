@@ -1,6 +1,8 @@
 use zebin::{ZebinArchive, ZebinArchiveBuilder};
 
 #[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[zebin(schema_key = 324478056)]
+#[zebin(revision = 3)]
 pub struct VersionedUser {
     #[zebin(id = 1)]
     pub id: u64,
@@ -39,22 +41,26 @@ fn test_vtable_generation() {
     );
     let layout0_pos = (layout_offset + layout0_offset) as usize;
 
-    // Layout entry: schema_id (4) + field_count (2) + reserved (2) + 3 field records.
-    let schema_id = u32::from_le_bytes(buf[layout0_pos..layout0_pos + 4].try_into().unwrap());
-    assert_eq!(schema_id, 0);
+    // Layout entry: stable_schema_key (4) + schema_revision (4) + field_count (2) + reserved (2) + 3 field records.
+    let stable_schema_key =
+        u32::from_le_bytes(buf[layout0_pos..layout0_pos + 4].try_into().unwrap());
+    assert_eq!(stable_schema_key, 324478056);
+    let schema_revision =
+        u32::from_le_bytes(buf[layout0_pos + 4..layout0_pos + 8].try_into().unwrap());
+    assert_eq!(schema_revision, 3);
 
-    let num_fields = u16::from_le_bytes(buf[layout0_pos + 4..layout0_pos + 6].try_into().unwrap());
+    let num_fields = u16::from_le_bytes(buf[layout0_pos + 8..layout0_pos + 10].try_into().unwrap());
     assert_eq!(num_fields, 3);
 
-    let field0_id = u16::from_le_bytes(buf[layout0_pos + 8..layout0_pos + 10].try_into().unwrap());
+    let field0_id = u16::from_le_bytes(buf[layout0_pos + 12..layout0_pos + 14].try_into().unwrap());
     let field0_offset =
-        u16::from_le_bytes(buf[layout0_pos + 10..layout0_pos + 12].try_into().unwrap());
-    let field1_id = u16::from_le_bytes(buf[layout0_pos + 12..layout0_pos + 14].try_into().unwrap());
-    let field1_offset =
         u16::from_le_bytes(buf[layout0_pos + 14..layout0_pos + 16].try_into().unwrap());
-    let field2_id = u16::from_le_bytes(buf[layout0_pos + 16..layout0_pos + 18].try_into().unwrap());
-    let field2_offset =
+    let field1_id = u16::from_le_bytes(buf[layout0_pos + 16..layout0_pos + 18].try_into().unwrap());
+    let field1_offset =
         u16::from_le_bytes(buf[layout0_pos + 18..layout0_pos + 20].try_into().unwrap());
+    let field2_id = u16::from_le_bytes(buf[layout0_pos + 20..layout0_pos + 22].try_into().unwrap());
+    let field2_offset =
+        u16::from_le_bytes(buf[layout0_pos + 22..layout0_pos + 24].try_into().unwrap());
 
     use zebin::memoffset::offset_of;
     assert_eq!(field0_id, 0);
@@ -84,7 +90,7 @@ fn test_safe_access() {
     let buf = zebin::encode(&user).unwrap();
 
     let archived = zebin::decode::<VersionedUser>(&buf).expect("Failed to validate archive");
-    assert_eq!(archived.schema_id, 0);
+    assert_eq!(archived.stable_schema_key, 324478056);
     assert_eq!(archived.id, 101);
     assert_eq!(archived.age, 30);
     unsafe {

@@ -1,6 +1,7 @@
 use zebin::{ZebinArchive, ZebinArchiveBuilder};
 
 #[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[zebin(schema_key = 860116326)]
 pub struct Child {
     #[zebin(id = 0)]
     pub value: u32,

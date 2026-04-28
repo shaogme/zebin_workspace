@@ -1,18 +1,14 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{DeriveInput, Index, Member};
+use syn::{DeriveInput, Member};
 
 use crate::shared::{
-    ItemSpec, RecordSpec, RecordStyle, VariantSpec, archived_name, has_schema, parse_item,
-    payload_name, user_member, variant_archived_name, variant_field_name, variant_method_name,
+    ItemSpec, RecordSpec, RecordStyle, VariantSpec, archived_name, has_schema, input_member,
+    parse_item, payload_name, user_member, variant_archived_name, variant_field_name,
+    variant_method_name,
 };
 
 // --- Helper Functions for Code Generation ---
-
-fn schema_access_expr(record: &RecordSpec<'_>, ident: &syn::Ident) -> proc_macro2::TokenStream {
-    let member = schema_member(record);
-    quote! { #ident.#member }
-}
 
 fn record_schema_field(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStream> {
     if !has_schema(record) {
@@ -20,7 +16,7 @@ fn record_schema_field(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStre
     }
 
     Some(match record.style {
-        RecordStyle::Named => quote! { pub schema_id: u32 },
+        RecordStyle::Named => quote! { pub stable_schema_key: u32 },
         RecordStyle::Unnamed => quote! { pub u32 },
         RecordStyle::Unit => unreachable!("unit never has schema"),
     })
@@ -99,7 +95,7 @@ fn record_schema_write(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStre
     Some(match record.style {
         RecordStyle::Named => quote! {
             <u32 as zebin::ArchivedLayout>::write_archived_bytes(
-                &archived.schema_id,
+                &archived.stable_schema_key,
                 &mut out[0..::core::mem::size_of::<u32>()],
             );
         },
@@ -121,7 +117,25 @@ fn helper_accessors(
         return quote! {};
     }
 
-    let schema_expr = schema_access_expr(record, &format_ident!("self"));
+    let stable_schema_key = record
+        .stable_schema_key
+        .expect("schema-bearing records require an explicit stable schema key");
+    let schema_revision = record.schema_revision;
+    let layout_fields: Vec<_> = record
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(field_index, field)| {
+            let field_id = field.field_id.expect("field ids are validated above");
+            let member = record_field_member(record, field_index);
+            quote! {
+                zebin::LayoutField {
+                    field_id: #field_id,
+                    offset: zebin::memoffset::offset_of!(#archived_name, #member) as u16,
+                }
+            }
+        })
+        .collect();
     let methods = record.fields.iter().enumerate().map(|(index, field)| {
         let ty = field.ty;
         let field_id = field.field_id.expect("field ids are validated above");
@@ -139,7 +153,7 @@ fn helper_accessors(
                         pos: 4,
                     })?,
                 );
-                let layout = layout_dir.lookup(#schema_expr)?;
+                let layout = layout_dir.lookup(#stable_schema_key, #schema_revision)?;
                 let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ZebinError::ValidationError {
                     message: format!("Field ID {} not found in layout", #field_id),
                     pos: self as *const _ as usize,
@@ -151,6 +165,9 @@ fn helper_accessors(
 
     quote! {
         impl #archived_name {
+            pub const LAYOUT_FIELDS: &'static [zebin::LayoutField] = &[
+                #(#layout_fields),*
+            ];
             #(#methods)*
         }
     }
@@ -167,18 +184,21 @@ fn helper_bytes_impl(
     writes.extend(record_field_inits(record, archived_name));
 
     let layout_checks = if has_schema(record) {
-        let schema_expr = schema_access_expr(record, &format_ident!("archived"));
-        let checks = record.fields.iter().enumerate().map(|(index, field)| {
+        let stable_schema_key = record
+            .stable_schema_key
+            .expect("schema-bearing records require an explicit stable schema key");
+        let schema_revision = record.schema_revision;
+        let checks: Vec<_> = record.fields.iter().enumerate().map(|(index, field)| {
             let field_id = field.field_id.expect("field ids are validated above");
             let member = record_field_member(record, index);
             quote! {
                 layout.check_field(#field_id, zebin::memoffset::offset_of!(#archived_name, #member) as u16)?;
             }
-        });
+        }).collect();
 
         quote! {
             let archived = unsafe { &*ptr };
-            let layout = context.layout(#schema_expr)?;
+            let layout = context.layout(#stable_schema_key, #schema_revision)?;
             #(#checks)*
         }
     } else {
@@ -221,16 +241,6 @@ fn helper_bytes_impl(
                 Ok(())
             }
         }
-    }
-}
-
-// --- Unified Record Implementation ---
-
-fn schema_member(record: &RecordSpec<'_>) -> Member {
-    match record.style {
-        RecordStyle::Named => Member::Named(format_ident!("schema_id")),
-        RecordStyle::Unnamed => Member::Unnamed(Index::from(0)),
-        RecordStyle::Unit => unreachable!("unit has no schema field"),
     }
 }
 
@@ -278,19 +288,28 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
     let resolver_name = crate::shared::resolver_name(name);
     let include_schema = has_schema(record);
     let helper = helper_record(&archived_name, record);
+    let stable_schema_key = if include_schema {
+        let stable_schema_key = record
+            .stable_schema_key
+            .expect("schema-bearing records require an explicit stable schema key");
+        Some(quote! { #stable_schema_key })
+    } else {
+        None
+    };
 
     let resolve_expr = match record.style {
         RecordStyle::Named => {
             let mut fields = Vec::new();
-            if include_schema {
-                fields.push(quote! { schema_id: resolver.schema_id });
+            if let Some(stable_schema_key) = &stable_schema_key {
+                fields.push(quote! { stable_schema_key: #stable_schema_key });
             }
             for (index, field) in record.fields.iter().enumerate() {
                 let ident = field.ident.expect("named field has ident");
-                let member = user_member(record, index);
+                let source_member = input_member(record, index);
+                let archived_member = user_member(record, index);
                 fields.push(quote! {
-                    #ident: self.#member.resolve(
-                        pos + zebin::memoffset::offset_of!(#archived_name, #member),
+                    #ident: self.#source_member.resolve(
+                        pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
                         resolver.#ident
                     )?
                 });
@@ -299,15 +318,16 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
         }
         RecordStyle::Unnamed => {
             let mut items = Vec::new();
-            if include_schema {
-                items.push(quote! { resolver.0 });
+            if let Some(stable_schema_key) = &stable_schema_key {
+                items.push(quote! { #stable_schema_key });
             }
             for (index, _field) in record.fields.iter().enumerate() {
-                let member = user_member(record, index);
+                let source_member = input_member(record, index);
+                let archived_member = user_member(record, index);
                 items.push(quote! {
-                    self.#member.resolve(
-                        pos + zebin::memoffset::offset_of!(#archived_name, #member),
-                        resolver.#member
+                    self.#source_member.resolve(
+                        pos + zebin::memoffset::offset_of!(#archived_name, #archived_member),
+                        resolver.#source_member
                     )?
                 });
             }
@@ -352,6 +372,15 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         let helper_name = variant_archived_name(name, variant.ident);
         variant_defs.push(helper_record(&helper_name, &variant.record));
         let payload_field_ident = variant_field_name(variant.ident);
+        let helper_stable_schema_key = if has_schema(&variant.record) {
+            let helper_stable_schema_key = variant
+                .record
+                .stable_schema_key
+                .expect("schema-bearing records require an explicit stable schema key");
+            Some(quote! { #helper_stable_schema_key })
+        } else {
+            None
+        };
         variant_payload_fields.push(quote! {
             #payload_field_ident: ::core::mem::ManuallyDrop<#helper_name>
         });
@@ -396,7 +425,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         });
 
         let record = &variant.record;
-        let include_schema = has_schema(record);
         let variant_ident = variant.ident;
         let payload_offset = quote! { zebin::memoffset::offset_of!(#archived_name, payload) };
 
@@ -422,33 +450,35 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         let resolver_pattern = quote! { #resolver_name::#variant_ident(resolver) };
 
         let mut fields = Vec::new();
-        if include_schema {
+        if let Some(helper_stable_schema_key) = &helper_stable_schema_key {
             match record.style {
-                RecordStyle::Named => fields.push(quote! { schema_id: resolver.schema_id }),
-                RecordStyle::Unnamed => fields.push(quote! { resolver.0 }),
+                RecordStyle::Named => {
+                    fields.push(quote! { stable_schema_key: #helper_stable_schema_key })
+                }
+                RecordStyle::Unnamed => fields.push(quote! { #helper_stable_schema_key }),
                 RecordStyle::Unit => {}
             }
         }
         for (field_index, field) in record.fields.iter().enumerate() {
-            let member = user_member(record, field_index);
+            let archived_member = user_member(record, field_index);
             match record.style {
                 RecordStyle::Named => {
                     let ident = field.ident.expect("named field has ident");
-                    let resolver_member = user_member(record, field_index);
+                    let resolver_member = input_member(record, field_index);
                     fields.push(quote! {
                         #ident: #ident.resolve(
-                            pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #member),
+                            pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
                             resolver.#resolver_member
                         )?
                     });
                 }
                 RecordStyle::Unnamed => {
                     let value_ident = format_ident!("field{}", field_index);
-                    let resolver_member = user_member(record, field_index);
+                    let source_member = input_member(record, field_index);
                     fields.push(quote! {
                         #value_ident.resolve(
-                            pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #member),
-                            resolver.#resolver_member
+                            pos + #payload_offset + zebin::memoffset::offset_of!(#helper_name, #archived_member),
+                            resolver.#source_member
                         )?
                     });
                 }
