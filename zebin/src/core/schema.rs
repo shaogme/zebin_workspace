@@ -18,7 +18,7 @@ pub type SchemaRevision = u32;
 pub enum ObjectEncoding {
     #[default]
     Fixed = 0,
-    Mixed = 1,
+    SchemaAware = 1,
     VarInt = 2,
     Packed = 3,
 }
@@ -123,7 +123,7 @@ impl<'a> LayoutView<'a> {
             .copied()
             .unwrap_or_default()
         {
-            1 => ObjectEncoding::Mixed,
+            1 => ObjectEncoding::SchemaAware,
             2 => ObjectEncoding::VarInt,
             3 => ObjectEncoding::Packed,
             _ => ObjectEncoding::Fixed,

@@ -1,7 +1,7 @@
 use alloc::{
     borrow::{Cow, ToOwned},
-    boxed::Box,
     collections::VecDeque,
+    format,
     rc::Rc,
     string::{String, ToString},
     sync::Arc,
@@ -13,17 +13,49 @@ use core::{num::NonZeroUsize, task::Poll};
 use crate::core::schema::{LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey};
 use crate::utils::byteops;
 
+/// A single segment in a validation path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ValidationPathSegment {
+    Field(&'static str),
+    Index(usize),
+    Variant(&'static str),
+}
+
+/// RAII guard that restores validation path state when dropped.
+pub struct ValidationPathGuard<'a, C: ValidationContext + ?Sized> {
+    context: &'a mut C,
+}
+
+impl<'a, C: ValidationContext + ?Sized> Drop for ValidationPathGuard<'a, C> {
+    fn drop(&mut self) {
+        self.context.pop_path_segment();
+    }
+}
+
+impl<'a, C: ValidationContext + ?Sized> core::ops::Deref for ValidationPathGuard<'a, C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        self.context
+    }
+}
+
+impl<'a, C: ValidationContext + ?Sized> core::ops::DerefMut for ValidationPathGuard<'a, C> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.context
+    }
+}
+
 /// Archived-side binary layout contract.
-pub trait ArchivedLayout: Sized {
+pub trait Layout: Sized {
     /// The alignment requirement for the archived representation.
     const ALIGNMENT: NonZeroUsize;
 
     /// Object encoding family used in schema metadata and archive flags.
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Fixed;
+    const ENCODING: ObjectEncoding = ObjectEncoding::Fixed;
 
     /// Optional byte width used when the archived form is not a plain fixed-size overlay.
-    fn encoded_len(archived: &Self) -> usize {
-        let _ = archived;
+    fn size_hint(&self) -> usize {
         core::mem::size_of::<Self>()
     }
 
@@ -32,19 +64,19 @@ pub trait ArchivedLayout: Sized {
 
     /// Convert an archived value to a freshly allocated byte vector.
     fn archived_bytes(archived: &Self) -> Vec<u8> {
-        let mut out = vec![0u8; Self::encoded_len(archived)];
+        let mut out = vec![0u8; archived.size_hint()];
         Self::write_archived_bytes(archived, &mut out);
         out
     }
 }
 
 /// Archived-side validation contract.
-pub trait ArchivedValidate {
+pub trait Validate {
     /// Validate an archived value in-place.
     ///
     /// # Safety
     /// The pointer must point to a valid memory location that can be read.
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         _ptr: *const Self,
         _context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -53,7 +85,7 @@ pub trait ArchivedValidate {
 }
 
 /// Archived-side decode contract for borrowing a validated view from bytes.
-pub trait ArchivedDecode<'a> {
+pub trait Access<'a>: Sized {
     type View: 'a;
 
     /// Decode a borrowed view from a validated archived pointer.
@@ -62,40 +94,16 @@ pub trait ArchivedDecode<'a> {
     ///
     /// # Safety
     /// `ptr` must point to the first byte of a readable archived value at `context`'s current archive.
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError>;
 }
 
-macro_rules! impl_archived_decode_fixed_primitive {
-    ($($t:ty),* $(,)?) => {
-        $(
-            impl<'a> ArchivedDecode<'a> for $t {
-                type View = &'a Self;
-
-                unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
-                    ptr: *const u8,
-                    context: &mut C,
-                ) -> Result<(Self::View, usize), ZebinError> {
-                    context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-                    let typed_ptr = ptr as *const Self;
-                    unsafe { <$t as ArchivedValidate>::validate(typed_ptr, context)?; }
-                    Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
-                }
-            }
-        )*
-    };
-}
-
-impl_archived_decode_fixed_primitive!(
-    u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64, bool
-);
-
 /// Object model layer: type-level archive/serialize/validate contracts.
 pub trait Archive {
     /// The archived version of this type.
-    type Archived: ArchivedLayout + ArchivedValidate;
+    type Archived: Layout + Validate;
     /// The resolver used to construct the archived version.
     type Resolver;
 
@@ -108,12 +116,12 @@ pub trait Archive {
 }
 
 /// Convert an archived value to a freshly allocated byte vector.
-pub fn archived_bytes<T: ArchivedLayout>(archived: &T) -> Vec<u8> {
+pub fn archived_bytes<T: Layout>(archived: &T) -> Vec<u8> {
     T::archived_bytes(archived)
 }
 
 /// Validation context used by archived representations.
-pub trait ArchivedValidationContext {
+pub trait ValidationContext {
     fn push_depth(&mut self) -> Result<(), ZebinError>;
 
     fn pop_depth(&mut self);
@@ -126,6 +134,35 @@ pub trait ArchivedValidationContext {
 
     fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError>;
 
+    fn push_path_segment(
+        &mut self,
+        segment: ValidationPathSegment,
+    ) -> Result<ValidationPathGuard<'_, Self>, ZebinError> {
+        self.push_path_segment_raw(segment);
+        Ok(ValidationPathGuard { context: self })
+    }
+
+    fn push_path_segment_raw(&mut self, segment: ValidationPathSegment);
+
+    fn pop_path_segment(&mut self);
+
+    fn path(&self) -> &[ValidationPathSegment];
+
+    fn validation_error(&self, message: impl Into<String>, pos: usize) -> ZebinError {
+        let path = self.path();
+        if path.is_empty() {
+            ZebinError::ValidationError {
+                message: message.into(),
+                pos,
+            }
+        } else {
+            ZebinError::ValidationError {
+                message: format_path_message(path, message.into()),
+                pos,
+            }
+        }
+    }
+
     fn resolved_layout(
         &mut self,
         stable_schema_key: StableSchemaKey,
@@ -134,11 +171,11 @@ pub trait ArchivedValidationContext {
 }
 
 /// RAII guard that restores validation depth when dropped.
-pub struct ArchivedDepthGuard<'a, C: ArchivedValidationContext + ?Sized> {
+pub struct ArchivedDepthGuard<'a, C: ValidationContext + ?Sized> {
     context: &'a mut C,
 }
 
-impl<'a, C: ArchivedValidationContext + ?Sized> ArchivedDepthGuard<'a, C> {
+impl<'a, C: ValidationContext + ?Sized> ArchivedDepthGuard<'a, C> {
     pub fn new(context: &'a mut C) -> Result<Self, ZebinError> {
         context.push_depth()?;
         Ok(Self { context })
@@ -157,7 +194,40 @@ impl<'a, C: ArchivedValidationContext + ?Sized> ArchivedDepthGuard<'a, C> {
     }
 }
 
-impl<'a, C: ArchivedValidationContext + ?Sized> core::ops::Deref for ArchivedDepthGuard<'a, C> {
+fn format_path_message(path: &[ValidationPathSegment], message: String) -> String {
+    use alloc::string::ToString;
+
+    let mut prefix = String::new();
+    for segment in path {
+        match segment {
+            ValidationPathSegment::Field(name) => {
+                if !prefix.is_empty() {
+                    prefix.push('.');
+                }
+                prefix.push_str(name);
+            }
+            ValidationPathSegment::Index(index) => {
+                prefix.push('[');
+                prefix.push_str(&index.to_string());
+                prefix.push(']');
+            }
+            ValidationPathSegment::Variant(name) => {
+                if !prefix.is_empty() {
+                    prefix.push_str("::");
+                }
+                prefix.push_str(name);
+            }
+        }
+    }
+
+    if prefix.is_empty() {
+        message
+    } else {
+        format!("{prefix}: {message}")
+    }
+}
+
+impl<'a, C: ValidationContext + ?Sized> core::ops::Deref for ArchivedDepthGuard<'a, C> {
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
@@ -165,13 +235,13 @@ impl<'a, C: ArchivedValidationContext + ?Sized> core::ops::Deref for ArchivedDep
     }
 }
 
-impl<'a, C: ArchivedValidationContext + ?Sized> core::ops::DerefMut for ArchivedDepthGuard<'a, C> {
+impl<'a, C: ValidationContext + ?Sized> core::ops::DerefMut for ArchivedDepthGuard<'a, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.context
     }
 }
 
-impl<'a, C: ArchivedValidationContext + ?Sized> Drop for ArchivedDepthGuard<'a, C> {
+impl<'a, C: ValidationContext + ?Sized> Drop for ArchivedDepthGuard<'a, C> {
     fn drop(&mut self) {
         self.context.pop_depth();
     }
@@ -251,7 +321,7 @@ pub trait LayoutSink {
 }
 
 /// Trait for resumable archive construction states.
-pub trait ArchiveState {
+pub trait SerializeState {
     type Resolver;
 
     fn poll<E: ByteSink + LayoutSink + ?Sized>(
@@ -261,12 +331,12 @@ pub trait ArchiveState {
 }
 
 /// Trait for types that can create resumable archive states.
-pub trait ArchiveBuilder: Archive {
-    type State<'a>: ArchiveState<Resolver = Self::Resolver>
+pub trait Serialize: Archive {
+    type State<'a>: SerializeState<Resolver = Self::Resolver>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError>;
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError>;
 }
 
 /// Source of indexed sequence items.
@@ -320,7 +390,7 @@ impl<T> SequenceSource<T> for VecDeque<T> {
     }
 }
 
-impl<T: ArchivedLayout, const N: usize> ArchivedLayout for [T; N] {
+impl<T: Layout, const N: usize> Layout for [T; N] {
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -337,8 +407,8 @@ impl<T: ArchivedLayout, const N: usize> ArchivedLayout for [T; N] {
     }
 }
 
-impl<T: ArchivedLayout + ArchivedValidate, const N: usize> ArchivedValidate for [T; N] {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -355,7 +425,9 @@ impl<T: ArchivedLayout + ArchivedValidate, const N: usize> ArchivedValidate for 
                 unsafe { data_ptr.add(index) }
             };
             unsafe {
-                T::validate(element_ptr, &mut *guard)?;
+                let mut path_guard =
+                    guard.push_path_segment(ValidationPathSegment::Index(index))?;
+                T::validate(element_ptr, &mut *path_guard)?;
             }
         }
 
@@ -363,19 +435,19 @@ impl<T: ArchivedLayout + ArchivedValidate, const N: usize> ArchivedValidate for 
     }
 }
 
-impl<'a, T, const N: usize> ArchivedDecode<'a> for [T; N]
+impl<'a, T, const N: usize> Access<'a> for [T; N]
 where
-    T: ArchivedLayout + ArchivedValidate + 'a,
+    T: Layout + Validate + 'a,
 {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -413,7 +485,7 @@ impl<const N: usize> ByteState<N> {
     }
 }
 
-impl<const N: usize> ArchiveState for ByteState<N> {
+impl<const N: usize> SerializeState for ByteState<N> {
     type Resolver = ();
 
     fn poll<E: ByteSink + LayoutSink + ?Sized>(
@@ -441,7 +513,7 @@ impl<const N: usize> ArchiveState for ByteState<N> {
 macro_rules! impl_archive_for_primitive {
     ($($t:ty),* $(,)?) => {
         $(
-            impl ArchivedLayout for $t {
+            impl Layout for $t {
                 const ALIGNMENT: NonZeroUsize = unsafe {
                     NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                 };
@@ -451,7 +523,21 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl ArchivedValidate for $t {}
+            impl Validate for $t {}
+
+            impl<'a> Access<'a> for $t {
+                type View = &'a Self;
+
+                unsafe fn access<C: ValidationContext + ?Sized>(
+                    ptr: *const u8,
+                    context: &mut C,
+                ) -> Result<(Self::View, usize), ZebinError> {
+                    context.check_range(ptr, core::mem::size_of::<Self>())?;
+                    let typed_ptr = ptr as *const Self;
+                    unsafe { <$t as Validate>::validate(typed_ptr, context)?; }
+                    Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+                }
+            }
 
             impl Archive for $t {
                 type Archived = $t;
@@ -462,10 +548,10 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl ArchiveBuilder for $t {
+            impl Serialize for $t {
                 type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
 
-                fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+                fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
                     Ok(ByteState::new(
                         self.to_le_bytes(),
                         unsafe {
@@ -480,7 +566,7 @@ macro_rules! impl_archive_for_primitive {
 
 impl_archive_for_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
-impl ArchivedLayout for bool {
+impl Layout for bool {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -488,8 +574,8 @@ impl ArchivedLayout for bool {
     }
 }
 
-impl ArchivedValidate for bool {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+impl Validate for bool {
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         _context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -501,6 +587,22 @@ impl ArchivedValidate for bool {
             });
         }
         Ok(())
+    }
+}
+
+impl<'a> Access<'a> for bool {
+    type View = &'a Self;
+
+    unsafe fn access<C: ValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError> {
+        context.check_range(ptr, core::mem::size_of::<Self>())?;
+        let typed_ptr = ptr as *const Self;
+        unsafe {
+            <Self as Validate>::validate(typed_ptr, context)?;
+        }
+        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 
@@ -517,13 +619,13 @@ impl Archive for bool {
     }
 }
 
-impl ArchiveBuilder for bool {
+impl Serialize for bool {
     type State<'a>
         = ByteState<1>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ByteState::new([*self as u8], NonZeroUsize::new(1).unwrap()))
     }
 }
@@ -544,17 +646,17 @@ where
     }
 }
 
-impl<T> ArchiveBuilder for Box<T>
+impl<T> Serialize for Box<T>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
-        = <T as ArchiveBuilder>::State<'a>
+        = <T as Serialize>::State<'a>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_serialize()
     }
 }
 
@@ -574,17 +676,17 @@ where
     }
 }
 
-impl<T> ArchiveBuilder for Rc<T>
+impl<T> Serialize for Rc<T>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
-        = <T as ArchiveBuilder>::State<'a>
+        = <T as Serialize>::State<'a>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_serialize()
     }
 }
 
@@ -604,17 +706,17 @@ where
     }
 }
 
-impl<T> ArchiveBuilder for Arc<T>
+impl<T> Serialize for Arc<T>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
-        = <T as ArchiveBuilder>::State<'a>
+        = <T as Serialize>::State<'a>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_serialize()
     }
 }
 
@@ -634,16 +736,16 @@ where
     }
 }
 
-impl<'a, B> ArchiveBuilder for Cow<'a, B>
+impl<'a, B> Serialize for Cow<'a, B>
 where
-    B: ?Sized + ToOwned + ArchiveBuilder + Archive,
+    B: ?Sized + ToOwned + Serialize + Archive,
 {
     type State<'b>
-        = <B as ArchiveBuilder>::State<'b>
+        = <B as Serialize>::State<'b>
     where
         Self: 'b;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin()
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_serialize()
     }
 }

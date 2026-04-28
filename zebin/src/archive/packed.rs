@@ -7,8 +7,8 @@ use crate::{
     ZebinError,
     core::rel_ptr::RelPtr,
     traits::{
-        Archive, ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedLayout, ArchivedValidate,
-        ArchivedValidationContext, ByteSink, LayoutSink,
+        Access, Archive, ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate,
+        ValidationContext,
     },
     utils::{
         byteops,
@@ -145,7 +145,7 @@ impl ArchivedPackedBoolSlice {
     }
 }
 
-impl ArchivedLayout for ArchivedPackedBoolSlice {
+impl Layout for ArchivedPackedBoolSlice {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -153,12 +153,12 @@ impl ArchivedLayout for ArchivedPackedBoolSlice {
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }
-        <u32 as ArchivedLayout>::write_archived_bytes(&archived.len, &mut out[8..12]);
+        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
     }
 }
 
-impl ArchivedValidate for ArchivedPackedBoolSlice {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+impl Validate for ArchivedPackedBoolSlice {
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -191,16 +191,16 @@ impl ArchivedValidate for ArchivedPackedBoolSlice {
     }
 }
 
-impl<'a> ArchivedDecode<'a> for ArchivedPackedBoolSlice {
+impl<'a> Access<'a> for ArchivedPackedBoolSlice {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -250,7 +250,7 @@ impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
     }
 }
 
-impl<const BITS: u8> ArchivedLayout for ArchivedPackedU8Slice<BITS> {
+impl<const BITS: u8> Layout for ArchivedPackedU8Slice<BITS> {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -258,12 +258,12 @@ impl<const BITS: u8> ArchivedLayout for ArchivedPackedU8Slice<BITS> {
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }
-        <u32 as ArchivedLayout>::write_archived_bytes(&archived.len, &mut out[8..12]);
+        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
     }
 }
 
-impl<const BITS: u8> ArchivedValidate for ArchivedPackedU8Slice<BITS> {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -315,16 +315,16 @@ impl<const BITS: u8> ArchivedValidate for ArchivedPackedU8Slice<BITS> {
     }
 }
 
-impl<'a, const BITS: u8> ArchivedDecode<'a> for ArchivedPackedU8Slice<BITS> {
+impl<'a, const BITS: u8> Access<'a> for ArchivedPackedU8Slice<BITS> {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -348,7 +348,7 @@ impl PackedSequenceState {
     }
 }
 
-impl ArchiveState for PackedSequenceState {
+impl SerializeState for PackedSequenceState {
     type Resolver = usize;
 
     fn poll<E: ByteSink + LayoutSink + ?Sized>(
@@ -427,13 +427,6 @@ impl<T, const BITS: u8> PackedVec<T, BITS> {
         Self { values }
     }
 
-    pub fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self::new(iter.into_iter().collect())
-    }
-
-    pub fn into_iter(self) -> alloc::vec::IntoIter<T> {
-        self.values.into_iter()
-    }
 
     pub fn values(&self) -> &[T] {
         self.values.as_slice()
@@ -495,13 +488,13 @@ impl Archive for PackedSlice<'_, bool, 1> {
     }
 }
 
-impl ArchiveBuilder for PackedSlice<'_, bool, 1> {
+impl Serialize for PackedSlice<'_, bool, 1> {
     type State<'a>
         = PackedSequenceState
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(PackedSequenceState::new(pack_bools(self.values)))
     }
 }
@@ -527,13 +520,13 @@ impl Archive for PackedVec<bool, 1> {
     }
 }
 
-impl ArchiveBuilder for PackedVec<bool, 1> {
+impl Serialize for PackedVec<bool, 1> {
     type State<'a>
         = PackedSequenceState
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(PackedSequenceState::new(pack_bools(self.values.as_slice())))
     }
 }
@@ -559,13 +552,13 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
     }
 }
 
-impl<const BITS: u8> ArchiveBuilder for PackedSlice<'_, u8, BITS> {
+impl<const BITS: u8> Serialize for PackedSlice<'_, u8, BITS> {
     type State<'a>
         = PackedSequenceState
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(PackedSequenceState::new(pack_small_values(
             self.values,
             usize::from(BITS),
@@ -594,13 +587,13 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
     }
 }
 
-impl<const BITS: u8> ArchiveBuilder for PackedVec<u8, BITS> {
+impl<const BITS: u8> Serialize for PackedVec<u8, BITS> {
     type State<'a>
         = PackedSequenceState
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(PackedSequenceState::new(pack_small_values(
             self.values.as_slice(),
             usize::from(BITS),

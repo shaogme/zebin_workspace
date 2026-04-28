@@ -6,7 +6,7 @@ use crate::{
     ZebinError,
     access::ResolvedLayout,
     core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
-    traits::ArchivedValidationContext,
+    traits::{ValidationContext, ValidationPathSegment},
 };
 
 /// Validator for byte streams to ensure safety before access.
@@ -16,6 +16,7 @@ pub struct Validator<'a> {
     cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a>)>,
     depth: usize,
     max_depth: usize,
+    path: alloc::vec::Vec<ValidationPathSegment>,
 }
 
 pub struct DepthGuard<'v> {
@@ -39,6 +40,7 @@ impl<'a> Validator<'a> {
             cached_layout: None,
             depth: 0,
             max_depth: 256,
+            path: alloc::vec::Vec::new(),
         }
     }
 
@@ -49,6 +51,7 @@ impl<'a> Validator<'a> {
             cached_layout: None,
             depth: 0,
             max_depth: 256,
+            path: alloc::vec::Vec::new(),
         }
     }
 
@@ -69,25 +72,22 @@ impl<'a> Validator<'a> {
 
         let start = ptr as usize;
         let buffer_start = self.data.as_ptr() as usize;
-        let buffer_end = buffer_start.checked_add(self.data.len()).ok_or_else(|| {
-            ZebinError::ValidationError {
-                message: "Buffer length overflow".to_string(),
-                pos: 0,
-            }
+        let buffer_end = buffer_start
+            .checked_add(self.data.len())
+            .ok_or_else(|| self.validation_error("Buffer length overflow".to_string(), 0))?;
+
+        let end = start.checked_add(size).ok_or_else(|| {
+            self.validation_error(
+                "Pointer range overflow".to_string(),
+                start.saturating_sub(buffer_start),
+            )
         })?;
 
-        let end = start
-            .checked_add(size)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Pointer range overflow".to_string(),
-                pos: start.saturating_sub(buffer_start),
-            })?;
-
         if start < buffer_start || end > buffer_end {
-            return Err(ZebinError::ValidationError {
-                message: "Pointer out of bounds".to_string(),
-                pos: start.saturating_sub(buffer_start),
-            });
+            return Err(self.validation_error(
+                "Pointer out of bounds".to_string(),
+                start.saturating_sub(buffer_start),
+            ));
         }
         Ok(())
     }
@@ -154,7 +154,7 @@ impl<'a> Validator<'a> {
     }
 }
 
-impl<'a> ArchivedValidationContext for Validator<'a> {
+impl<'a> ValidationContext for Validator<'a> {
     fn push_depth(&mut self) -> Result<(), ZebinError> {
         Validator::push_depth(self)
     }
@@ -169,6 +169,18 @@ impl<'a> ArchivedValidationContext for Validator<'a> {
 
     fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError> {
         Validator::check_alignment(self, ptr, alignment)
+    }
+
+    fn push_path_segment_raw(&mut self, segment: ValidationPathSegment) {
+        self.path.push(segment);
+    }
+
+    fn pop_path_segment(&mut self) {
+        self.path.pop();
+    }
+
+    fn path(&self) -> &[ValidationPathSegment] {
+        &self.path
     }
 
     fn resolved_layout(

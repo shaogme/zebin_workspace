@@ -1,6 +1,6 @@
-use zebin::{ZebinArchive, ZebinArchiveBuilder};
+use zebin::{ZebinArchive, ZebinSerialize};
 
-#[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[derive(ZebinArchive, ZebinSerialize)]
 pub struct UserProfile {
     pub id: u64,
     pub username: String,

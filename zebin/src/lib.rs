@@ -26,8 +26,8 @@ pub mod prelude {
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{
-        Archive, ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedDepthGuard, ArchivedLayout,
-        ArchivedValidate, ArchivedValidationContext, ByteSink, ByteState, LayoutSink, ZebinError,
+        Access, Archive, ArchivedDepthGuard, ByteSink, ByteState, Layout, LayoutSink, Serialize,
+        SerializeState, Validate, ValidationContext, ValidationPathSegment, ZebinError,
         archived_bytes,
     };
     pub use crate::{
@@ -36,7 +36,7 @@ pub mod prelude {
         ObjectEncoding, RelPtr, ResolvedLayout, Storage, Validator, decode, encode, encode_chunked,
         encode_into, validate,
     };
-    pub use zebin_macros::{ZebinArchive, ZebinArchiveBuilder};
+    pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
 
 pub use crate::access::ArchiveView;
@@ -57,9 +57,8 @@ pub use crate::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::storage::mmap::Mmap;
 pub use crate::traits::{
-    Archive, ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedDepthGuard, ArchivedLayout,
-    ArchivedValidate, ArchivedValidationContext, ByteSink, ByteState, LayoutSink, ZebinError,
-    archived_bytes,
+    Access, Archive, ArchivedDepthGuard, ByteSink, ByteState, Layout, LayoutSink, Serialize,
+    SerializeState, Validate, ValidationContext, ValidationPathSegment, ZebinError, archived_bytes,
 };
 pub use memoffset;
 pub use zebin_macros::*;
@@ -83,10 +82,10 @@ struct EncodePlan {
 
 fn measure_plan<T>(value: &T) -> Result<EncodePlan, ZebinError>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     let mut encoder = MeasureEncoder::new(ARCHIVE_HEADER_SIZE);
-    let mut state = value.begin()?;
+    let mut state = value.begin_serialize()?;
     let resolver = loop {
         match state.poll(&mut encoder)? {
             ::core::task::Poll::Pending => continue,
@@ -94,7 +93,7 @@ where
         }
     };
 
-    encoder.align(<T::Archived as crate::ArchivedLayout>::ALIGNMENT)?;
+    encoder.align(<T::Archived as crate::Layout>::ALIGNMENT)?;
     let root_offset = encoder.pos();
     let root_offset = usize_to_nonzero_u32(
         root_offset,
@@ -138,7 +137,7 @@ where
         layout_pos,
         total_len,
         header_bytes: ArchiveFormatHeader::to_bytes(
-            <T::Archived as crate::ArchivedLayout>::OBJECT_ENCODING as u8,
+            <T::Archived as crate::Layout>::ENCODING as u8,
             layout_offset,
             root_offset,
         ),
@@ -160,13 +159,13 @@ impl RootWriteState {
 
 enum EncodePhase<'a, T>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     Header {
         cursor: usize,
     },
     Body {
-        state: <T as ArchiveBuilder>::State<'a>,
+        state: <T as Serialize>::State<'a>,
     },
     RootAlign {
         resolver: Option<<T as Archive>::Resolver>,
@@ -183,11 +182,11 @@ where
 /// Stateful archive writer that can stream into caller-provided buffers.
 pub struct ArchiveWriter<'a, T>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     value: &'a T,
     plan: EncodePlan,
-    body_state: Option<<T as ArchiveBuilder>::State<'a>>,
+    body_state: Option<<T as Serialize>::State<'a>>,
     phase: EncodePhase<'a, T>,
     archive_pos: usize,
     layouts: layout::LayoutRegistry,
@@ -195,13 +194,13 @@ where
 
 impl<'a, T> ArchiveWriter<'a, T>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub fn new(value: &'a T) -> Result<Self, ZebinError> {
         let plan = measure_plan(value)?;
         Ok(Self {
             value,
-            body_state: Some(value.begin()?),
+            body_state: Some(value.begin_serialize()?),
             phase: EncodePhase::Header { cursor: 0 },
             archive_pos: 0,
             layouts: layout::LayoutRegistry::default(),
@@ -250,10 +249,10 @@ where
                     }
                 },
                 EncodePhase::RootAlign { resolver } => {
-                    encoder.align(<T::Archived as crate::ArchivedLayout>::ALIGNMENT)?;
+                    encoder.align(<T::Archived as crate::Layout>::ALIGNMENT)?;
                     if !encoder
                         .pos()
-                        .is_multiple_of(<T::Archived as crate::ArchivedLayout>::ALIGNMENT.get())
+                        .is_multiple_of(<T::Archived as crate::Layout>::ALIGNMENT.get())
                     {
                         break;
                     }
@@ -339,7 +338,7 @@ where
 /// Create a chunked archive writer that can be resumed with caller-provided buffers.
 pub fn encode_chunked<T>(value: &T) -> Result<ArchiveWriter<'_, T>, ZebinError>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     ArchiveWriter::new(value)
 }
@@ -347,7 +346,7 @@ where
 /// Archive a value into a newly allocated byte vector.
 pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     let mut writer = encode_chunked(value)?;
     let mut buf = vec![0u8; writer.total_len()];
@@ -358,7 +357,7 @@ where
 /// Archive a value into an existing vector, replacing its contents.
 pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     let mut writer = encode_chunked(value)?;
     buf.clear();
@@ -371,8 +370,8 @@ where
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: ::core::ops::Deref,
+    T::Archived: Layout + Validate + Access<'a>,
+    <T::Archived as Access<'a>>::View: ::core::ops::Deref,
 {
     access::decode(bytes)
 }
@@ -382,8 +381,8 @@ pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
     T::Archived: 'a,
-    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: ::core::ops::Deref,
+    T::Archived: Layout + Validate + Access<'a>,
+    <T::Archived as Access<'a>>::View: ::core::ops::Deref,
 {
     access::validate::<T>(bytes)
 }

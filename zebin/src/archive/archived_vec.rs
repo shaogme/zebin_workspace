@@ -2,10 +2,13 @@ use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError,
+    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
+    ZebinError,
     core::rel_ptr::RelPtr,
-    traits::{Archive, ArchivedDecode, SequenceResolverBuffer, SequenceSource, archived_bytes},
+    traits::{
+        Access, Archive, SequenceResolverBuffer, SequenceSource, ValidationPathSegment,
+        archived_bytes,
+    },
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
@@ -55,9 +58,9 @@ impl<T> ArchivedVec<T> {
     }
 }
 
-impl<T> ArchivedLayout for ArchivedVec<T>
+impl<T> Layout for ArchivedVec<T>
 where
-    T: ArchivedLayout,
+    T: Layout,
 {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
@@ -66,15 +69,15 @@ where
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }
-        <u32 as ArchivedLayout>::write_archived_bytes(&archived.len, &mut out[8..12]);
+        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
     }
 }
 
-impl<T> ArchivedValidate for ArchivedVec<T>
+impl<T> Validate for ArchivedVec<T>
 where
-    T: ArchivedLayout + ArchivedValidate,
+    T: Layout + Validate,
 {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -107,7 +110,11 @@ where
 
             for i in 0..len {
                 let element_ptr = unsafe { data_ptr.add(i) };
-                unsafe { T::validate(element_ptr, &mut *guard)? };
+                unsafe {
+                    let mut path_guard =
+                        guard.push_path_segment(ValidationPathSegment::Index(i))?;
+                    T::validate(element_ptr, &mut *path_guard)?;
+                }
             }
         }
 
@@ -115,19 +122,19 @@ where
     }
 }
 
-impl<'a, T: 'a> ArchivedDecode<'a> for ArchivedVec<T>
+impl<'a, T: 'a> Access<'a> for ArchivedVec<T>
 where
-    T: ArchivedLayout + ArchivedValidate,
+    T: Layout + Validate,
 {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -205,20 +212,20 @@ impl<T: Archive, const N: usize> SequenceResolverBuffer<T> for SequenceResolverA
 struct SequenceChildDriver<'a, S, T, B>
 where
     S: ?Sized + SequenceSource<T>,
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
     B: SequenceResolverBuffer<T>,
 {
     source: &'a S,
     len: usize,
     index: usize,
-    current_state: Option<Box<<T as ArchiveBuilder>::State<'a>>>,
+    current_state: Option<Box<<T as Serialize>::State<'a>>>,
     resolvers: B,
 }
 
 impl<'a, S, T, B> SequenceChildDriver<'a, S, T, B>
 where
     S: ?Sized + SequenceSource<T>,
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
     B: SequenceResolverBuffer<T>,
 {
     fn new(source: &'a S) -> Self {
@@ -242,7 +249,7 @@ where
             }
 
             if self.current_state.is_none() {
-                self.current_state = Some(Box::new(self.source.get(self.index).begin()?));
+                self.current_state = Some(Box::new(self.source.get(self.index).begin_serialize()?));
             }
 
             match self
@@ -279,7 +286,7 @@ where
 pub struct SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     children: SequenceChildDriver<'a, S, T, SequenceResolverVec<T>>,
     phase: SequencePhase,
@@ -292,7 +299,7 @@ where
 impl<'a, S, T> SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub(crate) fn new(source: &'a S) -> Self {
         Self {
@@ -316,10 +323,10 @@ where
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
-        encoder.align(<T::Archived as ArchivedLayout>::ALIGNMENT)?;
+        encoder.align(<T::Archived as Layout>::ALIGNMENT)?;
         if !encoder
             .pos()
-            .is_multiple_of(<T::Archived as ArchivedLayout>::ALIGNMENT.get())
+            .is_multiple_of(<T::Archived as Layout>::ALIGNMENT.get())
         {
             return Ok(Poll::Pending);
         }
@@ -366,10 +373,10 @@ where
     }
 }
 
-impl<'a, S, T> ArchiveState for SequenceArchiveState<'a, S, T>
+impl<'a, S, T> SerializeState for SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     type Resolver = usize;
 
@@ -411,14 +418,14 @@ where
 
 pub struct ArrayArchiveState<'a, T, const N: usize>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     children: SequenceChildDriver<'a, [T; N], T, SequenceResolverArray<T, N>>,
 }
 
 impl<'a, T, const N: usize> ArrayArchiveState<'a, T, N>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub(crate) fn new(items: &'a [T; N]) -> Self {
         Self {
@@ -436,9 +443,9 @@ where
     }
 }
 
-impl<'a, T, const N: usize> ArchiveState for ArrayArchiveState<'a, T, N>
+impl<'a, T, const N: usize> SerializeState for ArrayArchiveState<'a, T, N>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     type Resolver = [T::Resolver; N];
 
@@ -490,16 +497,16 @@ impl<T: Archive> Archive for Vec<T> {
     }
 }
 
-impl<T> ArchiveBuilder for Vec<T>
+impl<T> Serialize for Vec<T>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
         = VecArchiveState<'a, T>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VecArchiveState::new(self.as_slice()))
     }
 }
@@ -520,16 +527,16 @@ where
     }
 }
 
-impl<T> ArchiveBuilder for VecDeque<T>
+impl<T> Serialize for VecDeque<T>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
         = VecDequeArchiveState<'a, T>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VecDequeArchiveState::new(self))
     }
 }
@@ -550,16 +557,16 @@ where
     }
 }
 
-impl<T> ArchiveBuilder for [T]
+impl<T> Serialize for [T]
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
         = SliceArchiveState<'a, T>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(SliceArchiveState::new(self))
     }
 }
@@ -596,16 +603,16 @@ where
     }
 }
 
-impl<T, const N: usize> ArchiveBuilder for [T; N]
+impl<T, const N: usize> Serialize for [T; N]
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
         = ArrayArchiveState<'a, T, N>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ArrayArchiveState::new(self))
     }
 }

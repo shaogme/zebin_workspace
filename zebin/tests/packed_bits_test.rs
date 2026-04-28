@@ -1,8 +1,8 @@
 use zebin::{
-    PackedBoolSlice, PackedBoolVec, PackedU8Slice, PackedU8Vec, ZebinArchive, ZebinArchiveBuilder,
+    PackedBoolSlice, PackedBoolVec, PackedU8Slice, PackedU8Vec, ZebinArchive, ZebinSerialize,
 };
 
-#[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[derive(ZebinArchive, ZebinSerialize)]
 struct PackedAttrStruct {
     #[zebin(packed)]
     flags: Vec<bool>,
@@ -11,14 +11,14 @@ struct PackedAttrStruct {
     plain: u32,
 }
 
-#[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[derive(ZebinArchive, ZebinSerialize)]
 struct PackedTupleStruct(
     #[zebin(packed)] Vec<bool>,
     #[zebin(packed = 4)] Vec<u8>,
     u32,
 );
 
-#[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[derive(ZebinArchive, ZebinSerialize)]
 enum PackedVariantEnum {
     Empty,
     Packed(

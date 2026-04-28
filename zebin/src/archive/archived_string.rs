@@ -3,10 +3,10 @@ use core::{num::NonZeroUsize, str, task::Poll};
 use alloc::string::{String, ToString};
 
 use crate::{
-    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError,
+    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
+    ZebinError,
     core::rel_ptr::RelPtr,
-    traits::{Archive, ArchivedDecode},
+    traits::{Access, Archive},
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
@@ -43,7 +43,7 @@ impl ArchivedString {
     }
 }
 
-impl ArchivedLayout for ArchivedString {
+impl Layout for ArchivedString {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -51,12 +51,12 @@ impl ArchivedLayout for ArchivedString {
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }
-        <u32 as ArchivedLayout>::write_archived_bytes(&archived.len, &mut out[8..12]);
+        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
     }
 }
 
-impl ArchivedValidate for ArchivedString {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+impl Validate for ArchivedString {
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -91,16 +91,16 @@ impl ArchivedValidate for ArchivedString {
     }
 }
 
-impl<'a> ArchivedDecode<'a> for ArchivedString {
+impl<'a> Access<'a> for ArchivedString {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -123,7 +123,7 @@ impl<'a> StringArchiveState<'a> {
     }
 }
 
-impl<'a> ArchiveState for StringArchiveState<'a> {
+impl<'a> SerializeState for StringArchiveState<'a> {
     type Resolver = usize;
 
     fn poll<E: ByteSink + LayoutSink + ?Sized>(
@@ -165,13 +165,13 @@ impl Archive for String {
     }
 }
 
-impl ArchiveBuilder for String {
+impl Serialize for String {
     type State<'a>
         = StringArchiveState<'a>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         StringArchiveState::new(self.as_bytes())
     }
 }
@@ -197,13 +197,13 @@ impl Archive for str {
     }
 }
 
-impl ArchiveBuilder for str {
+impl Serialize for str {
     type State<'a>
         = StringArchiveState<'a>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         StringArchiveState::new(self.as_bytes())
     }
 }

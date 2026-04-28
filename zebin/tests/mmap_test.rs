@@ -6,9 +6,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use zebin::{Mmap, Storage, ZebinArchive, ZebinArchiveBuilder};
+use zebin::{Mmap, Storage, ZebinArchive, ZebinSerialize};
 
-#[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[derive(ZebinArchive, ZebinSerialize)]
 pub struct MmapUser {
     pub id: u64,
     pub name: String,

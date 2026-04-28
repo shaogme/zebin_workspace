@@ -2,9 +2,11 @@ use alloc::{string::ToString, vec::Vec};
 use core::{marker::PhantomData, num::NonZeroUsize, ops::Deref, task::Poll};
 
 use crate::{
-    ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedLayout, ArchivedValidate,
-    ArchivedValidationContext, ByteSink, LayoutSink, ZebinError, core::rel_ptr::RelPtr,
-    core::schema::ObjectEncoding, traits::Archive,
+    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
+    ZebinError,
+    core::rel_ptr::RelPtr,
+    core::schema::ObjectEncoding,
+    traits::{Access, Archive},
 };
 
 /// Unsigned integers that are serialized with a variable-length encoding.
@@ -54,7 +56,7 @@ impl<T> Deref for VarIntView<T> {
 }
 
 pub trait VarIntNumber: Copy {
-    type Archived: ArchivedLayout + ArchivedValidate + Copy + Send + Sync + 'static;
+    type Archived: Layout + Validate + Copy + Send + Sync + 'static;
     const MAX_BYTES: usize;
 
     fn to_u64(self) -> u64;
@@ -87,12 +89,12 @@ macro_rules! impl_varint_number {
             }
         }
 
-        impl ArchivedLayout for $archived {
+        impl Layout for $archived {
             const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-            const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
+            const ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
 
-            fn encoded_len(archived: &Self) -> usize {
-                encoded_len_u64(archived.get() as u64)
+            fn size_hint(&self) -> usize {
+                encoded_len_u64(self.get() as u64)
             }
 
             fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -100,8 +102,8 @@ macro_rules! impl_varint_number {
             }
         }
 
-        impl ArchivedValidate for $archived {
-            unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        impl Validate for $archived {
+            unsafe fn validate<C: ValidationContext + ?Sized>(
                 ptr: *const Self,
                 context: &mut C,
             ) -> Result<(), ZebinError> {
@@ -111,16 +113,16 @@ macro_rules! impl_varint_number {
             }
         }
 
-        impl<'a> ArchivedDecode<'a> for $archived {
+        impl<'a> Access<'a> for $archived {
             type View = &'a Self;
 
-            unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+            unsafe fn access<C: ValidationContext + ?Sized>(
                 ptr: *const u8,
                 context: &mut C,
             ) -> Result<(Self::View, usize), ZebinError> {
                 let typed_ptr = ptr as *const Self;
                 unsafe {
-                    <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+                    <Self as Validate>::validate(typed_ptr, context)?;
                 }
                 Ok((unsafe { &*typed_ptr }, $max_bytes))
             }
@@ -189,7 +191,7 @@ fn encode_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-fn decode_u64<T: VarIntNumber, C: ArchivedValidationContext + ?Sized>(
+fn decode_u64<T: VarIntNumber, C: ValidationContext + ?Sized>(
     bytes: *const u8,
     context: &mut C,
 ) -> Result<(T, usize), ZebinError> {
@@ -224,18 +226,15 @@ fn decode_u64<T: VarIntNumber, C: ArchivedValidationContext + ?Sized>(
     }
 }
 
-impl<T> ArchivedLayout for VarInt<T>
+impl<T> Layout for VarInt<T>
 where
     T: VarIntNumber,
 {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
+    const ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
 
-    fn encoded_len(archived: &Self) -> usize
-    where
-        Self: Sized,
-    {
-        encoded_len_u64(archived.value.to_u64())
+    fn size_hint(&self) -> usize {
+        encoded_len_u64(self.value.to_u64())
     }
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -243,27 +242,27 @@ where
     }
 }
 
-impl<T> ArchivedValidate for VarInt<T>
+impl<T> Validate for VarInt<T>
 where
     T: VarIntNumber,
 {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
-        let (view, _) = unsafe { Self::decode_view(ptr as *const u8, context)? };
+        let (view, _) = unsafe { Self::access(ptr as *const u8, context)? };
         let _ = view.get();
         Ok(())
     }
 }
 
-impl<'a, T: VarIntNumber + 'a> ArchivedDecode<'a> for VarInt<T>
+impl<'a, T: VarIntNumber + 'a> Access<'a> for VarInt<T>
 where
     T: VarIntNumber,
 {
     type View = VarIntView<T>;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
@@ -306,7 +305,7 @@ impl<T: VarIntNumber> VarIntArchiveState<T> {
     }
 }
 
-impl<T> ArchiveBuilder for VarInt<T>
+impl<T> Serialize for VarInt<T>
 where
     T: VarIntNumber,
 {
@@ -315,12 +314,12 @@ where
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntArchiveState::new(self.value))
     }
 }
 
-impl<T: VarIntNumber> ArchiveState for VarIntArchiveState<T> {
+impl<T: VarIntNumber> SerializeState for VarIntArchiveState<T> {
     type Resolver = ();
 
     fn poll<E: ByteSink + LayoutSink + ?Sized>(
@@ -437,7 +436,7 @@ impl<'a, T: VarIntNumber> Iterator for VarIntVecIter<'a, T> {
     }
 }
 
-impl<T: VarIntNumber> ArchivedLayout for ArchivedVarIntVec<T> {
+impl<T: VarIntNumber> Layout for ArchivedVarIntVec<T> {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -452,8 +451,8 @@ impl<T: VarIntNumber> ArchivedLayout for ArchivedVarIntVec<T> {
     }
 }
 
-impl<T: VarIntNumber> ArchivedValidate for ArchivedVarIntVec<T> {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -486,10 +485,10 @@ impl<T: VarIntNumber> ArchivedValidate for ArchivedVarIntVec<T> {
     }
 }
 
-impl<'a, T: VarIntNumber + 'a> ArchivedDecode<'a> for ArchivedVarIntVec<T> {
+impl<'a, T: VarIntNumber + 'a> Access<'a> for ArchivedVarIntVec<T> {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
@@ -577,7 +576,7 @@ impl<T: VarIntNumber> VarIntVecBuilderState<T> {
     }
 }
 
-impl<T: VarIntNumber> ArchiveState for VarIntVecBuilderState<T> {
+impl<T: VarIntNumber> SerializeState for VarIntVecBuilderState<T> {
     type Resolver = VarIntVecResolver;
 
     fn poll<E: ByteSink + LayoutSink + ?Sized>(
@@ -629,13 +628,13 @@ impl<T: VarIntNumber> ArchiveState for VarIntVecBuilderState<T> {
     }
 }
 
-impl<T: VarIntNumber> ArchiveBuilder for VarIntVec<T> {
+impl<T: VarIntNumber> Serialize for VarIntVec<T> {
     type State<'a>
         = VarIntVecBuilderState<T>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntVecBuilderState::new(&self.values))
     }
 }
@@ -666,13 +665,13 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
     }
 }
 
-impl<'a, T: VarIntNumber> ArchiveBuilder for PackedVarIntSlice<'a, T> {
+impl<'a, T: VarIntNumber> Serialize for PackedVarIntSlice<'a, T> {
     type State<'b>
         = VarIntVecBuilderState<T>
     where
         Self: 'b;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntVecBuilderState::new(self.values))
     }
 }

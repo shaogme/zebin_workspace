@@ -1,9 +1,11 @@
-use alloc::{boxed::Box, string::ToString};
+use alloc::string::ToString;
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError, traits::Archive, traits::ArchivedDecode, utils::byteops,
+    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
+    ZebinError,
+    traits::{Access, Archive, ValidationPathSegment},
+    utils::byteops,
 };
 
 /// Archived representation for `Result<T, E>`.
@@ -48,10 +50,10 @@ impl<T, E> ArchivedResult<T, E> {
     }
 }
 
-impl<T, E> ArchivedLayout for ArchivedResult<T, E>
+impl<T, E> Layout for ArchivedResult<T, E>
 where
-    T: ArchivedLayout,
-    E: ArchivedLayout,
+    T: Layout,
+    E: Layout,
 {
     const ALIGNMENT: NonZeroUsize = if T::ALIGNMENT.get() >= E::ALIGNMENT.get() {
         T::ALIGNMENT
@@ -80,12 +82,12 @@ where
     }
 }
 
-impl<T, E> ArchivedValidate for ArchivedResult<T, E>
+impl<T, E> Validate for ArchivedResult<T, E>
 where
-    T: ArchivedLayout + ArchivedValidate,
-    E: ArchivedLayout + ArchivedValidate,
+    T: Layout + Validate,
+    E: Layout + Validate,
 {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -95,20 +97,24 @@ where
         let archived = unsafe { &*ptr };
         match archived.tag {
             0 => {
+                let mut path_guard =
+                    guard.push_path_segment(ValidationPathSegment::Variant("Ok"))?;
                 let value_ptr = archived.ok.as_ptr();
-                guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
+                path_guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
+                path_guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
                 unsafe {
-                    T::validate(value_ptr, &mut *guard)?;
+                    T::validate(value_ptr, &mut *path_guard)?;
                 }
                 Ok(())
             }
             1 => {
+                let mut path_guard =
+                    guard.push_path_segment(ValidationPathSegment::Variant("Err"))?;
                 let value_ptr = archived.err.as_ptr();
-                guard.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
-                guard.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
+                path_guard.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
+                path_guard.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
                 unsafe {
-                    E::validate(value_ptr, &mut *guard)?;
+                    E::validate(value_ptr, &mut *path_guard)?;
                 }
                 Ok(())
             }
@@ -120,20 +126,20 @@ where
     }
 }
 
-impl<'a, T: 'a, E: 'a> ArchivedDecode<'a> for ArchivedResult<T, E>
+impl<'a, T: 'a, E: 'a> Access<'a> for ArchivedResult<T, E>
 where
-    T: ArchivedLayout + ArchivedValidate,
-    E: ArchivedLayout + ArchivedValidate,
+    T: Layout + Validate,
+    E: Layout + Validate,
 {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -142,30 +148,30 @@ where
 /// Resumable serialization state for `Result<T, E>`.
 pub enum ResultArchiveState<'a, T, E>
 where
-    T: ArchiveBuilder + Archive + 'a,
-    E: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
+    E: Serialize + Archive + 'a,
 {
-    Ok(Box<<T as ArchiveBuilder>::State<'a>>),
-    Err(Box<<E as ArchiveBuilder>::State<'a>>),
+    Ok(<T as Serialize>::State<'a>),
+    Err(<E as Serialize>::State<'a>),
 }
 
 impl<'a, T, E> ResultArchiveState<'a, T, E>
 where
-    T: ArchiveBuilder + Archive + 'a,
-    E: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
+    E: Serialize + Archive + 'a,
 {
     pub(crate) fn new(value: Result<&'a T, &'a E>) -> Result<Self, ZebinError> {
         match value {
-            Ok(inner) => Ok(Self::Ok(Box::new(inner.begin()?))),
-            Err(inner) => Ok(Self::Err(Box::new(inner.begin()?))),
+            Ok(inner) => Ok(Self::Ok(inner.begin_serialize()?)),
+            Err(inner) => Ok(Self::Err(inner.begin_serialize()?)),
         }
     }
 }
 
-impl<'a, T, E> ArchiveState for ResultArchiveState<'a, T, E>
+impl<'a, T, E> SerializeState for ResultArchiveState<'a, T, E>
 where
-    T: ArchiveBuilder + Archive + 'a,
-    E: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
+    E: Serialize + Archive + 'a,
 {
     type Resolver = Result<T::Resolver, E::Resolver>;
 
@@ -174,11 +180,11 @@ where
         encoder: &mut R,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
         match self {
-            ResultArchiveState::Ok(state) => match state.as_mut().poll(encoder)? {
+            ResultArchiveState::Ok(state) => match state.poll(encoder)? {
                 Poll::Pending => Ok(Poll::Pending),
                 Poll::Ready(resolver) => Ok(Poll::Ready(Ok(resolver))),
             },
-            ResultArchiveState::Err(state) => match state.as_mut().poll(encoder)? {
+            ResultArchiveState::Err(state) => match state.poll(encoder)? {
                 Poll::Pending => Ok(Poll::Pending),
                 Poll::Ready(resolver) => Ok(Poll::Ready(Err(resolver))),
             },
@@ -225,17 +231,17 @@ where
     }
 }
 
-impl<T, E> ArchiveBuilder for Result<T, E>
+impl<T, E> Serialize for Result<T, E>
 where
-    T: ArchiveBuilder + Archive,
-    E: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
+    E: Serialize + Archive,
 {
     type State<'a>
         = ResultArchiveState<'a, T, E>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         ResultArchiveState::new(self.as_ref())
     }
 }

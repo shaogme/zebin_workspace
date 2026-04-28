@@ -1,9 +1,11 @@
-use alloc::{boxed::Box, string::ToString};
+use alloc::string::ToString;
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError, traits::Archive, traits::ArchivedDecode, utils::byteops,
+    ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate, ValidationContext,
+    ZebinError,
+    traits::{Access, Archive, ValidationPathSegment},
+    utils::byteops,
 };
 
 /// Archived representation for `Option<T>`.
@@ -35,9 +37,9 @@ impl<T> ArchivedOption<T> {
     }
 }
 
-impl<T> ArchivedLayout for ArchivedOption<T>
+impl<T> Layout for ArchivedOption<T>
 where
-    T: ArchivedLayout,
+    T: Layout,
 {
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
@@ -55,11 +57,11 @@ where
     }
 }
 
-impl<T> ArchivedValidate for ArchivedOption<T>
+impl<T> Validate for ArchivedOption<T>
 where
-    T: ArchivedLayout + ArchivedValidate,
+    T: Layout + Validate,
 {
-    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn validate<C: ValidationContext + ?Sized>(
         ptr: *const Self,
         context: &mut C,
     ) -> Result<(), ZebinError> {
@@ -70,11 +72,13 @@ where
         match archived.tag {
             0 => Ok(()),
             1 => {
+                let mut path_guard =
+                    guard.push_path_segment(ValidationPathSegment::Variant("Some"))?;
                 let value_ptr = archived.value.as_ptr();
-                guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
+                path_guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
+                path_guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
                 unsafe {
-                    T::validate(value_ptr, &mut *guard)?;
+                    T::validate(value_ptr, &mut *path_guard)?;
                 }
                 Ok(())
             }
@@ -86,19 +90,19 @@ where
     }
 }
 
-impl<'a, T: 'a> ArchivedDecode<'a> for ArchivedOption<T>
+impl<'a, T: 'a> Access<'a> for ArchivedOption<T>
 where
-    T: ArchivedLayout + ArchivedValidate,
+    T: Layout + Validate,
 {
     type View = &'a Self;
 
-    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+    unsafe fn access<C: ValidationContext + ?Sized>(
         ptr: *const u8,
         context: &mut C,
     ) -> Result<(Self::View, usize), ZebinError> {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -107,33 +111,28 @@ where
 /// Resumable serialization state for `Option<T>`.
 pub struct OptionArchiveState<'a, T>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
-    is_some: bool,
-    inner: Option<Box<<T as ArchiveBuilder>::State<'a>>>,
+    inner: Option<<T as Serialize>::State<'a>>,
 }
 
 impl<'a, T> OptionArchiveState<'a, T>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     fn new(value: Option<&'a T>) -> Result<Self, ZebinError> {
         match value {
             Some(inner) => Ok(Self {
-                is_some: true,
-                inner: Some(Box::new(inner.begin()?)),
+                inner: Some(inner.begin_serialize()?),
             }),
-            None => Ok(Self {
-                is_some: false,
-                inner: None,
-            }),
+            None => Ok(Self { inner: None }),
         }
     }
 }
 
-impl<'a, T> ArchiveState for OptionArchiveState<'a, T>
+impl<'a, T> SerializeState for OptionArchiveState<'a, T>
 where
-    T: ArchiveBuilder + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     type Resolver = Option<T::Resolver>;
 
@@ -141,7 +140,7 @@ where
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
-        if !self.is_some {
+        if self.inner.is_none() {
             return Ok(Poll::Ready(None));
         }
 
@@ -153,7 +152,6 @@ where
         {
             Poll::Pending => Ok(Poll::Pending),
             Poll::Ready(resolver) => {
-                self.is_some = false;
                 self.inner = None;
                 Ok(Poll::Ready(Some(resolver)))
             }
@@ -191,16 +189,16 @@ where
     }
 }
 
-impl<T> ArchiveBuilder for Option<T>
+impl<T> Serialize for Option<T>
 where
-    T: ArchiveBuilder + Archive,
+    T: Serialize + Archive,
 {
     type State<'a>
         = OptionArchiveState<'a, T>
     where
         Self: 'a;
 
-    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         OptionArchiveState::new(self.as_ref())
     }
 }

@@ -7,25 +7,25 @@ use crate::{
         validator::Validator,
     },
     format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
-    traits::{Archive, ArchivedDecode, ArchivedLayout, ArchivedValidate, ZebinError},
+    traits::{Access, Archive, Layout, Validate, ZebinError},
     utils::num::{u32_to_nonzero_usize, u32_to_usize},
 };
 
 /// Safe access layer output that keeps the validated byte slice alive.
 pub struct ArchiveView<'a, T: Archive>
 where
-    T::Archived: ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+    T::Archived: Access<'a>,
+    <T::Archived as Access<'a>>::View: Deref,
 {
     bytes: &'a [u8],
     header: ArchiveHeader,
-    root: <T::Archived as ArchivedDecode<'a>>::View,
+    root: <T::Archived as Access<'a>>::View,
 }
 
 impl<'a, T: Archive> ArchiveView<'a, T>
 where
-    T::Archived: ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+    T::Archived: Access<'a>,
+    <T::Archived as Access<'a>>::View: Deref,
 {
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
@@ -35,7 +35,7 @@ where
         self.header
     }
 
-    pub fn root(&self) -> &<T::Archived as ArchivedDecode<'a>>::View {
+    pub fn root(&self) -> &<T::Archived as Access<'a>>::View {
         &self.root
     }
 
@@ -50,10 +50,10 @@ where
 
 impl<'a, T: Archive> Deref for ArchiveView<'a, T>
 where
-    T::Archived: ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+    T::Archived: Access<'a>,
+    <T::Archived as Access<'a>>::View: Deref,
 {
-    type Target = <<T::Archived as ArchivedDecode<'a>>::View as core::ops::Deref>::Target;
+    type Target = <<T::Archived as Access<'a>>::View as core::ops::Deref>::Target;
 
     fn deref(&self) -> &Self::Target {
         self.root.deref()
@@ -134,8 +134,8 @@ impl<'a> ResolvedLayout<'a> {
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+    T::Archived: Layout + Validate + Access<'a>,
+    <T::Archived as Access<'a>>::View: Deref,
 {
     check_archive(bytes)
 }
@@ -144,8 +144,8 @@ where
 fn check_archive<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+    T::Archived: Layout + Validate + Access<'a>,
+    <T::Archived as Access<'a>>::View: Deref,
 {
     let header = ArchiveHeader::parse(bytes)?;
     let root_pos = u32_to_usize(header.root_offset.get(), || ZebinError::ValidationError {
@@ -158,13 +158,11 @@ where
             pos: root_pos,
         });
     }
-    if root_pos % <T::Archived as ArchivedLayout>::ALIGNMENT.get() != 0 {
+    if root_pos % <T::Archived as Layout>::ALIGNMENT.get() != 0 {
         return Err(ZebinError::AlignmentError {
-            expected: <T::Archived as ArchivedLayout>::ALIGNMENT,
+            expected: <T::Archived as Layout>::ALIGNMENT,
             actual: unsafe {
-                NonZeroUsize::new_unchecked(
-                    root_pos % <T::Archived as ArchivedLayout>::ALIGNMENT.get(),
-                )
+                NonZeroUsize::new_unchecked(root_pos % <T::Archived as Layout>::ALIGNMENT.get())
             },
             pos: root_pos,
         });
@@ -191,7 +189,7 @@ where
     let mut validator = Validator::with_layouts(bytes, layout_dir);
     let root_ptr = unsafe { bytes.as_ptr().add(root_pos) };
     let (root_view, root_span) =
-        unsafe { <T::Archived as ArchivedDecode<'a>>::decode_view(root_ptr, &mut validator)? };
+        unsafe { <T::Archived as Access<'a>>::access(root_ptr, &mut validator)? };
     let root_end = root_pos
         .checked_add(root_span)
         .ok_or_else(|| ZebinError::ValidationError {
@@ -223,8 +221,8 @@ pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
     T::Archived: 'a,
-    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
-    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+    T::Archived: Layout + Validate + Access<'a>,
+    <T::Archived as Access<'a>>::View: Deref,
 {
     decode::<T>(bytes).map(|_| ())
 }

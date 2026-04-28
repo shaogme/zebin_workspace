@@ -323,13 +323,55 @@ pub fn packed_archived_type(field: &FieldSpec<'_>) -> Option<proc_macro2::TokenS
     })
 }
 
+fn is_rel_ptr_like(ty: &Type) -> bool {
+    match ty {
+        Type::Path(path) => {
+            let Some(segment) = path.path.segments.last() else {
+                return false;
+            };
+            matches!(
+                segment.ident.to_string().as_str(),
+                "String" | "Vec" | "VecDeque" | "Box" | "Rc" | "Arc" | "Cow"
+            )
+        }
+        _ => false,
+    }
+}
+
+fn is_varint_like(ty: &Type) -> bool {
+    match ty {
+        Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "VarInt"),
+        _ => false,
+    }
+}
+
+pub fn field_encoding(field: &FieldSpec<'_>) -> proc_macro2::TokenStream {
+    if field.packed_bits.is_some() {
+        return quote! { zebin::FieldEncoding::PackedBits };
+    }
+
+    if is_varint_like(field.ty) {
+        return quote! { zebin::FieldEncoding::VarInt };
+    }
+
+    if is_rel_ptr_like(field.ty) {
+        return quote! { zebin::FieldEncoding::RelPtr };
+    }
+
+    quote! { zebin::FieldEncoding::Fixed }
+}
+
 pub fn packed_begin_expr(
     field: &FieldSpec<'_>,
     value: proc_macro2::TokenStream,
 ) -> Option<proc_macro2::TokenStream> {
     let wrapper = packed_wrapper_type_expr(field)?;
     Some(quote! {
-        <#wrapper as zebin::ArchiveBuilder>::begin(
+        <#wrapper as zebin::Serialize>::begin_serialize(
             &<#wrapper>::new(#value.as_ref())
         )?
     })
@@ -492,7 +534,7 @@ pub fn parse_item(input: &DeriveInput) -> Result<ItemSpec<'_>> {
         }
         _ => Err(syn::Error::new(
             input.span(),
-            "ZebinArchive 和 ZebinArchiveBuilder 只支持 struct 与 enum",
+            "ZebinArchive 和 ZebinSerialize 只支持 struct 与 enum",
         )),
     }
 }
@@ -527,11 +569,12 @@ pub fn layout_field_entries(
         .map(|(index, field)| {
             let field_id = field.field_id.expect("field ids are validated above");
             let member = user_member(record, index);
+            let encoding = field_encoding(field);
             quote::quote! {
                 zebin::LayoutField {
                     field_id: #field_id,
                     offset: zebin::memoffset::offset_of!(#archived_name, #member) as u32,
-                    encoding: zebin::FieldEncoding::Fixed,
+                    encoding: #encoding,
                 }
             }
         })

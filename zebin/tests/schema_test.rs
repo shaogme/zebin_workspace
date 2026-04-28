@@ -1,6 +1,6 @@
-use zebin::{ZebinArchive, ZebinArchiveBuilder};
+use zebin::{ZebinArchive, ZebinSerialize};
 
-#[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[derive(ZebinArchive, ZebinSerialize)]
 #[zebin(schema_key = 324478056)]
 #[zebin(revision = 3)]
 pub struct VersionedUser {

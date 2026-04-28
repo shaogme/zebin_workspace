@@ -38,10 +38,10 @@ fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::T
     let fields = record.fields.iter().enumerate().map(|(index, field)| {
         let state_ident = &field.state_ident;
         let state_ty = if let Some(wrapper) = packed_wrapper_type(field) {
-            quote! { <#wrapper as zebin::ArchiveBuilder>::State<'a> }
+            quote! { <#wrapper as zebin::Serialize>::State<'a> }
         } else {
             let ty = field.ty;
-            quote! { <#ty as zebin::ArchiveBuilder>::State<'a> }
+            quote! { <#ty as zebin::Serialize>::State<'a> }
         };
         let resolver_ty = if let Some(wrapper) = packed_wrapper_type(field) {
             quote! { <#wrapper as zebin::Archive>::Resolver }
@@ -74,7 +74,7 @@ fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
         } else {
             let ty = field.ty;
             quote! {
-                <#ty as zebin::ArchiveBuilder>::begin(&self.#input_member)?
+                <#ty as zebin::Serialize>::begin_serialize(&self.#input_member)?
             }
         };
         quote! {
@@ -108,7 +108,7 @@ fn layout_fields(
         encoder.register_layout(
             #stable_schema_key,
             #schema_revision,
-            zebin::ObjectEncoding::Fixed,
+            zebin::ObjectEncoding::SchemaAware,
             layout,
         )?;
     }
@@ -184,7 +184,7 @@ fn record_state_impl(
 
     if has_schema(record) {
         quote! {
-            impl<'a> zebin::ArchiveState for #state_name<'a> {
+            impl<'a> zebin::SerializeState for #state_name<'a> {
                 type Resolver = #resolver_name;
 
                 fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
@@ -201,7 +201,7 @@ fn record_state_impl(
         }
     } else {
         quote! {
-            impl<'a> zebin::ArchiveState for #state_name<'a> {
+            impl<'a> zebin::SerializeState for #state_name<'a> {
                 type Resolver = #resolver_name;
 
                 fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
@@ -248,10 +248,10 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
         #resolver_def
         #state_impl
 
-        impl zebin::ArchiveBuilder for #name {
+        impl zebin::Serialize for #name {
             type State<'a> = #state_name<'a> where Self: 'a;
 
-            fn begin(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
+            fn begin_serialize(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
                 Ok(#state_name {
                     #init_fields
                 })
@@ -324,7 +324,7 @@ fn variant_begin_arm(
                     begin
                 } else {
                     quote! {
-                        <#ty as zebin::ArchiveBuilder>::begin(&#ident)?
+                        <#ty as zebin::Serialize>::begin_serialize(&#ident)?
                     }
                 };
                 quote! {
@@ -363,7 +363,7 @@ fn variant_begin_arm(
                         begin
                     } else {
                         quote! {
-                            <#ty as zebin::ArchiveBuilder>::begin(&#binder)?
+                            <#ty as zebin::Serialize>::begin_serialize(&#binder)?
                         }
                     };
                     quote! {
@@ -450,7 +450,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             #(#resolver_enum_variants),*
         }
 
-        impl<'a> zebin::ArchiveState for #state_name<'a> {
+        impl<'a> zebin::SerializeState for #state_name<'a> {
             type Resolver = #resolver_name;
 
             fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
@@ -464,10 +464,10 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             }
         }
 
-        impl zebin::ArchiveBuilder for #name {
+        impl zebin::Serialize for #name {
             type State<'a> = #state_name<'a> where Self: 'a;
 
-            fn begin(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
+            fn begin_serialize(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
                 match self {
                     #(#begin_arms),*
                 }

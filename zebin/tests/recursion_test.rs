@@ -1,6 +1,6 @@
-use zebin::{ZebinArchive, ZebinArchiveBuilder, ZebinError};
+use zebin::{ZebinArchive, ZebinSerialize, ZebinError};
 
-#[derive(ZebinArchive, ZebinArchiveBuilder)]
+#[derive(ZebinArchive, ZebinSerialize)]
 pub struct Node {
     pub children: Vec<Node>,
 }
