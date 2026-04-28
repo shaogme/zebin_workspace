@@ -3,6 +3,7 @@ use core::{num::NonZeroUsize, str, task::Poll};
 use alloc::string::{String, ToString};
 
 use crate::{
+    byteops,
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
     ByteSink, LayoutSink, ZebinError,
     core::rel_ptr::RelPtr,
@@ -44,7 +45,7 @@ impl ArchivedLayout for ArchivedString {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        out.fill(0);
+        byteops::fill(out, 0);
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }

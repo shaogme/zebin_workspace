@@ -2,6 +2,7 @@ use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
+    byteops,
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
     ByteSink, LayoutSink, ZebinError,
     core::rel_ptr::RelPtr,
@@ -59,7 +60,7 @@ where
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        out.fill(0);
+        byteops::fill(out, 0);
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }

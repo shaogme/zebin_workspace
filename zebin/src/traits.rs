@@ -10,6 +10,7 @@ use alloc::{
 };
 use core::{num::NonZeroUsize, task::Poll};
 
+use crate::byteops;
 use crate::core::schema::{LayoutField, SchemaRevision, StableSchemaKey};
 
 /// Archived-side binary layout contract.
@@ -256,7 +257,7 @@ impl<T: ArchivedLayout, const N: usize> ArchivedLayout for [T; N] {
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        out.fill(0);
+        byteops::fill(out, 0);
         let elem_size = core::mem::size_of::<T>();
         if elem_size == 0 {
             return;
@@ -363,7 +364,7 @@ macro_rules! impl_archive_for_primitive {
                 };
 
                 fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-                    out.copy_from_slice(&archived.to_le_bytes());
+                    crate::byteops::copy_exact(out, &archived.to_le_bytes());
                 }
             }
 

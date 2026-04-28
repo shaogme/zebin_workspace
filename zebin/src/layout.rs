@@ -4,6 +4,7 @@ use core::num::NonZeroUsize;
 use alloc::vec::Vec;
 
 use crate::{
+    byteops,
     ZebinError,
     core::schema::{LayoutDescriptor, LayoutField, SchemaRevision, StableSchemaKey},
     num::usize_to_u32,
@@ -173,7 +174,7 @@ impl<'a> ByteSink for SliceEncoder<'a> {
         let remaining = self.buf.len().saturating_sub(self.written);
         let written = remaining.min(padding);
         if written > 0 {
-            self.buf[self.written..self.written + written].fill(0);
+            byteops::fill(&mut self.buf[self.written..self.written + written], 0);
             self.written += written;
             self.archive_pos = self
                 .archive_pos

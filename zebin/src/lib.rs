@@ -9,6 +9,8 @@ compile_error!(
 pub extern crate alloc;
 
 mod access;
+#[doc(hidden)]
+pub mod byteops;
 mod archive;
 mod core;
 mod format;

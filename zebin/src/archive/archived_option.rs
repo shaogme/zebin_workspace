@@ -2,6 +2,7 @@ use alloc::{boxed::Box, string::ToString};
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
+    byteops,
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
     ByteSink, LayoutSink, ZebinError, traits::Archive,
 };
@@ -42,7 +43,7 @@ where
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        out.fill(0);
+        byteops::fill(out, 0);
         out[0] = archived.tag;
         if archived.tag == 1 {
             let value_offset = crate::memoffset::offset_of!(ArchivedOption<T>, value);
