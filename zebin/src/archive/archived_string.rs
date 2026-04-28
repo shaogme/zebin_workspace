@@ -1,5 +1,7 @@
-use std::num::NonZeroUsize;
-use std::str;
+use core::num::NonZeroUsize;
+use core::str;
+
+use alloc::string::{String, ToString};
 
 use crate::{
     Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
@@ -32,7 +34,7 @@ impl ArchivedString {
             .ptr
             .as_ref()
             .expect("non-empty archived string must have a pointer");
-        let bytes = unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) };
+        let bytes = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) };
         unsafe { str::from_utf8_unchecked(bytes) }
     }
 }
@@ -123,7 +125,7 @@ impl<'v> Validate<Validator<'v>> for ArchivedString {
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;
         context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, std::mem::size_of::<Self>())?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
 
         // Validate the string data pointer and length.
@@ -143,7 +145,7 @@ impl<'v> Validate<Validator<'v>> for ArchivedString {
             context.check_range(data_ptr, len)?;
 
             // Validate UTF-8.
-            let bytes = unsafe { std::slice::from_raw_parts(data_ptr, len) };
+            let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
             str::from_utf8(bytes).map_err(|_| ZebinError::ValidationError {
                 message: "Invalid UTF-8 sequence".to_string(),
                 pos: data_ptr as usize,

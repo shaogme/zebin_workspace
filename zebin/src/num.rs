@@ -1,5 +1,5 @@
-use std::convert::TryFrom;
-use std::num::{NonZeroU32, NonZeroUsize};
+use core::convert::TryFrom;
+use core::num::{NonZeroU32, NonZeroUsize};
 
 use crate::traits::ZebinError;
 

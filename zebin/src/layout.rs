@@ -1,6 +1,7 @@
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::num::NonZeroUsize;
+use core::convert::TryFrom;
+use core::num::NonZeroUsize;
+
+use alloc::vec::Vec;
 
 use crate::{
     ZebinError,
@@ -8,6 +9,12 @@ use crate::{
     num::usize_to_u32,
     traits::Encoder,
 };
+
+#[cfg(feature = "no_std")]
+pub type HashMap<K, V> = hashbrown::HashMap<K, V, core::hash::BuildHasherDefault<ahash::AHasher>>;
+
+#[cfg(feature = "std")]
+pub type HashMap<K, V> = std::collections::HashMap<K, V>;
 
 /// Shared layout registry used by both the measuring and emitting encoders.
 #[derive(Default)]

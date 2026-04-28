@@ -1,4 +1,9 @@
-use std::num::NonZeroUsize;
+use alloc::{
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use core::num::NonZeroUsize;
 
 use crate::core::schema::LayoutField;
 
@@ -19,7 +24,7 @@ pub trait Archive {
 
     /// Convert an archived value to a freshly allocated byte vector.
     fn archived_bytes(archived: &Self::Archived) -> Vec<u8> {
-        let mut out = vec![0u8; std::mem::size_of::<Self::Archived>()];
+        let mut out = vec![0u8; core::mem::size_of::<Self::Archived>()];
         Self::write_archived_bytes(archived, &mut out);
         out
     }
@@ -43,8 +48,8 @@ pub enum ZebinError {
     RecursionLimitExceeded,
 }
 
-impl std::fmt::Display for ZebinError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ZebinError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ZebinError::Infallible => write!(f, "infallible error"),
             ZebinError::WriteError => write!(f, "failed to write archive bytes"),
@@ -69,17 +74,17 @@ impl std::fmt::Display for ZebinError {
     }
 }
 
-impl std::error::Error for ZebinError {}
+impl core::error::Error for ZebinError {}
 
-impl From<std::convert::Infallible> for ZebinError {
-    fn from(error: std::convert::Infallible) -> Self {
+impl From<core::convert::Infallible> for ZebinError {
+    fn from(error: core::convert::Infallible) -> Self {
         match error {}
     }
 }
 
 /// Trait for layout-aware encoders.
 pub trait Encoder {
-    type Error: std::error::Error + From<std::convert::Infallible>;
+    type Error: core::error::Error + From<core::convert::Infallible>;
 
     fn pos(&self) -> usize;
 
@@ -187,7 +192,7 @@ macro_rules! impl_archive_for_primitive {
                 type Archived = $t;
                 type Resolver = ();
                 const ALIGNMENT: NonZeroUsize = unsafe {
-                    NonZeroUsize::new_unchecked(std::mem::size_of::<Self>())
+                    NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                 };
 
                 fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
@@ -200,13 +205,13 @@ macro_rules! impl_archive_for_primitive {
             }
 
             impl Serialize for $t {
-                type State<'a> = ByteState<{ std::mem::size_of::<$t>() }> where Self: 'a;
+                type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
 
                 fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
                     Ok(ByteState::new(
                         self.to_le_bytes(),
                         unsafe {
-                            NonZeroUsize::new_unchecked(std::mem::size_of::<Self>())
+                            NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                         },
                     ))
                 }
@@ -214,7 +219,7 @@ macro_rules! impl_archive_for_primitive {
 
             impl<C: ?Sized> Validate<C> for $t {
                 const ALIGNMENT: NonZeroUsize = unsafe {
-                    NonZeroUsize::new_unchecked(std::mem::size_of::<Self>())
+                    NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                 };
 
                 unsafe fn validate(_ptr: *const Self, _context: &mut C) -> Result<(), ZebinError> {

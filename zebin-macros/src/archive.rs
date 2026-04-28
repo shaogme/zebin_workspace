@@ -87,7 +87,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         quote! {
             {
                 let offset = zebin::memoffset::offset_of!(#archived_name, #name);
-                let size = ::std::mem::size_of::<<#ty as zebin::Archive>::Archived>();
+                let size = ::core::mem::size_of::<<#ty as zebin::Archive>::Archived>();
                 <#ty as zebin::Archive>::write_archived_bytes(
                     &archived.#name,
                     &mut out[offset..offset + size],
@@ -100,7 +100,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         quote! {
             <u32 as zebin::Archive>::write_archived_bytes(
                 &archived.schema_id,
-                &mut out[0..::std::mem::size_of::<u32>()],
+                &mut out[0..::core::mem::size_of::<u32>()],
             );
         }
     } else {
@@ -121,7 +121,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                     let header = zebin::ArchiveHeader::parse(buffer)?;
                     let layout_dir = zebin::LayoutDirectory::new(
                         buffer,
-                        ::std::num::NonZeroUsize::new(header.layout_offset.get() as usize).ok_or_else(|| zebin::ZebinError::ValidationError {
+                        ::core::num::NonZeroUsize::new(header.layout_offset.get() as usize).ok_or_else(|| zebin::ZebinError::ValidationError {
                             message: "Layout offset cannot be zero".to_string(),
                             pos: 4,
                         })?,
@@ -186,7 +186,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         let ty = &f.ty;
         quote! {
             {
-                let field_ptr = unsafe { std::ptr::addr_of!((*ptr).#name) };
+                let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#name) };
                 unsafe { <<#ty as zebin::Archive>::Archived as zebin::Validate<zebin::Validator<'_>>>::validate(field_ptr, context)? };
             }
         }
@@ -213,7 +213,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let validate_impl = quote! {
         impl zebin::Validate<zebin::Validator<'_>> for #archived_name {
-            const ALIGNMENT: ::std::num::NonZeroUsize = {
+            const ALIGNMENT: ::core::num::NonZeroUsize = {
                 let mut max = 1usize;
                 #(
                     let align = #alignments.get();
@@ -221,12 +221,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
                         max = align;
                     }
                 )*
-                unsafe { ::std::num::NonZeroUsize::new_unchecked(max) }
+                unsafe { ::core::num::NonZeroUsize::new_unchecked(max) }
             };
 
             unsafe fn validate(ptr: *const Self, context: &mut zebin::Validator<'_>) -> Result<(), zebin::ZebinError> {
                 let _guard = context.enter()?;
-                context.check_range(ptr as *const u8, std::mem::size_of::<Self>())?;
+                context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
                 context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
                 #layout_validation
 
@@ -256,7 +256,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         impl zebin::Archive for #name {
             type Archived = #archived_name;
             type Resolver = #resolver_name;
-            const ALIGNMENT: ::std::num::NonZeroUsize = {
+            const ALIGNMENT: ::core::num::NonZeroUsize = {
                 let mut max = 1usize;
                 #(
                     let align = #alignments.get();
@@ -264,7 +264,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                         max = align;
                     }
                 )*
-                unsafe { ::std::num::NonZeroUsize::new_unchecked(max) }
+                unsafe { ::core::num::NonZeroUsize::new_unchecked(max) }
             };
 
             fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, zebin::ZebinError> {

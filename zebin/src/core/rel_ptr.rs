@@ -1,5 +1,7 @@
-use std::marker::PhantomData;
-use std::num::NonZeroI64;
+use core::marker::PhantomData;
+use core::num::NonZeroI64;
+
+use alloc::string::ToString;
 
 use crate::traits::ZebinError;
 

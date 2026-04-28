@@ -1,7 +1,8 @@
 #[cfg(feature = "mmap")]
 pub mod mmap;
 
-use std::num::NonZeroUsize;
+use alloc::{vec, vec::Vec};
+use core::num::NonZeroUsize;
 
 use crate::ZebinError;
 

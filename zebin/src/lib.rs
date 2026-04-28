@@ -1,3 +1,13 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(any(feature = "no_std", feature = "std")))]
+compile_error!(
+    "Please enable at least one of the features: no_std or std. 
+	Use --no-default-features flag to disable default features when you need no_std."
+);
+
+extern crate alloc;
+
 mod access;
 mod archive;
 mod core;
@@ -8,7 +18,7 @@ mod storage;
 mod traits;
 
 pub mod prelude {
-    #[cfg(feature = "mmap")]
+    #[cfg(all(feature = "mmap", feature = "std"))]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{ByteState, Encoder, Serialize, Validate, ZebinError};
     pub use crate::{
@@ -26,7 +36,7 @@ pub use crate::core::schema::{LayoutDescriptor, LayoutDirectory, LayoutField, La
 pub use crate::core::validator::Validator;
 pub use crate::format::{ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::storage::Storage;
-#[cfg(feature = "mmap")]
+#[cfg(all(feature = "mmap", feature = "std"))]
 pub use crate::storage::mmap::Mmap;
 pub use crate::traits::*;
 pub use memoffset;
@@ -37,6 +47,8 @@ use crate::{
     layout::{MeasureEncoder, SliceEncoder, build_layout_section_bytes},
     num::{u32_to_usize, usize_to_nonzero_u32},
 };
+
+use alloc::{string::ToString, vec, vec::Vec};
 
 struct EncodePlan {
     root_pos: usize,

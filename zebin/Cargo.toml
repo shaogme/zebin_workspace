@@ -9,9 +9,13 @@ authors.workspace = true
 zebin-macros.workspace = true
 memoffset = "0.9"
 memmap2 = { version = "0.9", optional = true }
+hashbrown = { version = "0.17", default-features = false, features = ["alloc"], optional = true }
+ahash = { version = "0.8", default-features = false, optional = true }
 
 [features]
-default = []
+default = ["std"]
+no_std = ["dep:hashbrown", "dep:ahash"]
+std = []
 mmap = ["dep:memmap2"]
 
 [lints]

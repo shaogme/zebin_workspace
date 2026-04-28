@@ -1,5 +1,7 @@
-use std::num::NonZeroUsize;
-use std::ops::Deref;
+use core::num::NonZeroUsize;
+use core::ops::Deref;
+
+use alloc::{format, string::ToString};
 
 use crate::{
     core::{schema::LayoutDirectory, validator::Validator},
@@ -210,7 +212,7 @@ where
         pos: 8,
     })?;
     let root_end = root_pos
-        .checked_add(std::mem::size_of::<T::Archived>())
+        .checked_add(core::mem::size_of::<T::Archived>())
         .ok_or_else(|| ZebinError::ValidationError {
             message: "Root range overflow".to_string(),
             pos: root_pos,

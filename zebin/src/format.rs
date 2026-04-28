@@ -1,4 +1,6 @@
-use std::num::NonZeroU32;
+use core::num::NonZeroU32;
+
+use alloc::{format, string::ToString};
 
 use crate::ZebinError;
 

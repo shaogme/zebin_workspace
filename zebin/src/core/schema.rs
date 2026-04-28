@@ -1,5 +1,7 @@
 use crate::{ZebinError, num::u32_to_usize};
-use std::num::NonZeroUsize;
+use core::num::NonZeroUsize;
+
+use alloc::{format, string::ToString, vec::Vec};
 
 /// A single field entry inside a layout descriptor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

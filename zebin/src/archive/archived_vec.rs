@@ -1,4 +1,6 @@
-use std::num::NonZeroUsize;
+use core::num::NonZeroUsize;
+
+use alloc::{boxed::Box, string::ToString, vec::Vec};
 
 use crate::{
     Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
@@ -31,7 +33,7 @@ impl<T> ArchivedVec<T> {
             .ptr
             .as_ref()
             .expect("non-empty archived vector must have a pointer");
-        unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) }
+        unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) }
     }
 
     /// Get the length of the vector.
@@ -236,7 +238,7 @@ where
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;
         context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, std::mem::size_of::<Self>())?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
 
         let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
@@ -252,7 +254,7 @@ where
                     pos: ptr as usize,
                 })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
-            let total_size = len.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
+            let total_size = len.checked_mul(core::mem::size_of::<T>()).ok_or_else(|| {
                 ZebinError::ValidationError {
                     message: "ArchivedVec size overflow".to_string(),
                     pos: ptr as usize,

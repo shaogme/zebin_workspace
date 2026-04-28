@@ -1,4 +1,6 @@
-use std::{marker::PhantomData, num::NonZeroUsize};
+use core::{marker::PhantomData, num::NonZeroUsize};
+
+use alloc::string::ToString;
 
 use crate::{
     ZebinError,
