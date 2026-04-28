@@ -10,8 +10,8 @@ use alloc::{
 };
 use core::{num::NonZeroUsize, task::Poll};
 
-use crate::byteops;
 use crate::core::schema::{LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey};
+use crate::utils::byteops;
 
 /// Archived-side binary layout contract.
 pub trait ArchivedLayout: Sized {
@@ -427,7 +427,7 @@ macro_rules! impl_archive_for_primitive {
                 };
 
                 fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-                    crate::byteops::copy_exact(out, &archived.to_le_bytes());
+                    crate::utils::byteops::copy_exact(out, &archived.to_le_bytes());
                 }
             }
 

@@ -10,14 +10,12 @@ pub extern crate alloc;
 
 mod access;
 mod archive;
-#[doc(hidden)]
-pub mod byteops;
 mod core;
 mod format;
 mod layout;
-mod num;
 mod storage;
 mod traits;
+pub mod utils;
 
 pub mod prelude {
     pub use crate::archive::packed::{
@@ -69,7 +67,7 @@ pub use zebin_macros::*;
 use crate::{
     format::ArchiveHeader as ArchiveFormatHeader,
     layout::{MeasureEncoder, SliceEncoder, build_layout_section_bytes},
-    num::{u32_to_usize, usize_to_nonzero_u32},
+    utils::num::{u32_to_usize, usize_to_nonzero_u32},
 };
 
 use alloc::{string::ToString, vec, vec::Vec};

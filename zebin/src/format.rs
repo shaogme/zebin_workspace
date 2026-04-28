@@ -2,7 +2,7 @@ use core::num::NonZeroU32;
 
 use alloc::{format, string::ToString};
 
-use crate::{ZebinError, num::read_fixed};
+use crate::{ZebinError, utils::num::read_fixed};
 
 /// Archive format constants and header utilities.
 pub const ARCHIVE_MAGIC: [u8; 2] = *b"ZB";

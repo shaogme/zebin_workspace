@@ -4,12 +4,15 @@ use core::{num::NonZeroUsize, task::Poll};
 use wide::u8x16;
 
 use crate::{
-    ZebinError, byteops,
+    ZebinError,
     core::rel_ptr::RelPtr,
-    num::{u32_to_usize, usize_to_u32},
     traits::{
         Archive, ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedLayout, ArchivedValidate,
         ArchivedValidationContext, ByteSink, LayoutSink,
+    },
+    utils::{
+        byteops,
+        num::{u32_to_usize, usize_to_u32},
     },
 };
 

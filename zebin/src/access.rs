@@ -7,8 +7,8 @@ use crate::{
         validator::Validator,
     },
     format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
-    num::{u32_to_nonzero_usize, u32_to_usize},
     traits::{Archive, ArchivedDecode, ArchivedLayout, ArchivedValidate, ZebinError},
+    utils::num::{u32_to_nonzero_usize, u32_to_usize},
 };
 
 /// Safe access layer output that keeps the validated byte slice alive.

@@ -1,6 +1,6 @@
 use crate::{
     ZebinError,
-    num::{read_fixed, u32_to_usize},
+    utils::num::{read_fixed, u32_to_usize},
 };
 use core::num::NonZeroUsize;
 
@@ -14,8 +14,7 @@ pub type SchemaRevision = u32;
 
 /// Object-level encoding family stored in layout metadata.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ObjectEncoding {
     #[default]
     Fixed = 0,
@@ -24,11 +23,9 @@ pub enum ObjectEncoding {
     Packed = 3,
 }
 
-
 /// Field-level encoding family stored in layout metadata.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FieldEncoding {
     #[default]
     Fixed = 0,
@@ -37,7 +34,6 @@ pub enum FieldEncoding {
     PackedLen = 3,
     RelPtr = 4,
 }
-
 
 /// A single field entry inside a layout descriptor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

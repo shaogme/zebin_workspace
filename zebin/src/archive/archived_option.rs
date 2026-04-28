@@ -3,7 +3,7 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError, byteops, traits::Archive, traits::ArchivedDecode,
+    ByteSink, LayoutSink, ZebinError, traits::Archive, traits::ArchivedDecode, utils::byteops,
 };
 
 /// Archived representation for `Option<T>`.

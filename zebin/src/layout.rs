@@ -4,12 +4,12 @@ use core::num::NonZeroUsize;
 use alloc::vec::Vec;
 
 use crate::{
-    ZebinError, byteops,
+    ZebinError,
     core::schema::{
         LayoutDescriptor, LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey,
     },
-    num::usize_to_u32,
     traits::{ByteSink, LayoutSink},
+    utils::{byteops, num::usize_to_u32},
 };
 
 #[cfg(feature = "no_std")]

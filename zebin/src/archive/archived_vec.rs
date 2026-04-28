@@ -3,10 +3,13 @@ use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError, byteops,
+    ByteSink, LayoutSink, ZebinError,
     core::rel_ptr::RelPtr,
-    num::{u32_to_usize, usize_to_u32},
     traits::{Archive, ArchivedDecode, SequenceResolverBuffer, SequenceSource, archived_bytes},
+    utils::{
+        byteops,
+        num::{u32_to_usize, usize_to_u32},
+    },
 };
 
 /// An archived vector that uses a relative pointer.

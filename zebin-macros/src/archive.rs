@@ -216,7 +216,7 @@ fn helper_bytes_impl(
             };
 
             fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-                zebin::byteops::fill(out, 0);
+                zebin::utils::byteops::fill(out, 0);
                 #(#writes)*
             }
         }
@@ -564,7 +564,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 };
 
                 fn write_archived_bytes(_archived: &Self, out: &mut [u8]) {
-                    zebin::byteops::fill(out, 0);
+                    zebin::utils::byteops::fill(out, 0);
                 }
             }
 
@@ -588,7 +588,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 };
 
                 fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-                    zebin::byteops::fill(out, 0);
+                    zebin::utils::byteops::fill(out, 0);
                     <u32 as zebin::ArchivedLayout>::write_archived_bytes(
                         &archived.tag,
                         &mut out[0..::core::mem::size_of::<u32>()],

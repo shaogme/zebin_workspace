@@ -4,10 +4,13 @@ use alloc::string::{String, ToString};
 
 use crate::{
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError, byteops,
+    ByteSink, LayoutSink, ZebinError,
     core::rel_ptr::RelPtr,
-    num::{u32_to_usize, usize_to_u32},
     traits::{Archive, ArchivedDecode},
+    utils::{
+        byteops,
+        num::{u32_to_usize, usize_to_u32},
+    },
 };
 
 /// An archived string that uses a relative pointer.
