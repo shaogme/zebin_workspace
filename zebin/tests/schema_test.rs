@@ -49,22 +49,29 @@ fn test_vtable_generation() {
     let field0_id = u16::from_le_bytes(buf[layout0_pos + 8..layout0_pos + 10].try_into().unwrap());
     let field0_offset =
         u16::from_le_bytes(buf[layout0_pos + 10..layout0_pos + 12].try_into().unwrap());
-    let field1_id =
-        u16::from_le_bytes(buf[layout0_pos + 12..layout0_pos + 14].try_into().unwrap());
+    let field1_id = u16::from_le_bytes(buf[layout0_pos + 12..layout0_pos + 14].try_into().unwrap());
     let field1_offset =
         u16::from_le_bytes(buf[layout0_pos + 14..layout0_pos + 16].try_into().unwrap());
-    let field2_id =
-        u16::from_le_bytes(buf[layout0_pos + 16..layout0_pos + 18].try_into().unwrap());
+    let field2_id = u16::from_le_bytes(buf[layout0_pos + 16..layout0_pos + 18].try_into().unwrap());
     let field2_offset =
         u16::from_le_bytes(buf[layout0_pos + 18..layout0_pos + 20].try_into().unwrap());
 
     use zebin::memoffset::offset_of;
     assert_eq!(field0_id, 0);
-    assert_eq!(field0_offset as usize, offset_of!(ArchivedVersionedUser, name));
+    assert_eq!(
+        field0_offset as usize,
+        offset_of!(ArchivedVersionedUser, name)
+    );
     assert_eq!(field1_id, 1);
-    assert_eq!(field1_offset as usize, offset_of!(ArchivedVersionedUser, id));
+    assert_eq!(
+        field1_offset as usize,
+        offset_of!(ArchivedVersionedUser, id)
+    );
     assert_eq!(field2_id, 2);
-    assert_eq!(field2_offset as usize, offset_of!(ArchivedVersionedUser, age));
+    assert_eq!(
+        field2_offset as usize,
+        offset_of!(ArchivedVersionedUser, age)
+    );
 }
 
 #[test]

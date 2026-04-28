@@ -2,9 +2,9 @@ use std::num::NonZeroUsize;
 use std::str;
 
 use crate::{
+    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
     core::{rel_ptr::RelPtr, validator::Validator},
     num::{u32_to_usize, usize_to_u32},
-    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
 };
 
 /// An archived string that uses a relative pointer.
@@ -73,7 +73,9 @@ impl<'a> SerializeState for StringSerializeState<'a> {
         if self.cursor < self.bytes.len() {
             Ok(SerializePoll::Pending)
         } else {
-            Ok(SerializePoll::Ready(self.start_pos.expect("start_pos set above")))
+            Ok(SerializePoll::Ready(
+                self.start_pos.expect("start_pos set above"),
+            ))
         }
     }
 }
@@ -105,7 +107,10 @@ impl Archive for String {
 }
 
 impl Serialize for String {
-    type State<'a> = StringSerializeState<'a> where Self: 'a;
+    type State<'a>
+        = StringSerializeState<'a>
+    where
+        Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
         StringSerializeState::new(self.as_bytes())

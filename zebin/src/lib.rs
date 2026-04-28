@@ -8,16 +8,16 @@ mod storage;
 mod traits;
 
 pub mod prelude {
-    pub use crate::{
-        decode, encode, encode_chunked, encode_into, validate, Archive, ArchiveHeader,
-        ArchiveView, ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView,
-        RelPtr, SerializePoll, SerializeState, Storage, Validator, ARCHIVE_HEADER_SIZE,
-        ARCHIVE_MAGIC, ARCHIVE_VERSION,
-    };
-    pub use crate::traits::{ByteState, Encoder, Serialize, Validate, ZebinError};
-    pub use zebin_macros::{ZebinArchive, ZebinSerialize};
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
+    pub use crate::traits::{ByteState, Encoder, Serialize, Validate, ZebinError};
+    pub use crate::{
+        ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, Archive, ArchiveHeader, ArchiveView,
+        ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr,
+        SerializePoll, SerializeState, Storage, Validator, decode, encode, encode_chunked,
+        encode_into, validate,
+    };
+    pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
 
 pub use crate::access::ArchiveView;
@@ -26,15 +26,15 @@ pub use crate::core::schema::{LayoutDescriptor, LayoutDirectory, LayoutField, La
 pub use crate::core::validator::Validator;
 pub use crate::format::{ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::storage::Storage;
+#[cfg(feature = "mmap")]
+pub use crate::storage::mmap::Mmap;
 pub use crate::traits::*;
 pub use memoffset;
 pub use zebin_macros::*;
-#[cfg(feature = "mmap")]
-pub use crate::storage::mmap::Mmap;
 
 use crate::{
     format::ArchiveHeader as ArchiveFormatHeader,
-    layout::{build_layout_section_bytes, MeasureEncoder, SliceEncoder},
+    layout::{MeasureEncoder, SliceEncoder, build_layout_section_bytes},
     num::{u32_to_usize, usize_to_nonzero_u32},
 };
 
@@ -52,14 +52,14 @@ where
     T: Serialize + Archive,
 {
     let mut encoder = MeasureEncoder::new(ARCHIVE_HEADER_SIZE);
-        let mut state = value.begin()?;
-        let resolver = loop {
-            match state.poll(&mut encoder)? {
-                SerializePoll::Pending => continue,
-                SerializePoll::Error(err) => return Err(err),
-                SerializePoll::Ready(resolver) => break resolver,
-            }
-        };
+    let mut state = value.begin()?;
+    let resolver = loop {
+        match state.poll(&mut encoder)? {
+            SerializePoll::Pending => continue,
+            SerializePoll::Error(err) => return Err(err),
+            SerializePoll::Ready(resolver) => break resolver,
+        }
+    };
 
     let _ = encoder.align(T::ALIGNMENT)?;
     let root_offset = encoder.pos();
@@ -125,13 +125,21 @@ enum EncodePhase<'a, T>
 where
     T: Serialize + Archive + 'a,
 {
-    Header { cursor: usize },
-    Body { state: <T as Serialize>::State<'a> },
+    Header {
+        cursor: usize,
+    },
+    Body {
+        state: <T as Serialize>::State<'a>,
+    },
     RootAlign {
         resolver: Option<<T as Archive>::Resolver>,
     },
-    Root { state: RootWriteState },
-    Layout { cursor: usize },
+    Root {
+        state: RootWriteState,
+    },
+    Layout {
+        cursor: usize,
+    },
     Done,
 }
 
@@ -272,43 +280,21 @@ where
         self.archive_pos = encoder.pos();
         Ok(encoder.written())
     }
-}
 
-/// Serialize a value into a newly allocated byte vector.
-pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
-where
-    T: Serialize + Archive,
-{
-    let mut writer = ArchiveWriter::new(value)?;
-    let mut buf = vec![0u8; writer.total_len()];
-    let mut written = 0usize;
-    while !writer.is_finished() {
-        let chunk = writer.write(&mut buf[written..])?;
-        written = written.checked_add(chunk).ok_or(ZebinError::WriteError)?;
-        if chunk == 0 && !writer.is_finished() {
-            return Err(ZebinError::WriteError);
+    /// Writes the archive into the provided buffer until completion.
+    pub fn write_all(&mut self, out: &mut [u8]) -> Result<usize, ZebinError> {
+        let mut total_written = 0usize;
+        while !self.is_finished() {
+            let chunk = self.write(&mut out[total_written..])?;
+            total_written = total_written
+                .checked_add(chunk)
+                .ok_or(ZebinError::WriteError)?;
+            if chunk == 0 && !self.is_finished() {
+                return Err(ZebinError::WriteError);
+            }
         }
+        Ok(total_written)
     }
-    Ok(buf)
-}
-
-/// Serialize a value into an existing vector, replacing its contents.
-pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
-where
-    T: Serialize + Archive,
-{
-    let mut writer = ArchiveWriter::new(value)?;
-    buf.clear();
-    buf.resize(writer.total_len(), 0);
-    let mut written = 0usize;
-    while !writer.is_finished() {
-        let chunk = writer.write(&mut buf[written..])?;
-        written = written.checked_add(chunk).ok_or(ZebinError::WriteError)?;
-        if chunk == 0 && !writer.is_finished() {
-            return Err(ZebinError::WriteError);
-        }
-    }
-    Ok(())
 }
 
 /// Create a chunked archive writer that can be resumed with caller-provided buffers.
@@ -317,6 +303,29 @@ where
     T: Serialize + Archive,
 {
     ArchiveWriter::new(value)
+}
+
+/// Serialize a value into a newly allocated byte vector.
+pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
+where
+    T: Serialize + Archive,
+{
+    let mut writer = encode_chunked(value)?;
+    let mut buf = vec![0u8; writer.total_len()];
+    writer.write_all(&mut buf)?;
+    Ok(buf)
+}
+
+/// Serialize a value into an existing vector, replacing its contents.
+pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
+where
+    T: Serialize + Archive,
+{
+    let mut writer = encode_chunked(value)?;
+    buf.clear();
+    buf.resize(writer.total_len(), 0);
+    writer.write_all(buf)?;
+    Ok(())
 }
 
 /// Decode and validate a byte slice into a zero-copy archived view.

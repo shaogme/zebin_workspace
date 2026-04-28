@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, spanned::Spanned, DeriveInput, Field, Result};
+use syn::{DeriveInput, Field, Result, parse_macro_input, spanned::Spanned};
 
 fn parse_field_id(field: &Field) -> Result<Option<u16>> {
     let mut field_id: Option<u16> = None;
@@ -32,8 +32,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }) => named,
         _ => {
             return syn::Error::new(span, "ZebinArchive 只支持具名字段的 struct")
-            .to_compile_error()
-            .into();
+                .to_compile_error()
+                .into();
         }
     };
 

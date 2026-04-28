@@ -232,7 +232,11 @@ impl Archive for bool {
     type Resolver = ();
     const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
 
-    fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(
+        &self,
+        _pos: usize,
+        _resolver: Self::Resolver,
+    ) -> Result<Self::Archived, ZebinError> {
         Ok(*self)
     }
 
@@ -242,10 +246,15 @@ impl Archive for bool {
 }
 
 impl Serialize for bool {
-    type State<'a> = ByteState<1> where Self: 'a;
+    type State<'a>
+        = ByteState<1>
+    where
+        Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(ByteState::new([*self as u8], unsafe { NonZeroUsize::new_unchecked(1) }))
+        Ok(ByteState::new([*self as u8], unsafe {
+            NonZeroUsize::new_unchecked(1)
+        }))
     }
 }
 

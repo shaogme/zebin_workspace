@@ -1,9 +1,9 @@
 use std::num::NonZeroUsize;
 
 use crate::{
+    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
     core::{rel_ptr::RelPtr, validator::Validator},
     num::{u32_to_usize, usize_to_u32},
-    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
 };
 
 /// An archived vector that uses a relative pointer.
@@ -147,7 +147,8 @@ where
                     if self.write_index >= self.items.len() {
                         self.phase = VecPhase::Done;
                         return Ok(SerializePoll::Ready(
-                            self.data_pos.expect("data_pos set when entering writing phase"),
+                            self.data_pos
+                                .expect("data_pos set when entering writing phase"),
                         ));
                     }
 
@@ -177,7 +178,8 @@ where
                 }
                 VecPhase::Done => {
                     return Ok(SerializePoll::Ready(
-                        self.data_pos.expect("data_pos set when entering writing phase"),
+                        self.data_pos
+                            .expect("data_pos set when entering writing phase"),
                     ));
                 }
             }
@@ -215,7 +217,10 @@ impl<T> Serialize for Vec<T>
 where
     T: Serialize + Archive,
 {
-    type State<'a> = VecSerializeState<'a, T> where Self: 'a;
+    type State<'a>
+        = VecSerializeState<'a, T>
+    where
+        Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
         VecSerializeState::new(self.as_slice())
@@ -247,12 +252,12 @@ where
                     pos: ptr as usize,
                 })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
-            let total_size = len
-                .checked_mul(std::mem::size_of::<T>())
-                .ok_or_else(|| ZebinError::ValidationError {
+            let total_size = len.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
+                ZebinError::ValidationError {
                     message: "ArchivedVec size overflow".to_string(),
                     pos: ptr as usize,
-                })?;
+                }
+            })?;
             context.check_range(data_ptr as *const u8, total_size)?;
             context.check_alignment(data_ptr as *const u8, T::ALIGNMENT)?;
 

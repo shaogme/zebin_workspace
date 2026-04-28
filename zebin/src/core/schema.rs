@@ -1,4 +1,4 @@
-use crate::{num::u32_to_usize, ZebinError};
+use crate::{ZebinError, num::u32_to_usize};
 use std::num::NonZeroUsize;
 
 /// A single field entry inside a layout descriptor.
@@ -83,10 +83,12 @@ impl<'a> LayoutView<'a> {
     }
 
     pub fn check_field(&self, field_id: u16, expected: u16) -> Result<(), ZebinError> {
-        let actual = self.field_offset(field_id).ok_or_else(|| ZebinError::ValidationError {
-            message: format!("Missing layout entry for field {}", field_id),
-            pos: self.entry_pos,
-        })?;
+        let actual = self
+            .field_offset(field_id)
+            .ok_or_else(|| ZebinError::ValidationError {
+                message: format!("Missing layout entry for field {}", field_id),
+                pos: self.entry_pos,
+            })?;
         if actual != expected {
             return Err(ZebinError::ValidationError {
                 message: format!(
@@ -114,8 +116,18 @@ impl<'a> Iterator for LayoutFieldIter<'a> {
         if self.remaining == 0 {
             return None;
         }
-        let field_id = u16::from_le_bytes(self.bytes.get(self.cursor..self.cursor + 2)?.try_into().ok()?);
-        let offset = u16::from_le_bytes(self.bytes.get(self.cursor + 2..self.cursor + 4)?.try_into().ok()?);
+        let field_id = u16::from_le_bytes(
+            self.bytes
+                .get(self.cursor..self.cursor + 2)?
+                .try_into()
+                .ok()?,
+        );
+        let offset = u16::from_le_bytes(
+            self.bytes
+                .get(self.cursor + 2..self.cursor + 4)?
+                .try_into()
+                .ok()?,
+        );
         self.cursor += 4;
         self.remaining -= 1;
         Some(LayoutField { field_id, offset })
@@ -147,12 +159,13 @@ impl<'a> LayoutDirectory<'a> {
 
     pub fn lookup(&self, schema_id: u32) -> Result<LayoutView<'a>, ZebinError> {
         let section_offset = self.section_offset.get();
-        let header_end = section_offset
-            .checked_add(4)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout section header overflow".to_string(),
-                pos: section_offset,
-            })?;
+        let header_end =
+            section_offset
+                .checked_add(4)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout section header overflow".to_string(),
+                    pos: section_offset,
+                })?;
         if header_end > self.bytes.len() {
             return Err(ZebinError::ValidationError {
                 message: "Layout section header out of bounds".to_string(),
@@ -189,15 +202,18 @@ impl<'a> LayoutDirectory<'a> {
         }
 
         let offsets_pos = header_end;
-        let offsets_end = offsets_pos
-            .checked_add(num_layouts.checked_mul(4).ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout offset table overflow".to_string(),
-                pos: section_offset,
-            })?)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout offset table overflow".to_string(),
-                pos: section_offset,
-            })?;
+        let offsets_end =
+            offsets_pos
+                .checked_add(num_layouts.checked_mul(4).ok_or_else(|| {
+                    ZebinError::ValidationError {
+                        message: "Layout offset table overflow".to_string(),
+                        pos: section_offset,
+                    }
+                })?)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout offset table overflow".to_string(),
+                    pos: section_offset,
+                })?;
         if offsets_end > self.bytes.len() {
             return Err(ZebinError::ValidationError {
                 message: "Layout offset table out of bounds".to_string(),
@@ -230,12 +246,13 @@ impl<'a> LayoutDirectory<'a> {
                 pos: offset_pos,
             })?;
 
-        let entry_header_end = entry_pos
-            .checked_add(8)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout entry overflow".to_string(),
-                pos: entry_pos,
-            })?;
+        let entry_header_end =
+            entry_pos
+                .checked_add(8)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout entry overflow".to_string(),
+                    pos: entry_pos,
+                })?;
         if entry_header_end > self.bytes.len() {
             return Err(ZebinError::ValidationError {
                 message: "Layout entry out of bounds".to_string(),

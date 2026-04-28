@@ -98,7 +98,10 @@ impl ArchiveHeader {
         Ok(Self::new(version, flags, layout_offset, root_offset))
     }
 
-    pub fn to_bytes(layout_offset: NonZeroU32, root_offset: NonZeroU32) -> [u8; ARCHIVE_HEADER_SIZE] {
+    pub fn to_bytes(
+        layout_offset: NonZeroU32,
+        root_offset: NonZeroU32,
+    ) -> [u8; ARCHIVE_HEADER_SIZE] {
         let mut bytes = [0u8; ARCHIVE_HEADER_SIZE];
         bytes[0..2].copy_from_slice(&ARCHIVE_MAGIC);
         bytes[2] = ARCHIVE_VERSION;

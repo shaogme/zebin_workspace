@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, spanned::Spanned, DeriveInput, Field, Result};
+use syn::{DeriveInput, Field, Result, parse_macro_input, spanned::Spanned};
 
 fn parse_field_id(field: &Field) -> Result<Option<u16>> {
     let mut field_id: Option<u16> = None;
@@ -86,18 +86,15 @@ pub fn derive(input: TokenStream) -> TokenStream {
     });
 
     let layout_fields = if is_evolvable {
-        let entries = field_ids
-            .iter()
-            .zip(field_names.iter())
-            .map(|(id, field)| {
-                let id = id.expect("field ids are validated above");
-                quote! {
-                    zebin::LayoutField {
-                        field_id: #id,
-                        offset: zebin::memoffset::offset_of!(#archived_name, #field) as u16,
-                    }
+        let entries = field_ids.iter().zip(field_names.iter()).map(|(id, field)| {
+            let id = id.expect("field ids are validated above");
+            quote! {
+                zebin::LayoutField {
+                    field_id: #id,
+                    offset: zebin::memoffset::offset_of!(#archived_name, #field) as u16,
                 }
-            });
+            }
+        });
 
         quote! {
             let layout: &[zebin::LayoutField] = &[

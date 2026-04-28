@@ -3,10 +3,10 @@ use std::convert::TryFrom;
 use std::num::NonZeroUsize;
 
 use crate::{
+    ZebinError,
     core::schema::{LayoutDescriptor, LayoutField},
     num::usize_to_u32,
     traits::Encoder,
-    ZebinError,
 };
 
 /// Shared layout registry used by both the measuring and emitting encoders.
@@ -76,7 +76,10 @@ impl Encoder for MeasureEncoder {
         let alignment = alignment.get();
         let pos = self.pos;
         let padding = (alignment - (pos % alignment)) % alignment;
-        self.pos = self.pos.checked_add(padding).ok_or(ZebinError::WriteError)?;
+        self.pos = self
+            .pos
+            .checked_add(padding)
+            .ok_or(ZebinError::WriteError)?;
         Ok(padding)
     }
 

@@ -2,10 +2,7 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 
 use crate::{
-    core::{
-        validator::Validator,
-        schema::LayoutDirectory,
-    },
+    core::{schema::LayoutDirectory, validator::Validator},
     format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
     num::{u32_to_nonzero_usize, u32_to_usize},
     traits::{Archive, Validate, ZebinError},
@@ -171,23 +168,25 @@ fn validate_layout_section(bytes: &[u8], layout_offset: NonZeroUsize) -> Result<
             layout_pos + 4,
             "Layout field count",
         )?));
-        let entry_size = 8usize
-            .checked_add(field_count.checked_mul(4).ok_or_else(|| {
-                ZebinError::ValidationError {
+        let entry_size =
+            8usize
+                .checked_add(field_count.checked_mul(4).ok_or_else(|| {
+                    ZebinError::ValidationError {
+                        message: "Layout field table overflow".to_string(),
+                        pos: layout_pos,
+                    }
+                })?)
+                .ok_or_else(|| ZebinError::ValidationError {
                     message: "Layout field table overflow".to_string(),
                     pos: layout_pos,
-                }
-            })?)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout field table overflow".to_string(),
-                pos: layout_pos,
-            })?;
-        let entry_end = layout_pos
-            .checked_add(entry_size)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout entry overflow".to_string(),
-                pos: layout_pos,
-            })?;
+                })?;
+        let entry_end =
+            layout_pos
+                .checked_add(entry_size)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout entry overflow".to_string(),
+                    pos: layout_pos,
+                })?;
         if entry_end > bytes.len() {
             return Err(ZebinError::ValidationError {
                 message: "Layout entry payload out of bounds".to_string(),
