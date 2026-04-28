@@ -131,13 +131,13 @@ fn test_enum_layout_mismatch_rejected() {
             .unwrap(),
     ) as usize;
     let layout0_pos = layout_offset + layout0_offset;
-    let field0_offset_pos = layout0_pos + 14;
-    let field0_offset = u16::from_le_bytes(
-        buf[field0_offset_pos..field0_offset_pos + 2]
+    let field0_offset_pos = layout0_pos + 16 + 2;
+    let field0_offset = u32::from_le_bytes(
+        buf[field0_offset_pos..field0_offset_pos + 4]
             .try_into()
             .unwrap(),
     );
-    buf[field0_offset_pos..field0_offset_pos + 2]
+    buf[field0_offset_pos..field0_offset_pos + 4]
         .copy_from_slice(&(field0_offset + 1).to_le_bytes());
 
     let err = zebin::validate::<StructPacket>(&buf).unwrap_err();

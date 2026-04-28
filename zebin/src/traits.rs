@@ -11,12 +11,24 @@ use alloc::{
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::byteops;
-use crate::core::schema::{LayoutField, SchemaRevision, StableSchemaKey};
+use crate::core::schema::{LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey};
 
 /// Archived-side binary layout contract.
 pub trait ArchivedLayout {
     /// The alignment requirement for the archived representation.
     const ALIGNMENT: NonZeroUsize;
+
+    /// Object encoding family used in schema metadata and archive flags.
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Fixed;
+
+    /// Optional byte width used when the archived form is not a plain fixed-size overlay.
+    fn encoded_len(archived: &Self) -> usize
+    where
+        Self: Sized,
+    {
+        let _ = archived;
+        core::mem::size_of::<Self>()
+    }
 
     /// Write a deterministic byte representation of an archived value.
     fn write_archived_bytes(archived: &Self, out: &mut [u8]);
@@ -26,7 +38,7 @@ pub trait ArchivedLayout {
     where
         Self: Sized,
     {
-        let mut out = vec![0u8; core::mem::size_of::<Self>()];
+        let mut out = vec![0u8; Self::encoded_len(archived)];
         Self::write_archived_bytes(archived, &mut out);
         out
     }
@@ -45,6 +57,46 @@ pub trait ArchivedValidate {
         Ok(())
     }
 }
+
+/// Archived-side decode contract for borrowing a validated view from bytes.
+pub trait ArchivedDecode<'a> {
+    type View: 'a;
+
+    /// Decode a borrowed view from a validated archived pointer.
+    ///
+    /// The returned span is the number of bytes consumed by this archived value.
+    ///
+    /// # Safety
+    /// `ptr` must point to the first byte of a readable archived value at `context`'s current archive.
+    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError>;
+}
+
+macro_rules! impl_archived_decode_fixed_primitive {
+    ($($t:ty),* $(,)?) => {
+        $(
+            impl<'a> ArchivedDecode<'a> for $t {
+                type View = &'a Self;
+
+                unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+                    ptr: *const u8,
+                    context: &mut C,
+                ) -> Result<(Self::View, usize), ZebinError> {
+                    context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+                    let typed_ptr = ptr as *const Self;
+                    unsafe { <$t as ArchivedValidate>::validate(typed_ptr, context)?; }
+                    Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+                }
+            }
+        )*
+    };
+}
+
+impl_archived_decode_fixed_primitive!(
+    u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64, bool
+);
 
 /// Object model layer: type-level archive/serialize/validate contracts.
 pub trait Archive {
@@ -179,6 +231,7 @@ pub trait LayoutSink {
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
+        encoding: ObjectEncoding,
         layout: &[LayoutField],
     ) -> Result<(), ZebinError>;
 }
@@ -293,6 +346,24 @@ impl<T: ArchivedLayout + ArchivedValidate, const N: usize> ArchivedValidate for 
         }
 
         Ok(())
+    }
+}
+
+impl<'a, T, const N: usize> ArchivedDecode<'a> for [T; N]
+where
+    T: ArchivedLayout + ArchivedValidate + 'a,
+{
+    type View = &'a Self;
+
+    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError> {
+        let typed_ptr = ptr as *const Self;
+        unsafe {
+            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+        }
+        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 

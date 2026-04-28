@@ -530,7 +530,8 @@ pub fn layout_field_entries(
             quote::quote! {
                 zebin::LayoutField {
                     field_id: #field_id,
-                    offset: zebin::memoffset::offset_of!(#archived_name, #member) as u16,
+                    offset: zebin::memoffset::offset_of!(#archived_name, #member) as u32,
+                    encoding: zebin::FieldEncoding::Fixed,
                 }
             }
         })

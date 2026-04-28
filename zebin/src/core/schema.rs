@@ -12,11 +12,39 @@ pub type StableSchemaKey = u32;
 /// Monotonic schema revision for a stable schema key.
 pub type SchemaRevision = u32;
 
+/// Object-level encoding family stored in layout metadata.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
+pub enum ObjectEncoding {
+    #[default]
+    Fixed = 0,
+    Mixed = 1,
+    VarInt = 2,
+    Packed = 3,
+}
+
+
+/// Field-level encoding family stored in layout metadata.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
+pub enum FieldEncoding {
+    #[default]
+    Fixed = 0,
+    VarInt = 1,
+    PackedBits = 2,
+    PackedLen = 3,
+    RelPtr = 4,
+}
+
+
 /// A single field entry inside a layout descriptor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LayoutField {
     pub field_id: u16,
-    pub offset: u16,
+    pub offset: u32,
+    pub encoding: FieldEncoding,
 }
 
 /// An owned layout descriptor used while constructing an archive.
@@ -24,6 +52,7 @@ pub struct LayoutField {
 pub struct LayoutDescriptor {
     pub stable_schema_key: StableSchemaKey,
     pub schema_revision: SchemaRevision,
+    pub encoding: ObjectEncoding,
     pub fields: Vec<LayoutField>,
 }
 
@@ -31,6 +60,7 @@ impl LayoutDescriptor {
     pub fn new(
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
+        encoding: ObjectEncoding,
         mut fields: Vec<LayoutField>,
     ) -> Result<Self, ZebinError> {
         fields.sort_unstable_by_key(|field| field.field_id);
@@ -42,11 +72,12 @@ impl LayoutDescriptor {
         Ok(Self {
             stable_schema_key,
             schema_revision,
+            encoding,
             fields,
         })
     }
 
-    pub fn field_offset(&self, field_id: u16) -> Option<u16> {
+    pub fn field_offset(&self, field_id: u16) -> Option<u32> {
         self.fields
             .binary_search_by_key(&field_id, |field| field.field_id)
             .ok()
@@ -89,6 +120,20 @@ impl<'a> LayoutView<'a> {
         u32::from_le_bytes(revision_bytes)
     }
 
+    pub fn encoding(&self) -> ObjectEncoding {
+        match self
+            .bytes
+            .get(self.entry_pos + 10)
+            .copied()
+            .unwrap_or_default()
+        {
+            1 => ObjectEncoding::Mixed,
+            2 => ObjectEncoding::VarInt,
+            3 => ObjectEncoding::Packed,
+            _ => ObjectEncoding::Fixed,
+        }
+    }
+
     pub fn field_count(&self) -> usize {
         self.field_count
     }
@@ -96,12 +141,12 @@ impl<'a> LayoutView<'a> {
     pub fn fields(&self) -> LayoutFieldIter<'a> {
         LayoutFieldIter {
             bytes: self.bytes,
-            cursor: self.entry_pos + 12,
+            cursor: self.entry_pos + 16,
             remaining: self.field_count,
         }
     }
 
-    pub fn field_offset(&self, field_id: u16) -> Option<u16> {
+    pub fn field_offset(&self, field_id: u16) -> Option<u32> {
         for field in self.fields() {
             if field.field_id == field_id {
                 return Some(field.offset);
@@ -110,7 +155,7 @@ impl<'a> LayoutView<'a> {
         None
     }
 
-    pub fn check_field(&self, field_id: u16, expected: u16) -> Result<(), ZebinError> {
+    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), ZebinError> {
         let actual = self
             .field_offset(field_id)
             .ok_or_else(|| ZebinError::ValidationError {
@@ -150,15 +195,26 @@ impl<'a> Iterator for LayoutFieldIter<'a> {
                 .try_into()
                 .ok()?,
         );
-        let offset = u16::from_le_bytes(
+        let offset = u32::from_le_bytes(
             self.bytes
-                .get(self.cursor + 2..self.cursor + 4)?
+                .get(self.cursor + 2..self.cursor + 6)?
                 .try_into()
                 .ok()?,
         );
-        self.cursor += 4;
+        let encoding = match self.bytes.get(self.cursor + 6).copied().unwrap_or_default() {
+            1 => FieldEncoding::VarInt,
+            2 => FieldEncoding::PackedBits,
+            3 => FieldEncoding::PackedLen,
+            4 => FieldEncoding::RelPtr,
+            _ => FieldEncoding::Fixed,
+        };
+        self.cursor += 8;
         self.remaining -= 1;
-        Some(LayoutField { field_id, offset })
+        Some(LayoutField {
+            field_id,
+            offset,
+            encoding,
+        })
     }
 }
 
@@ -237,7 +293,7 @@ impl<'a> ParsedLayoutSection<'a> {
 
             let entry_header_end =
                 entry_pos
-                    .checked_add(12)
+                    .checked_add(16)
                     .ok_or_else(|| ZebinError::ValidationError {
                         message: "Layout entry overflow".to_string(),
                         pos: entry_pos,
@@ -294,8 +350,8 @@ impl<'a> ParsedLayoutSection<'a> {
                 .map_err(|_| ZebinError::LayoutError)?,
         ));
         let entry_end = entry_pos
-            .checked_add(12)
-            .and_then(|pos| pos.checked_add(field_count.checked_mul(4)?))
+            .checked_add(16)
+            .and_then(|pos| pos.checked_add(field_count.checked_mul(8)?))
             .ok_or_else(|| ZebinError::ValidationError {
                 message: "Layout field table overflow".to_string(),
                 pos: entry_pos,
@@ -379,7 +435,7 @@ fn parse_layout_section<'a>(
                 pos: offset_pos,
             })?;
 
-        let entry_header_len = 12;
+        let entry_header_len = 16;
         let entry_header_end = layout_pos.checked_add(entry_header_len).ok_or_else(|| {
             ZebinError::ValidationError {
                 message: "Layout entry overflow".to_string(),
@@ -400,7 +456,7 @@ fn parse_layout_section<'a>(
         )?));
         let entry_size =
             entry_header_len
-                .checked_add(field_count.checked_mul(4).ok_or_else(|| {
+                .checked_add(field_count.checked_mul(8).ok_or_else(|| {
                     ZebinError::ValidationError {
                         message: "Layout field table overflow".to_string(),
                         pos: layout_pos,

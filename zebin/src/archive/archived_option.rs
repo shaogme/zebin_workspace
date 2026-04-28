@@ -3,7 +3,7 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
     ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
-    ByteSink, LayoutSink, ZebinError, byteops, traits::Archive,
+    ByteSink, LayoutSink, ZebinError, byteops, traits::Archive, traits::ArchivedDecode,
 };
 
 /// Archived representation for `Option<T>`.
@@ -83,6 +83,24 @@ where
                 pos: ptr as usize,
             }),
         }
+    }
+}
+
+impl<'a, T: 'a> ArchivedDecode<'a> for ArchivedOption<T>
+where
+    T: ArchivedLayout + ArchivedValidate,
+{
+    type View = &'a Self;
+
+    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError> {
+        let typed_ptr = ptr as *const Self;
+        unsafe {
+            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+        }
+        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 

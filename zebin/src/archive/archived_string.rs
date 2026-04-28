@@ -7,7 +7,7 @@ use crate::{
     ByteSink, LayoutSink, ZebinError, byteops,
     core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
-    traits::Archive,
+    traits::{Archive, ArchivedDecode},
 };
 
 /// An archived string that uses a relative pointer.
@@ -85,6 +85,21 @@ impl ArchivedValidate for ArchivedString {
         }
 
         Ok(())
+    }
+}
+
+impl<'a> ArchivedDecode<'a> for ArchivedString {
+    type View = &'a Self;
+
+    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError> {
+        let typed_ptr = ptr as *const Self;
+        unsafe {
+            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+        }
+        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 

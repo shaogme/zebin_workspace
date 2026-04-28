@@ -24,17 +24,19 @@ pub mod prelude {
         ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
         PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
     };
+    pub use crate::archive::varint::{VarInt, VarIntView};
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{
-        Archive, ArchiveBuilder, ArchiveState, ArchivedDepthGuard, ArchivedLayout,
+        Archive, ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedDepthGuard, ArchivedLayout,
         ArchivedValidate, ArchivedValidationContext, ByteSink, ByteState, LayoutSink, ZebinError,
         archived_bytes,
     };
     pub use crate::{
         ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader, ArchiveView,
-        ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr,
-        ResolvedLayout, Storage, Validator, decode, encode, encode_chunked, encode_into, validate,
+        ArchiveWriter, FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView,
+        ObjectEncoding, RelPtr, ResolvedLayout, Storage, Validator, decode, encode, encode_chunked,
+        encode_into, validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinArchiveBuilder};
 }
@@ -45,9 +47,11 @@ pub use crate::archive::packed::{
     ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec, PackedSlice,
     PackedU8Slice, PackedU8Vec, PackedVec,
 };
+pub use crate::archive::varint::{VarInt, VarIntView};
 pub use crate::core::rel_ptr::RelPtr;
 pub use crate::core::schema::{
-    LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, SchemaRevision, StableSchemaKey,
+    FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
+    SchemaRevision, StableSchemaKey,
 };
 pub use crate::core::validator::Validator;
 pub use crate::format::{ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
@@ -55,8 +59,9 @@ pub use crate::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::storage::mmap::Mmap;
 pub use crate::traits::{
-    Archive, ArchiveBuilder, ArchiveState, ArchivedDepthGuard, ArchivedLayout, ArchivedValidate,
-    ArchivedValidationContext, ByteSink, ByteState, LayoutSink, ZebinError, archived_bytes,
+    Archive, ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedDepthGuard, ArchivedLayout,
+    ArchivedValidate, ArchivedValidationContext, ByteSink, ByteState, LayoutSink, ZebinError,
+    archived_bytes,
 };
 pub use memoffset;
 pub use zebin_macros::*;
@@ -134,7 +139,11 @@ where
         root_pos,
         layout_pos,
         total_len,
-        header_bytes: ArchiveFormatHeader::to_bytes(layout_offset, root_offset),
+        header_bytes: ArchiveFormatHeader::to_bytes(
+            <T::Archived as crate::ArchivedLayout>::OBJECT_ENCODING as u8,
+            layout_offset,
+            root_offset,
+        ),
         layout_bytes,
         layouts,
     })
@@ -364,7 +373,8 @@ where
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: ArchivedLayout + ArchivedValidate,
+    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: ::core::ops::Deref,
 {
     access::decode(bytes)
 }
@@ -374,7 +384,8 @@ pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
     T::Archived: 'a,
-    T::Archived: ArchivedLayout + ArchivedValidate,
+    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: ::core::ops::Deref,
 {
     access::validate::<T>(bytes)
 }

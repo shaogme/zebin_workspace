@@ -179,7 +179,7 @@ fn helper_bytes_impl(
             let field_id = field.field_id.expect("field ids are validated above");
             let member = record_field_member(record, index);
             quote! {
-                layout.check_field(#field_id, zebin::memoffset::offset_of!(#archived_name, #member) as u16)?;
+                layout.check_field(#field_id, zebin::memoffset::offset_of!(#archived_name, #member) as u32)?;
             }
         }).collect();
 
@@ -232,6 +232,19 @@ fn helper_bytes_impl(
                 #layout_checks
                 #(#field_validations)*
                 Ok(())
+            }
+        }
+
+        impl<'a> zebin::ArchivedDecode<'a> for #archived_name {
+            type View = &'a Self;
+
+            unsafe fn decode_view<C: zebin::ArchivedValidationContext + ?Sized>(
+                ptr: *const u8,
+                context: &mut C,
+            ) -> Result<(Self::View, usize), zebin::ZebinError> {
+                let typed_ptr = ptr as *const Self;
+                unsafe { <Self as zebin::ArchivedValidate>::validate(typed_ptr, context)?; }
+                Ok((unsafe { &*typed_ptr }, ::core::mem::size_of::<Self>()))
             }
         }
     }
@@ -623,6 +636,21 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
 
     let root_validate = quote! {};
 
+    let root_decode = quote! {
+        impl<'a> zebin::ArchivedDecode<'a> for #archived_name {
+            type View = &'a Self;
+
+            unsafe fn decode_view<C: zebin::ArchivedValidationContext + ?Sized>(
+                ptr: *const u8,
+                context: &mut C,
+            ) -> Result<(Self::View, usize), zebin::ZebinError> {
+                let typed_ptr = ptr as *const Self;
+                unsafe { <Self as zebin::ArchivedValidate>::validate(typed_ptr, context)?; }
+                Ok((unsafe { &*typed_ptr }, ::core::mem::size_of::<Self>()))
+            }
+        }
+    };
+
     let root_archive = if variants.is_empty() {
         quote! {
             impl zebin::Archive for #name {
@@ -669,6 +697,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
 
         #payload_struct
         #root_bytes
+        #root_decode
         #root_accessors
         #root_validate
         #root_archive

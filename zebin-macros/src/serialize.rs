@@ -105,7 +105,12 @@ fn layout_fields(
         let layout: &[zebin::LayoutField] = &[
             #(#entries),*
         ];
-        encoder.register_layout(#stable_schema_key, #schema_revision, layout)?;
+        encoder.register_layout(
+            #stable_schema_key,
+            #schema_revision,
+            zebin::ObjectEncoding::Fixed,
+            layout,
+        )?;
     }
 }
 

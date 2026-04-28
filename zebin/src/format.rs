@@ -79,13 +79,14 @@ impl ArchiveHeader {
     }
 
     pub fn to_bytes(
+        flags: u8,
         layout_offset: NonZeroU32,
         root_offset: NonZeroU32,
     ) -> [u8; ARCHIVE_HEADER_SIZE] {
         let mut bytes = [0u8; ARCHIVE_HEADER_SIZE];
         bytes[0..2].copy_from_slice(&ARCHIVE_MAGIC);
         bytes[2] = ARCHIVE_VERSION;
-        bytes[3] = 0;
+        bytes[3] = flags;
         bytes[4..8].copy_from_slice(&layout_offset.get().to_le_bytes());
         bytes[8..12].copy_from_slice(&root_offset.get().to_le_bytes());
         bytes

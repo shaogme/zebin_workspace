@@ -6,7 +6,7 @@ use crate::{
     ByteSink, LayoutSink, ZebinError, byteops,
     core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
-    traits::{Archive, SequenceResolverBuffer, SequenceSource, archived_bytes},
+    traits::{Archive, ArchivedDecode, SequenceResolverBuffer, SequenceSource, archived_bytes},
 };
 
 /// An archived vector that uses a relative pointer.
@@ -109,6 +109,24 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<'a, T: 'a> ArchivedDecode<'a> for ArchivedVec<T>
+where
+    T: ArchivedLayout + ArchivedValidate,
+{
+    type View = &'a Self;
+
+    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError> {
+        let typed_ptr = ptr as *const Self;
+        unsafe {
+            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+        }
+        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 

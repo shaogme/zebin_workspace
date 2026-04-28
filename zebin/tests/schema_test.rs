@@ -41,7 +41,7 @@ fn test_vtable_generation() {
     );
     let layout0_pos = (layout_offset + layout0_offset) as usize;
 
-    // Layout entry: stable_schema_key (4) + schema_revision (4) + field_count (2) + reserved (2) + 3 field records.
+    // Layout entry: stable_schema_key (4) + schema_revision (4) + field_count (2) + encoding/reserved (6) + 3 field records.
     let stable_schema_key =
         u32::from_le_bytes(buf[layout0_pos..layout0_pos + 4].try_into().unwrap());
     assert_eq!(stable_schema_key, 324478056);
@@ -52,15 +52,15 @@ fn test_vtable_generation() {
     let num_fields = u16::from_le_bytes(buf[layout0_pos + 8..layout0_pos + 10].try_into().unwrap());
     assert_eq!(num_fields, 3);
 
-    let field0_id = u16::from_le_bytes(buf[layout0_pos + 12..layout0_pos + 14].try_into().unwrap());
+    let field0_id = u16::from_le_bytes(buf[layout0_pos + 16..layout0_pos + 18].try_into().unwrap());
     let field0_offset =
-        u16::from_le_bytes(buf[layout0_pos + 14..layout0_pos + 16].try_into().unwrap());
-    let field1_id = u16::from_le_bytes(buf[layout0_pos + 16..layout0_pos + 18].try_into().unwrap());
+        u32::from_le_bytes(buf[layout0_pos + 18..layout0_pos + 22].try_into().unwrap());
+    let field1_id = u16::from_le_bytes(buf[layout0_pos + 24..layout0_pos + 26].try_into().unwrap());
     let field1_offset =
-        u16::from_le_bytes(buf[layout0_pos + 18..layout0_pos + 20].try_into().unwrap());
-    let field2_id = u16::from_le_bytes(buf[layout0_pos + 20..layout0_pos + 22].try_into().unwrap());
+        u32::from_le_bytes(buf[layout0_pos + 26..layout0_pos + 30].try_into().unwrap());
+    let field2_id = u16::from_le_bytes(buf[layout0_pos + 32..layout0_pos + 34].try_into().unwrap());
     let field2_offset =
-        u16::from_le_bytes(buf[layout0_pos + 22..layout0_pos + 24].try_into().unwrap());
+        u32::from_le_bytes(buf[layout0_pos + 34..layout0_pos + 38].try_into().unwrap());
 
     use zebin::memoffset::offset_of;
     assert_eq!(field0_id, 0);

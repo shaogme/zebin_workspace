@@ -8,7 +8,7 @@ use crate::{
     core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
     traits::{
-        Archive, ArchiveBuilder, ArchiveState, ArchivedLayout, ArchivedValidate,
+        Archive, ArchiveBuilder, ArchiveState, ArchivedDecode, ArchivedLayout, ArchivedValidate,
         ArchivedValidationContext, ByteSink, LayoutSink,
     },
 };
@@ -188,6 +188,21 @@ impl ArchivedValidate for ArchivedPackedBoolSlice {
     }
 }
 
+impl<'a> ArchivedDecode<'a> for ArchivedPackedBoolSlice {
+    type View = &'a Self;
+
+    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError> {
+        let typed_ptr = ptr as *const Self;
+        unsafe {
+            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+        }
+        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+    }
+}
+
 /// Archived packed small-integer slice. Values are stored using `BITS` bits.
 #[repr(C)]
 pub struct ArchivedPackedU8Slice<const BITS: u8> {
@@ -294,6 +309,21 @@ impl<const BITS: u8> ArchivedValidate for ArchivedPackedU8Slice<BITS> {
         }
 
         Ok(())
+    }
+}
+
+impl<'a, const BITS: u8> ArchivedDecode<'a> for ArchivedPackedU8Slice<BITS> {
+    type View = &'a Self;
+
+    unsafe fn decode_view<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const u8,
+        context: &mut C,
+    ) -> Result<(Self::View, usize), ZebinError> {
+        let typed_ptr = ptr as *const Self;
+        unsafe {
+            <Self as ArchivedValidate>::validate(typed_ptr, context)?;
+        }
+        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 

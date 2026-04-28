@@ -8,17 +8,25 @@ use crate::{
     },
     format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
     num::{u32_to_nonzero_usize, u32_to_usize},
-    traits::{Archive, ArchivedLayout, ArchivedValidate, ZebinError},
+    traits::{Archive, ArchivedDecode, ArchivedLayout, ArchivedValidate, ZebinError},
 };
 
 /// Safe access layer output that keeps the validated byte slice alive.
-pub struct ArchiveView<'a, T: Archive> {
+pub struct ArchiveView<'a, T: Archive>
+where
+    T::Archived: ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+{
     bytes: &'a [u8],
     header: ArchiveHeader,
-    root: &'a T::Archived,
+    root: <T::Archived as ArchivedDecode<'a>>::View,
 }
 
-impl<'a, T: Archive> ArchiveView<'a, T> {
+impl<'a, T: Archive> ArchiveView<'a, T>
+where
+    T::Archived: ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+{
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
     }
@@ -27,8 +35,8 @@ impl<'a, T: Archive> ArchiveView<'a, T> {
         self.header
     }
 
-    pub fn root(&self) -> &'a T::Archived {
-        self.root
+    pub fn root(&self) -> &<T::Archived as ArchivedDecode<'a>>::View {
+        &self.root
     }
 
     pub fn resolved_layout(
@@ -40,11 +48,15 @@ impl<'a, T: Archive> ArchiveView<'a, T> {
     }
 }
 
-impl<'a, T: Archive> Deref for ArchiveView<'a, T> {
-    type Target = T::Archived;
+impl<'a, T: Archive> Deref for ArchiveView<'a, T>
+where
+    T::Archived: ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: Deref,
+{
+    type Target = <<T::Archived as ArchivedDecode<'a>>::View as core::ops::Deref>::Target;
 
     fn deref(&self) -> &Self::Target {
-        self.root
+        self.root.deref()
     }
 }
 
@@ -113,7 +125,7 @@ impl<'a> ResolvedLayout<'a> {
         self.layout.schema_revision()
     }
 
-    pub fn field_offset(&self, field_id: u16) -> Option<u16> {
+    pub fn field_offset(&self, field_id: u16) -> Option<u32> {
         self.layout.field_offset(field_id)
     }
 }
@@ -122,7 +134,8 @@ impl<'a> ResolvedLayout<'a> {
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: ArchivedLayout + ArchivedValidate,
+    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: Deref,
 {
     check_archive(bytes)
 }
@@ -131,28 +144,17 @@ where
 fn check_archive<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: ArchivedLayout + ArchivedValidate,
+    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: Deref,
 {
     let header = ArchiveHeader::parse(bytes)?;
     let root_pos = u32_to_usize(header.root_offset.get(), || ZebinError::ValidationError {
         message: "Root offset exceeds usize range".to_string(),
         pos: 8,
     })?;
-    let root_end = root_pos
-        .checked_add(core::mem::size_of::<T::Archived>())
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: "Root range overflow".to_string(),
-            pos: root_pos,
-        })?;
     if root_pos < ARCHIVE_HEADER_SIZE {
         return Err(ZebinError::ValidationError {
             message: "Root overlaps archive header".to_string(),
-            pos: root_pos,
-        });
-    }
-    if root_end > bytes.len() {
-        return Err(ZebinError::ValidationError {
-            message: "Root out of bounds".to_string(),
             pos: root_pos,
         });
     }
@@ -172,12 +174,6 @@ where
         message: "Layout offset exceeds usize range".to_string(),
         pos: 4,
     })?;
-    if layout_offset < root_end {
-        return Err(ZebinError::ValidationError {
-            message: "Layout section overlaps root".to_string(),
-            pos: layout_offset,
-        });
-    }
     let layout_dir = LayoutDirectory::new(
         bytes,
         u32_to_nonzero_usize(
@@ -193,16 +189,32 @@ where
         )?,
     )?;
     let mut validator = Validator::with_layouts(bytes, layout_dir);
-    let root_ptr = unsafe { bytes.as_ptr().add(root_pos) as *const T::Archived };
-
-    unsafe {
-        <T::Archived as ArchivedValidate>::validate(root_ptr, &mut validator)?;
+    let root_ptr = unsafe { bytes.as_ptr().add(root_pos) };
+    let (root_view, root_span) =
+        unsafe { <T::Archived as ArchivedDecode<'a>>::decode_view(root_ptr, &mut validator)? };
+    let root_end = root_pos
+        .checked_add(root_span)
+        .ok_or_else(|| ZebinError::ValidationError {
+            message: "Root range overflow".to_string(),
+            pos: root_pos,
+        })?;
+    if root_end > bytes.len() {
+        return Err(ZebinError::ValidationError {
+            message: "Root out of bounds".to_string(),
+            pos: root_pos,
+        });
+    }
+    if layout_offset < root_end {
+        return Err(ZebinError::ValidationError {
+            message: "Layout section overlaps root".to_string(),
+            pos: layout_offset,
+        });
     }
 
     Ok(ArchiveView {
         bytes,
         header,
-        root: unsafe { &*root_ptr },
+        root: root_view,
     })
 }
 
@@ -211,7 +223,8 @@ pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
     T::Archived: 'a,
-    T::Archived: ArchivedLayout + ArchivedValidate,
+    T::Archived: ArchivedLayout + ArchivedValidate + ArchivedDecode<'a>,
+    <T::Archived as ArchivedDecode<'a>>::View: Deref,
 {
     decode::<T>(bytes).map(|_| ())
 }
