@@ -54,8 +54,9 @@ fn test_tuple_enum_round_trip() {
     assert_eq!(archived.tag(), 1);
 
     let data = unsafe { archived.as_data().unwrap() };
-    assert_eq!(*unsafe { data.field0(&buf).unwrap() }, 7);
-    assert_eq!(unsafe { data.field1(&buf).unwrap().as_str() }, "packet");
+    let layout = archived.resolved_layout(573785173, 0).unwrap();
+    assert_eq!(*unsafe { data.field0(&layout).unwrap() }, 7);
+    assert_eq!(unsafe { data.field1(&layout).unwrap().as_str() }, "packet");
 }
 
 #[test]
@@ -71,8 +72,9 @@ fn test_struct_enum_round_trip() {
     assert_eq!(archived.tag(), 1);
 
     let data = unsafe { archived.as_data().unwrap() };
-    assert_eq!(*unsafe { data.code(&buf).unwrap() }, 42);
-    assert_eq!(unsafe { data.label(&buf).unwrap().as_str() }, "hello");
+    let layout = archived.resolved_layout(1432778632, 0).unwrap();
+    assert_eq!(*unsafe { data.code(&layout).unwrap() }, 42);
+    assert_eq!(unsafe { data.label(&layout).unwrap().as_str() }, "hello");
 }
 
 #[test]

@@ -4,8 +4,8 @@ use syn::{DeriveInput, Member};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, VariantSpec, archived_name, has_schema, input_member,
-    parse_item, payload_name, user_member, variant_archived_name, variant_field_name,
-    variant_method_name,
+    layout_field_entries, parse_item, payload_name, user_member, variant_archived_name,
+    variant_field_name, variant_method_name,
 };
 
 // --- Helper Functions for Code Generation ---
@@ -117,25 +117,7 @@ fn helper_accessors(
         return quote! {};
     }
 
-    let stable_schema_key = record
-        .stable_schema_key
-        .expect("schema-bearing records require an explicit stable schema key");
-    let schema_revision = record.schema_revision;
-    let layout_fields: Vec<_> = record
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(field_index, field)| {
-            let field_id = field.field_id.expect("field ids are validated above");
-            let member = record_field_member(record, field_index);
-            quote! {
-                zebin::LayoutField {
-                    field_id: #field_id,
-                    offset: zebin::memoffset::offset_of!(#archived_name, #member) as u16,
-                }
-            }
-        })
-        .collect();
+    let layout_fields = layout_field_entries(record, archived_name);
     let methods = record.fields.iter().enumerate().map(|(index, field)| {
         let ty = field.ty;
         let field_id = field.field_id.expect("field ids are validated above");
@@ -143,22 +125,14 @@ fn helper_accessors(
         quote! {
             pub unsafe fn #method<'a>(
                 &'a self,
-                buffer: &'a [u8],
+                layout: &'a zebin::ResolvedLayout<'a>,
             ) -> Result<&'a <#ty as zebin::Archive>::Archived, zebin::ZebinError> {
-                let header = zebin::ArchiveHeader::parse(buffer)?;
-                let layout_dir = zebin::LayoutDirectory::new(
-                    buffer,
-                    ::core::num::NonZeroUsize::new(header.layout_offset.get() as usize).ok_or_else(|| zebin::ZebinError::ValidationError {
-                        message: "Layout offset cannot be zero".to_string(),
-                        pos: 4,
-                    })?,
-                );
-                let layout = layout_dir.lookup(#stable_schema_key, #schema_revision)?;
                 let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ZebinError::ValidationError {
                     message: format!("Field ID {} not found in layout", #field_id),
                     pos: self as *const _ as usize,
                 })?;
-                Ok(&*(((self as *const _ as *const u8).add(offset as usize)) as *const <#ty as zebin::Archive>::Archived))
+                let base = self as *const _ as *const u8;
+                Ok(&*(((base.add(offset as usize)) as *const <#ty as zebin::Archive>::Archived)))
             }
         }
     });
@@ -198,7 +172,8 @@ fn helper_bytes_impl(
 
         quote! {
             let archived = unsafe { &*ptr };
-            let layout = context.layout(#stable_schema_key, #schema_revision)?;
+            let layout = context.resolved_layout(#stable_schema_key, #schema_revision)?;
+            let layout = layout.layout();
             #(#checks)*
         }
     } else {

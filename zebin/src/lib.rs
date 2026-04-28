@@ -27,13 +27,14 @@ pub mod prelude {
     };
     pub use crate::{
         ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader, ArchiveView,
-        ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr, Storage,
-        Validator, decode, encode, encode_chunked, encode_into, validate,
+        ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr,
+        ResolvedLayout, Storage, Validator, decode, encode, encode_chunked, encode_into, validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinArchiveBuilder};
 }
 
 pub use crate::access::ArchiveView;
+pub use crate::access::ResolvedLayout;
 pub use crate::core::rel_ptr::RelPtr;
 pub use crate::core::schema::{
     LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, SchemaRevision, StableSchemaKey,

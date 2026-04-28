@@ -20,7 +20,7 @@ pub type HashMap<K, V> = std::collections::HashMap<K, V>;
 #[derive(Default)]
 pub(crate) struct LayoutRegistry {
     layouts: Vec<LayoutDescriptor>,
-    layout_map: HashMap<LayoutDescriptor, u32>,
+    layout_map: HashMap<(StableSchemaKey, SchemaRevision), u32>,
 }
 
 impl LayoutRegistry {
@@ -32,21 +32,21 @@ impl LayoutRegistry {
     ) -> Result<(), ZebinError> {
         let descriptor =
             LayoutDescriptor::new(stable_schema_key, schema_revision, layout.to_vec())?;
-        if let Some(existing) = self.layouts.iter().find(|existing| {
-            existing.stable_schema_key == stable_schema_key
-                && existing.schema_revision == schema_revision
-        }) && existing != &descriptor
-        {
-            return Err(ZebinError::LayoutError);
-        }
-        if let Some(&id) = self.layout_map.get(&descriptor) {
-            let _ = id;
+        let key = (stable_schema_key, schema_revision);
+        if let Some(&id) = self.layout_map.get(&key) {
+            let existing = self
+                .layouts
+                .get(id as usize)
+                .ok_or(ZebinError::LayoutError)?;
+            if existing != &descriptor {
+                return Err(ZebinError::LayoutError);
+            }
             return Ok(());
         }
 
         let id = usize_to_u32(self.layouts.len(), || ZebinError::LayoutError)?;
-        self.layouts.push(descriptor.clone());
-        self.layout_map.insert(descriptor, id);
+        self.layouts.push(descriptor);
+        self.layout_map.insert(key, id);
         Ok(())
     }
 

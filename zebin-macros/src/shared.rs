@@ -319,6 +319,27 @@ pub fn user_member(record: &RecordSpec<'_>, index: usize) -> Member {
     }
 }
 
+pub fn layout_field_entries(
+    record: &RecordSpec<'_>,
+    archived_name: &Ident,
+) -> Vec<proc_macro2::TokenStream> {
+    record
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let field_id = field.field_id.expect("field ids are validated above");
+            let member = user_member(record, index);
+            quote::quote! {
+                zebin::LayoutField {
+                    field_id: #field_id,
+                    offset: zebin::memoffset::offset_of!(#archived_name, #member) as u16,
+                }
+            }
+        })
+        .collect()
+}
+
 pub fn input_member(record: &RecordSpec<'_>, index: usize) -> Member {
     match record.style {
         RecordStyle::Named => Member::Named(

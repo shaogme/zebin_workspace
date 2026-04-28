@@ -79,11 +79,11 @@ pub trait ArchivedValidationContext {
 
     fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError>;
 
-    fn layout(
-        &self,
+    fn resolved_layout(
+        &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<crate::core::schema::LayoutView<'_>, ZebinError>;
+    ) -> Result<crate::access::ResolvedLayout<'_>, ZebinError>;
 }
 
 /// RAII guard that restores validation depth when dropped.

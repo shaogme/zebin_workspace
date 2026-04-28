@@ -1,36 +1,15 @@
 use core::num::NonZeroUsize;
 use core::ops::Deref;
 
-use alloc::{format, string::ToString};
-
 use crate::{
-    core::{schema::LayoutDirectory, validator::Validator},
+    core::{
+        schema::{LayoutDirectory, LayoutView},
+        validator::Validator,
+    },
     format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
     num::{u32_to_nonzero_usize, u32_to_usize},
     traits::{Archive, ArchivedLayout, ArchivedValidate, ZebinError},
 };
-
-fn read_fixed<const N: usize>(
-    bytes: &[u8],
-    pos: usize,
-    field: &'static str,
-) -> Result<[u8; N], ZebinError> {
-    let end = pos
-        .checked_add(N)
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: format!("{field} overflow"),
-            pos,
-        })?;
-    let slice = bytes
-        .get(pos..end)
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: format!("{field} out of bounds"),
-            pos,
-        })?;
-    let mut out = [0u8; N];
-    out.copy_from_slice(slice);
-    Ok(out)
-}
 
 /// Safe access layer output that keeps the validated byte slice alive.
 pub struct ArchiveView<'a, T: Archive> {
@@ -51,6 +30,14 @@ impl<'a, T: Archive> ArchiveView<'a, T> {
     pub fn root(&self) -> &'a T::Archived {
         self.root
     }
+
+    pub fn resolved_layout(
+        &self,
+        stable_schema_key: u32,
+        schema_revision: u32,
+    ) -> Result<ResolvedLayout<'a>, ZebinError> {
+        ResolvedLayout::new(self.bytes, stable_schema_key, schema_revision)
+    }
 }
 
 impl<'a, T: Archive> Deref for ArchiveView<'a, T> {
@@ -61,6 +48,76 @@ impl<'a, T: Archive> Deref for ArchiveView<'a, T> {
     }
 }
 
+/// Resolved layout handle for a specific schema key and revision.
+#[derive(Clone, Copy)]
+pub struct ResolvedLayout<'a> {
+    bytes: &'a [u8],
+    header: ArchiveHeader,
+    layout: LayoutView<'a>,
+}
+
+impl<'a> ResolvedLayout<'a> {
+    pub(crate) fn from_parts(
+        bytes: &'a [u8],
+        header: ArchiveHeader,
+        layout: LayoutView<'a>,
+    ) -> Self {
+        Self {
+            bytes,
+            header,
+            layout,
+        }
+    }
+
+    pub fn new(
+        bytes: &'a [u8],
+        stable_schema_key: u32,
+        schema_revision: u32,
+    ) -> Result<Self, ZebinError> {
+        let header = ArchiveHeader::parse(bytes)?;
+        let layout_dir = LayoutDirectory::new(
+            bytes,
+            u32_to_nonzero_usize(
+                header.layout_offset.get(),
+                || ZebinError::ValidationError {
+                    message: "Layout offset exceeds usize range".to_string(),
+                    pos: 4,
+                },
+                || ZebinError::ValidationError {
+                    message: "Layout offset cannot be zero".to_string(),
+                    pos: 4,
+                },
+            )?,
+        )?;
+        let layout = layout_dir.lookup(stable_schema_key, schema_revision)?;
+        Ok(Self::from_parts(bytes, header, layout))
+    }
+
+    pub fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
+    pub fn header(&self) -> ArchiveHeader {
+        self.header
+    }
+
+    pub fn layout(&self) -> LayoutView<'a> {
+        self.layout
+    }
+
+    pub fn stable_schema_key(&self) -> u32 {
+        self.layout.stable_schema_key()
+    }
+
+    pub fn schema_revision(&self) -> u32 {
+        self.layout.schema_revision()
+    }
+
+    pub fn field_offset(&self, field_id: u16) -> Option<u16> {
+        self.layout.field_offset(field_id)
+    }
+}
+
 /// Decode and validate the archived root object.
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
@@ -68,120 +125,6 @@ where
     T::Archived: ArchivedLayout + ArchivedValidate,
 {
     check_archive(bytes)
-}
-
-fn validate_layout_section(bytes: &[u8], layout_offset: NonZeroUsize) -> Result<(), ZebinError> {
-    let layout_offset = layout_offset.get();
-
-    let header_end = layout_offset
-        .checked_add(4)
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: "Layout section header overflow".to_string(),
-            pos: layout_offset,
-        })?;
-    if header_end > bytes.len() {
-        return Err(ZebinError::ValidationError {
-            message: "Layout section header out of bounds".to_string(),
-            pos: layout_offset,
-        });
-    }
-
-    let num_layouts = u32_to_usize(
-        u32::from_le_bytes(read_fixed::<4>(
-            bytes,
-            layout_offset,
-            "Layout section header",
-        )?),
-        || ZebinError::ValidationError {
-            message: "Layout section layout count exceeds usize range".to_string(),
-            pos: layout_offset,
-        },
-    )?;
-    let offsets_pos = header_end;
-    let offsets_end = offsets_pos
-        .checked_add(
-            num_layouts
-                .checked_mul(4)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout offset table overflow".to_string(),
-                    pos: layout_offset,
-                })?,
-        )
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: "Layout offset table overflow".to_string(),
-            pos: layout_offset,
-        })?;
-
-    if offsets_end > bytes.len() {
-        return Err(ZebinError::ValidationError {
-            message: "Layout offset table out of bounds".to_string(),
-            pos: offsets_pos,
-        });
-    }
-
-    for layout_idx in 0..num_layouts {
-        let offset_pos = offsets_pos + layout_idx * 4;
-        let layout_rel_offset = u32_to_usize(
-            u32::from_le_bytes(read_fixed::<4>(bytes, offset_pos, "Layout offset entry")?),
-            || ZebinError::ValidationError {
-                message: "Layout offset entry exceeds usize range".to_string(),
-                pos: offset_pos,
-            },
-        )?;
-        let layout_pos = layout_offset
-            .checked_add(layout_rel_offset)
-            .ok_or_else(|| ZebinError::ValidationError {
-                message: "Layout position overflow".to_string(),
-                pos: offset_pos,
-            })?;
-
-        let entry_header_len = 12;
-        let entry_header_end = layout_pos.checked_add(entry_header_len).ok_or_else(|| {
-            ZebinError::ValidationError {
-                message: "Layout entry overflow".to_string(),
-                pos: layout_pos,
-            }
-        })?;
-        if entry_header_end > bytes.len() {
-            return Err(ZebinError::ValidationError {
-                message: "Layout entry out of bounds".to_string(),
-                pos: layout_pos,
-            });
-        }
-
-        let field_count = usize::from(u16::from_le_bytes(read_fixed::<2>(
-            bytes,
-            layout_pos + 8,
-            "Layout field count",
-        )?));
-        let entry_size =
-            entry_header_len
-                .checked_add(field_count.checked_mul(4).ok_or_else(|| {
-                    ZebinError::ValidationError {
-                        message: "Layout field table overflow".to_string(),
-                        pos: layout_pos,
-                    }
-                })?)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout field table overflow".to_string(),
-                    pos: layout_pos,
-                })?;
-        let entry_end =
-            layout_pos
-                .checked_add(entry_size)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout entry overflow".to_string(),
-                    pos: layout_pos,
-                })?;
-        if entry_end > bytes.len() {
-            return Err(ZebinError::ValidationError {
-                message: "Layout entry payload out of bounds".to_string(),
-                pos: layout_pos,
-            });
-        }
-    }
-
-    Ok(())
 }
 
 /// Check the archive for safety and return a validated archive view.
@@ -235,21 +178,6 @@ where
             pos: layout_offset,
         });
     }
-    validate_layout_section(
-        bytes,
-        u32_to_nonzero_usize(
-            header.layout_offset.get(),
-            || ZebinError::ValidationError {
-                message: "Layout offset exceeds usize range".to_string(),
-                pos: 4,
-            },
-            || ZebinError::ValidationError {
-                message: "Layout offset cannot be zero".to_string(),
-                pos: 4,
-            },
-        )?,
-    )?;
-
     let layout_dir = LayoutDirectory::new(
         bytes,
         u32_to_nonzero_usize(
@@ -263,7 +191,7 @@ where
                 pos: 4,
             },
         )?,
-    );
+    )?;
     let mut validator = Validator::with_layouts(bytes, layout_dir);
     let root_ptr = unsafe { bytes.as_ptr().add(root_pos) as *const T::Archived };
 

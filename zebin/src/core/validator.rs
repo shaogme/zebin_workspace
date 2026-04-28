@@ -4,7 +4,8 @@ use alloc::string::ToString;
 
 use crate::{
     ZebinError,
-    core::schema::{LayoutDirectory, LayoutView, SchemaRevision, StableSchemaKey},
+    access::ResolvedLayout,
+    core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
     traits::ArchivedValidationContext,
 };
 
@@ -12,6 +13,7 @@ use crate::{
 pub struct Validator<'a> {
     data: &'a [u8],
     layouts: Option<LayoutDirectory<'a>>,
+    cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a>)>,
     depth: usize,
     max_depth: usize,
 }
@@ -34,6 +36,7 @@ impl<'a> Validator<'a> {
         Self {
             data,
             layouts: None,
+            cached_layout: None,
             depth: 0,
             max_depth: 256,
         }
@@ -43,6 +46,7 @@ impl<'a> Validator<'a> {
         Self {
             data,
             layouts: Some(layouts),
+            cached_layout: None,
             depth: 0,
             max_depth: 256,
         }
@@ -126,16 +130,27 @@ impl<'a> Validator<'a> {
         self.data
     }
 
-    pub fn layout(
-        &self,
+    pub fn resolved_layout(
+        &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<LayoutView<'a>, ZebinError> {
+    ) -> Result<ResolvedLayout<'a>, ZebinError> {
+        if let Some((cached_key, cached_revision, resolved)) = self.cached_layout
+            && cached_key == stable_schema_key
+            && cached_revision == schema_revision
+        {
+            return Ok(resolved);
+        }
+
         let layouts = self.layouts.ok_or_else(|| ZebinError::ValidationError {
             message: "Missing layout directory".to_string(),
             pos: 0,
         })?;
-        layouts.lookup(stable_schema_key, schema_revision)
+        let header = crate::format::ArchiveHeader::parse(self.data)?;
+        let layout = layouts.lookup(stable_schema_key, schema_revision)?;
+        let resolved = ResolvedLayout::from_parts(self.data, header, layout);
+        self.cached_layout = Some((stable_schema_key, schema_revision, resolved));
+        Ok(resolved)
     }
 }
 
@@ -156,11 +171,11 @@ impl<'a> ArchivedValidationContext for Validator<'a> {
         Validator::check_alignment(self, ptr, alignment)
     }
 
-    fn layout(
-        &self,
+    fn resolved_layout(
+        &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<LayoutView<'a>, ZebinError> {
-        Validator::layout(self, stable_schema_key, schema_revision)
+    ) -> Result<ResolvedLayout<'a>, ZebinError> {
+        Validator::resolved_layout(self, stable_schema_key, schema_revision)
     }
 }

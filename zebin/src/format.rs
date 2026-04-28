@@ -2,34 +2,12 @@ use core::num::NonZeroU32;
 
 use alloc::{format, string::ToString};
 
-use crate::ZebinError;
+use crate::{ZebinError, num::read_fixed};
 
 /// Archive format constants and header utilities.
 pub const ARCHIVE_MAGIC: [u8; 2] = *b"ZB";
 pub const ARCHIVE_VERSION: u8 = 1;
 pub const ARCHIVE_HEADER_SIZE: usize = 12;
-
-fn read_fixed<const N: usize>(
-    bytes: &[u8],
-    pos: usize,
-    field: &'static str,
-) -> Result<[u8; N], ZebinError> {
-    let end = pos
-        .checked_add(N)
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: format!("{field} overflow"),
-            pos,
-        })?;
-    let slice = bytes
-        .get(pos..end)
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: format!("{field} out of bounds"),
-            pos,
-        })?;
-    let mut out = [0u8; N];
-    out.copy_from_slice(slice);
-    Ok(out)
-}
 
 /// Parsed archive header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

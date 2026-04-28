@@ -4,8 +4,8 @@ use syn::DeriveInput;
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, VariantSpec, binder_slot_ident, has_schema, input_member,
-    parse_item, resolver_name, resolver_slot_ident, state_name, state_slot_ident, user_member,
-    variant_resolver_name, variant_state_name,
+    layout_field_entries, parse_item, resolver_name, resolver_slot_ident, state_name,
+    state_slot_ident, variant_resolver_name, variant_state_name,
 };
 
 // --- Helper Functions for Code Generation ---
@@ -80,16 +80,7 @@ fn layout_fields(
         return quote! {};
     }
 
-    let entries = record.fields.iter().enumerate().map(|(index, field)| {
-        let field_id = field.field_id.expect("field ids are validated above");
-        let member = user_member(record, index);
-        quote! {
-            zebin::LayoutField {
-                field_id: #field_id,
-                offset: zebin::memoffset::offset_of!(#archived_name, #member) as u16,
-            }
-        }
-    });
+    let entries = layout_field_entries(record, archived_name);
 
     quote! {
         let layout: &[zebin::LayoutField] = &[

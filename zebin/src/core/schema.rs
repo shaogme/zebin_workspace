@@ -1,4 +1,7 @@
-use crate::{ZebinError, num::u32_to_usize};
+use crate::{
+    ZebinError,
+    num::{read_fixed, u32_to_usize},
+};
 use core::num::NonZeroUsize;
 
 use alloc::{format, string::ToString, vec::Vec};
@@ -164,14 +167,17 @@ impl<'a> Iterator for LayoutFieldIter<'a> {
 pub struct LayoutDirectory<'a> {
     bytes: &'a [u8],
     section_offset: NonZeroUsize,
+    parsed: ParsedLayoutSection<'a>,
 }
 
 impl<'a> LayoutDirectory<'a> {
-    pub fn new(bytes: &'a [u8], section_offset: NonZeroUsize) -> Self {
-        Self {
+    pub fn new(bytes: &'a [u8], section_offset: NonZeroUsize) -> Result<Self, ZebinError> {
+        let parsed = parse_layout_section(bytes, section_offset)?;
+        Ok(Self {
             bytes,
             section_offset,
-        }
+            parsed,
+        })
     }
 
     pub fn section_offset(&self) -> NonZeroUsize {
@@ -187,72 +193,35 @@ impl<'a> LayoutDirectory<'a> {
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
     ) -> Result<LayoutView<'a>, ZebinError> {
-        let section_offset = self.section_offset.get();
-        let header_end =
-            section_offset
-                .checked_add(4)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout section header overflow".to_string(),
-                    pos: section_offset,
-                })?;
-        if header_end > self.bytes.len() {
-            return Err(ZebinError::ValidationError {
-                message: "Layout section header out of bounds".to_string(),
-                pos: section_offset,
-            });
-        }
+        self.parsed.lookup(stable_schema_key, schema_revision)
+    }
+}
 
-        let num_layouts = u32_to_usize(
-            u32::from_le_bytes(
-                self.bytes
-                    .get(section_offset..header_end)
-                    .ok_or_else(|| ZebinError::ValidationError {
-                        message: "Layout section header out of bounds".to_string(),
-                        pos: section_offset,
-                    })?
-                    .try_into()
-                    .map_err(|_| ZebinError::LayoutError)?,
-            ),
-            || ZebinError::ValidationError {
-                message: "Layout section layout count exceeds usize range".to_string(),
-                pos: section_offset,
-            },
-        )?;
+#[derive(Clone, Copy)]
+pub(crate) struct ParsedLayoutSection<'a> {
+    bytes: &'a [u8],
+    section_offset: usize,
+    num_layouts: usize,
+}
 
-        let offsets_pos = header_end;
-        let offsets_end =
-            offsets_pos
-                .checked_add(num_layouts.checked_mul(4).ok_or_else(|| {
-                    ZebinError::ValidationError {
-                        message: "Layout offset table overflow".to_string(),
-                        pos: section_offset,
-                    }
-                })?)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout offset table overflow".to_string(),
-                    pos: section_offset,
-                })?;
-        if offsets_end > self.bytes.len() {
-            return Err(ZebinError::ValidationError {
-                message: "Layout offset table out of bounds".to_string(),
-                pos: offsets_pos,
-            });
-        }
+impl<'a> ParsedLayoutSection<'a> {
+    fn lookup(
+        &self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+    ) -> Result<LayoutView<'a>, ZebinError> {
+        let section_offset = self.section_offset;
+        let offsets_pos = section_offset + 4;
 
         let mut found_entry: Option<(usize, usize)> = None;
-        for layout_index in 0..num_layouts {
+        for layout_index in 0..self.num_layouts {
             let offset_pos = offsets_pos + layout_index * 4;
             let layout_rel_offset = u32_to_usize(
-                u32::from_le_bytes(
-                    self.bytes
-                        .get(offset_pos..offset_pos + 4)
-                        .ok_or_else(|| ZebinError::ValidationError {
-                            message: "Layout offset entry out of bounds".to_string(),
-                            pos: offset_pos,
-                        })?
-                        .try_into()
-                        .map_err(|_| ZebinError::LayoutError)?,
-                ),
+                u32::from_le_bytes(read_fixed::<4>(
+                    self.bytes,
+                    offset_pos,
+                    "Layout offset entry",
+                )?),
                 || ZebinError::ValidationError {
                     message: "Layout offset entry overflow".to_string(),
                     pos: offset_pos,
@@ -340,4 +309,125 @@ impl<'a> LayoutDirectory<'a> {
 
         Ok(LayoutView::new(self.bytes, entry_pos, field_count))
     }
+}
+
+fn parse_layout_section<'a>(
+    bytes: &'a [u8],
+    section_offset: NonZeroUsize,
+) -> Result<ParsedLayoutSection<'a>, ZebinError> {
+    let section_offset = section_offset.get();
+
+    let header_end = section_offset
+        .checked_add(4)
+        .ok_or_else(|| ZebinError::ValidationError {
+            message: "Layout section header overflow".to_string(),
+            pos: section_offset,
+        })?;
+    if header_end > bytes.len() {
+        return Err(ZebinError::ValidationError {
+            message: "Layout section header out of bounds".to_string(),
+            pos: section_offset,
+        });
+    }
+
+    let num_layouts = u32_to_usize(
+        u32::from_le_bytes(read_fixed::<4>(
+            bytes,
+            section_offset,
+            "Layout section header",
+        )?),
+        || ZebinError::ValidationError {
+            message: "Layout section layout count exceeds usize range".to_string(),
+            pos: section_offset,
+        },
+    )?;
+
+    let offsets_pos = header_end;
+    let offsets_end = offsets_pos
+        .checked_add(
+            num_layouts
+                .checked_mul(4)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout offset table overflow".to_string(),
+                    pos: section_offset,
+                })?,
+        )
+        .ok_or_else(|| ZebinError::ValidationError {
+            message: "Layout offset table overflow".to_string(),
+            pos: section_offset,
+        })?;
+    if offsets_end > bytes.len() {
+        return Err(ZebinError::ValidationError {
+            message: "Layout offset table out of bounds".to_string(),
+            pos: offsets_pos,
+        });
+    }
+
+    for layout_idx in 0..num_layouts {
+        let offset_pos = offsets_pos + layout_idx * 4;
+        let layout_rel_offset = u32_to_usize(
+            u32::from_le_bytes(read_fixed::<4>(bytes, offset_pos, "Layout offset entry")?),
+            || ZebinError::ValidationError {
+                message: "Layout offset entry exceeds usize range".to_string(),
+                pos: offset_pos,
+            },
+        )?;
+        let layout_pos = section_offset
+            .checked_add(layout_rel_offset)
+            .ok_or_else(|| ZebinError::ValidationError {
+                message: "Layout position overflow".to_string(),
+                pos: offset_pos,
+            })?;
+
+        let entry_header_len = 12;
+        let entry_header_end = layout_pos.checked_add(entry_header_len).ok_or_else(|| {
+            ZebinError::ValidationError {
+                message: "Layout entry overflow".to_string(),
+                pos: layout_pos,
+            }
+        })?;
+        if entry_header_end > bytes.len() {
+            return Err(ZebinError::ValidationError {
+                message: "Layout entry out of bounds".to_string(),
+                pos: layout_pos,
+            });
+        }
+
+        let field_count = usize::from(u16::from_le_bytes(read_fixed::<2>(
+            bytes,
+            layout_pos + 8,
+            "Layout field count",
+        )?));
+        let entry_size =
+            entry_header_len
+                .checked_add(field_count.checked_mul(4).ok_or_else(|| {
+                    ZebinError::ValidationError {
+                        message: "Layout field table overflow".to_string(),
+                        pos: layout_pos,
+                    }
+                })?)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout field table overflow".to_string(),
+                    pos: layout_pos,
+                })?;
+        let entry_end =
+            layout_pos
+                .checked_add(entry_size)
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Layout entry overflow".to_string(),
+                    pos: layout_pos,
+                })?;
+        if entry_end > bytes.len() {
+            return Err(ZebinError::ValidationError {
+                message: "Layout entry payload out of bounds".to_string(),
+                pos: layout_pos,
+            });
+        }
+    }
+
+    Ok(ParsedLayoutSection {
+        bytes,
+        section_offset,
+        num_layouts,
+    })
 }
