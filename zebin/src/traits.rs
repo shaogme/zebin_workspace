@@ -168,7 +168,7 @@ impl<const N: usize> SerializeState for ByteState<N> {
         E::Error: From<ZebinError>,
     {
         if !self.aligned {
-            let _ = encoder.align(self.alignment)?;
+            encoder.align(self.alignment)?;
             if !encoder.pos().is_multiple_of(self.alignment.get()) {
                 return Ok(SerializePoll::Pending);
             }

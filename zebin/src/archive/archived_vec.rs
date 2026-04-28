@@ -138,7 +138,7 @@ where
                     }
                 }
                 VecPhase::Aligning => {
-                    let _ = encoder.align(T::ALIGNMENT)?;
+                    encoder.align(T::ALIGNMENT)?;
                     if !encoder.pos().is_multiple_of(T::ALIGNMENT.get()) {
                         return Ok(SerializePoll::Pending);
                     }

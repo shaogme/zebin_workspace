@@ -1,5 +1,6 @@
 mod archive;
 mod serialize;
+mod shared;
 
 use proc_macro::TokenStream;
 

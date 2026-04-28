@@ -6,7 +6,7 @@ compile_error!(
 	Use --no-default-features flag to disable default features when you need no_std."
 );
 
-extern crate alloc;
+pub extern crate alloc;
 
 mod access;
 mod archive;
@@ -73,7 +73,7 @@ where
         }
     };
 
-    let _ = encoder.align(T::ALIGNMENT)?;
+    encoder.align(T::ALIGNMENT)?;
     let root_offset = encoder.pos();
     let root_offset = usize_to_nonzero_u32(
         root_offset,
@@ -90,7 +90,7 @@ where
     let root_pos = u32_to_usize(root_offset.get(), || ZebinError::WriteError)?;
     let archived = value.resolve(root_pos, resolver)?;
     let archived_bytes = T::archived_bytes(&archived);
-    let _ = encoder.write(&archived_bytes)?;
+    encoder.write(&archived_bytes)?;
 
     let layout_offset = encoder.pos();
     let layout_offset = usize_to_nonzero_u32(
@@ -226,7 +226,7 @@ where
                     }
                 },
                 EncodePhase::RootAlign { resolver } => {
-                    let _ = encoder.align(T::ALIGNMENT)?;
+                    encoder.align(T::ALIGNMENT)?;
                     if !encoder.pos().is_multiple_of(T::ALIGNMENT.get()) {
                         break;
                     }
