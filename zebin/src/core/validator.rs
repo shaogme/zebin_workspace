@@ -5,6 +5,7 @@ use alloc::string::ToString;
 use crate::{
     ZebinError,
     core::schema::{LayoutDirectory, LayoutView},
+    traits::ArchivedValidationContext,
 };
 
 /// Validator for byte streams to ensure safety before access.
@@ -131,5 +132,27 @@ impl<'a> Validator<'a> {
             pos: 0,
         })?;
         layouts.lookup(schema_id)
+    }
+}
+
+impl<'a> ArchivedValidationContext for Validator<'a> {
+    fn push_depth(&mut self) -> Result<(), ZebinError> {
+        Validator::push_depth(self)
+    }
+
+    fn pop_depth(&mut self) {
+        Validator::pop_depth(self)
+    }
+
+    fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ZebinError> {
+        Validator::check_range(self, ptr, size)
+    }
+
+    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError> {
+        Validator::check_alignment(self, ptr, alignment)
+    }
+
+    fn layout(&self, schema_id: u32) -> Result<LayoutView<'a>, ZebinError> {
+        Validator::layout(self, schema_id)
     }
 }

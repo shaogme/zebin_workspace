@@ -2,8 +2,8 @@ use alloc::{boxed::Box, string::ToString};
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchivedBytes, Encoder, Serialize, SerializeState, Validate, ZebinError,
-    core::validator::Validator, traits::Archive,
+    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
+    ZebinError, traits::Archive,
 };
 
 /// Archived representation for `Result<T, E>`.
@@ -48,10 +48,10 @@ impl<T, E> ArchivedResult<T, E> {
     }
 }
 
-impl<T, E> ArchivedBytes for ArchivedResult<T, E>
+impl<T, E> ArchivedLayout for ArchivedResult<T, E>
 where
-    T: ArchivedBytes,
-    E: ArchivedBytes,
+    T: ArchivedLayout,
+    E: ArchivedLayout,
 {
     const ALIGNMENT: NonZeroUsize = if T::ALIGNMENT.get() >= E::ALIGNMENT.get() {
         T::ALIGNMENT
@@ -80,8 +80,48 @@ where
     }
 }
 
+impl<T, E> ArchivedValidate for ArchivedResult<T, E>
+where
+    T: ArchivedLayout + ArchivedValidate,
+    E: ArchivedLayout + ArchivedValidate,
+{
+    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const Self,
+        context: &mut C,
+    ) -> Result<(), ZebinError> {
+        let _guard = context.guard()?;
+        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*ptr };
+        match archived.tag {
+            0 => {
+                let value_ptr = archived.ok.as_ptr();
+                context.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
+                context.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
+                unsafe {
+                    T::validate(value_ptr, context)?;
+                }
+                Ok(())
+            }
+            1 => {
+                let value_ptr = archived.err.as_ptr();
+                context.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
+                context.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
+                unsafe {
+                    E::validate(value_ptr, context)?;
+                }
+                Ok(())
+            }
+            _ => Err(ZebinError::ValidationError {
+                message: "Invalid Result discriminant".to_string(),
+                pos: ptr as usize,
+            }),
+        }
+    }
+}
+
 /// Resumable serialization state for `Result<T, E>`.
-pub enum ResultSerializeState<'a, T, E>
+pub enum ResultArchiveState<'a, T, E>
 where
     T: Serialize + Archive + 'a,
     E: Serialize + Archive + 'a,
@@ -90,7 +130,7 @@ where
     Err(Box<<E as Serialize>::State<'a>>),
 }
 
-impl<'a, T, E> ResultSerializeState<'a, T, E>
+impl<'a, T, E> ResultArchiveState<'a, T, E>
 where
     T: Serialize + Archive + 'a,
     E: Serialize + Archive + 'a,
@@ -103,7 +143,7 @@ where
     }
 }
 
-impl<'a, T, E> SerializeState for ResultSerializeState<'a, T, E>
+impl<'a, T, E> ArchiveState for ResultArchiveState<'a, T, E>
 where
     T: Serialize + Archive + 'a,
     E: Serialize + Archive + 'a,
@@ -115,11 +155,11 @@ where
         encoder: &mut R,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
         match self {
-            ResultSerializeState::Ok(state) => match state.as_mut().poll(encoder)? {
+            ResultArchiveState::Ok(state) => match state.as_mut().poll(encoder)? {
                 Poll::Pending => Ok(Poll::Pending),
                 Poll::Ready(resolver) => Ok(Poll::Ready(Ok(resolver))),
             },
-            ResultSerializeState::Err(state) => match state.as_mut().poll(encoder)? {
+            ResultArchiveState::Err(state) => match state.as_mut().poll(encoder)? {
                 Poll::Pending => Ok(Poll::Pending),
                 Poll::Ready(resolver) => Ok(Poll::Ready(Err(resolver))),
             },
@@ -168,48 +208,11 @@ where
     E: Serialize + Archive,
 {
     type State<'a>
-        = ResultSerializeState<'a, T, E>
+        = ResultArchiveState<'a, T, E>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        ResultSerializeState::new(self.as_ref())
-    }
-}
-
-impl<'v, T, E> Validate<Validator<'v>> for ArchivedResult<T, E>
-where
-    T: Validate<Validator<'v>>,
-    E: Validate<Validator<'v>>,
-{
-    unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
-        let _guard = context.enter()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-        match archived.tag {
-            0 => {
-                let value_ptr = archived.ok.as_ptr();
-                context.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                context.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
-                unsafe {
-                    T::validate(value_ptr, context)?;
-                }
-                Ok(())
-            }
-            1 => {
-                let value_ptr = archived.err.as_ptr();
-                context.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
-                context.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
-                unsafe {
-                    E::validate(value_ptr, context)?;
-                }
-                Ok(())
-            }
-            _ => Err(ZebinError::ValidationError {
-                message: "Invalid Result discriminant".to_string(),
-                pos: ptr as usize,
-            }),
-        }
+        ResultArchiveState::new(self.as_ref())
     }
 }

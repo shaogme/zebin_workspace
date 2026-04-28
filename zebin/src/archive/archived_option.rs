@@ -2,8 +2,8 @@ use alloc::{boxed::Box, string::ToString};
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchivedBytes, Encoder, Serialize, SerializeState, Validate, ZebinError,
-    core::validator::Validator, traits::Archive,
+    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
+    ZebinError, traits::Archive,
 };
 
 /// Archived representation for `Option<T>`.
@@ -35,9 +35,9 @@ impl<T> ArchivedOption<T> {
     }
 }
 
-impl<T> ArchivedBytes for ArchivedOption<T>
+impl<T> ArchivedLayout for ArchivedOption<T>
 where
-    T: ArchivedBytes,
+    T: ArchivedLayout,
 {
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
@@ -55,8 +55,39 @@ where
     }
 }
 
+impl<T> ArchivedValidate for ArchivedOption<T>
+where
+    T: ArchivedLayout + ArchivedValidate,
+{
+    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const Self,
+        context: &mut C,
+    ) -> Result<(), ZebinError> {
+        let _guard = context.guard()?;
+        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*ptr };
+        match archived.tag {
+            0 => Ok(()),
+            1 => {
+                let value_ptr = archived.value.as_ptr();
+                context.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
+                context.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
+                unsafe {
+                    T::validate(value_ptr, context)?;
+                }
+                Ok(())
+            }
+            _ => Err(ZebinError::ValidationError {
+                message: "Invalid Option discriminant".to_string(),
+                pos: ptr as usize,
+            }),
+        }
+    }
+}
+
 /// Resumable serialization state for `Option<T>`.
-pub struct OptionSerializeState<'a, T>
+pub struct OptionArchiveState<'a, T>
 where
     T: Serialize + Archive + 'a,
 {
@@ -64,7 +95,7 @@ where
     inner: Option<Box<<T as Serialize>::State<'a>>>,
 }
 
-impl<'a, T> OptionSerializeState<'a, T>
+impl<'a, T> OptionArchiveState<'a, T>
 where
     T: Serialize + Archive + 'a,
 {
@@ -82,7 +113,7 @@ where
     }
 }
 
-impl<'a, T> SerializeState for OptionSerializeState<'a, T>
+impl<'a, T> ArchiveState for OptionArchiveState<'a, T>
 where
     T: Serialize + Archive + 'a,
 {
@@ -143,39 +174,11 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = OptionSerializeState<'a, T>
+        = OptionArchiveState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        OptionSerializeState::new(self.as_ref())
-    }
-}
-
-impl<'v, T> Validate<Validator<'v>> for ArchivedOption<T>
-where
-    T: Validate<Validator<'v>>,
-{
-    unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
-        let _guard = context.enter()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-        match archived.tag {
-            0 => Ok(()),
-            1 => {
-                let value_ptr = archived.value.as_ptr();
-                context.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                context.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
-                unsafe {
-                    T::validate(value_ptr, context)?;
-                }
-                Ok(())
-            }
-            _ => Err(ZebinError::ValidationError {
-                message: "Invalid Option discriminant".to_string(),
-                pos: ptr as usize,
-            }),
-        }
+        OptionArchiveState::new(self.as_ref())
     }
 }

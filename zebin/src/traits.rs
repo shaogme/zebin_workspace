@@ -12,8 +12,8 @@ use core::{num::NonZeroUsize, task::Poll};
 
 use crate::core::schema::LayoutField;
 
-/// Archived-side byte layout contract.
-pub trait ArchivedBytes {
+/// Archived-side binary layout contract.
+pub trait ArchivedLayout {
     /// The alignment requirement for the archived representation.
     const ALIGNMENT: NonZeroUsize;
 
@@ -31,19 +31,74 @@ pub trait ArchivedBytes {
     }
 }
 
+/// Archived-side validation contract.
+pub trait ArchivedValidate {
+    /// Validate an archived value in-place.
+    ///
+    /// # Safety
+    /// The pointer must point to a valid memory location that can be read.
+    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        _ptr: *const Self,
+        _context: &mut C,
+    ) -> Result<(), ZebinError> {
+        Ok(())
+    }
+}
+
 /// Object model layer: type-level archive/serialize/validate contracts.
 pub trait Archive {
     /// The archived version of this type.
-    type Archived: ArchivedBytes;
+    type Archived: ArchivedLayout + ArchivedValidate;
     /// The resolver used to construct the archived version.
     type Resolver;
 
     /// Resolve the archived version using the given resolver.
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError>;
+}
 
-    /// Convert an archived value to a freshly allocated byte vector.
-    fn archived_bytes(archived: &Self::Archived) -> Vec<u8> {
-        <Self::Archived as ArchivedBytes>::archived_bytes(archived)
+/// Convert an archived value to a freshly allocated byte vector.
+pub fn archived_bytes<T: ArchivedLayout>(archived: &T) -> Vec<u8> {
+    T::archived_bytes(archived)
+}
+
+/// Validation context used by archived representations.
+pub trait ArchivedValidationContext {
+    fn push_depth(&mut self) -> Result<(), ZebinError>;
+
+    fn pop_depth(&mut self);
+
+    fn guard(&mut self) -> Result<ArchivedDepthGuard<Self>, ZebinError> {
+        ArchivedDepthGuard::new(self)
+    }
+
+    fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ZebinError>;
+
+    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError>;
+
+    fn layout(&self, schema_id: u32) -> Result<crate::core::schema::LayoutView<'_>, ZebinError>;
+}
+
+/// RAII guard that restores validation depth when dropped.
+pub struct ArchivedDepthGuard<C: ArchivedValidationContext + ?Sized> {
+    context: *mut C,
+    _marker: core::marker::PhantomData<*mut C>,
+}
+
+impl<C: ArchivedValidationContext + ?Sized> ArchivedDepthGuard<C> {
+    pub fn new(context: &mut C) -> Result<Self, ZebinError> {
+        context.push_depth()?;
+        Ok(Self {
+            context,
+            _marker: core::marker::PhantomData,
+        })
+    }
+}
+
+impl<C: ArchivedValidationContext + ?Sized> Drop for ArchivedDepthGuard<C> {
+    fn drop(&mut self) {
+        unsafe {
+            (*self.context).pop_depth();
+        }
     }
 }
 
@@ -51,7 +106,6 @@ pub trait Archive {
 pub enum ZebinError {
     Infallible,
     WriteError,
-    ReadOnlyStorage,
     AlignmentError {
         expected: NonZeroUsize,
         actual: NonZeroUsize,
@@ -70,7 +124,6 @@ impl core::fmt::Display for ZebinError {
         match self {
             ZebinError::Infallible => write!(f, "infallible error"),
             ZebinError::WriteError => write!(f, "failed to write archive bytes"),
-            ZebinError::ReadOnlyStorage => write!(f, "storage backend is read-only"),
             ZebinError::AlignmentError {
                 expected,
                 actual,
@@ -114,7 +167,7 @@ pub trait Encoder {
 }
 
 /// Trait for resumable serialization states.
-pub trait SerializeState {
+pub trait ArchiveState {
     type Resolver;
 
     fn poll<E: Encoder + ?Sized>(
@@ -125,28 +178,21 @@ pub trait SerializeState {
 
 /// Trait for types that can create resumable serialization states.
 pub trait Serialize: Archive {
-    type State<'a>: SerializeState<Resolver = Self::Resolver>
+    type State<'a>: ArchiveState<Resolver = Self::Resolver>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError>;
 }
 
-/// Trait for types that can be validated for safety.
-pub trait Validate<C: ?Sized>: ArchivedBytes {
-    /// Validate the archived version of this type.
-    ///
-    /// # Safety
-    /// The pointer must point to a valid memory location that can be read.
-    unsafe fn validate(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>;
-}
-
 /// Source of indexed sequence items.
 pub trait SequenceSource<T> {
     fn len(&self) -> usize;
+
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
     fn get(&self, index: usize) -> &T;
 }
 
@@ -190,7 +236,7 @@ impl<T> SequenceSource<T> for VecDeque<T> {
     }
 }
 
-impl<T: ArchivedBytes, const N: usize> ArchivedBytes for [T; N] {
+impl<T: ArchivedLayout, const N: usize> ArchivedLayout for [T; N] {
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -204,6 +250,32 @@ impl<T: ArchivedBytes, const N: usize> ArchivedBytes for [T; N] {
             let end = start + elem_size;
             T::write_archived_bytes(item, &mut out[start..end]);
         }
+    }
+}
+
+impl<T: ArchivedLayout + ArchivedValidate, const N: usize> ArchivedValidate for [T; N] {
+    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const Self,
+        context: &mut C,
+    ) -> Result<(), ZebinError> {
+        let _guard = context.guard()?;
+        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let data_ptr = ptr as *const T;
+        let elem_size = core::mem::size_of::<T>();
+
+        for index in 0..N {
+            let element_ptr = if elem_size == 0 {
+                data_ptr
+            } else {
+                unsafe { data_ptr.add(index) }
+            };
+            unsafe {
+                T::validate(element_ptr, context)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -241,7 +313,7 @@ impl<const N: usize> ByteState<N> {
     }
 }
 
-impl<const N: usize> SerializeState for ByteState<N> {
+impl<const N: usize> ArchiveState for ByteState<N> {
     type Resolver = ();
 
     fn poll<E: Encoder + ?Sized>(
@@ -269,7 +341,7 @@ impl<const N: usize> SerializeState for ByteState<N> {
 macro_rules! impl_archive_for_primitive {
     ($($t:ty),* $(,)?) => {
         $(
-            impl ArchivedBytes for $t {
+            impl ArchivedLayout for $t {
                 const ALIGNMENT: NonZeroUsize = unsafe {
                     NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                 };
@@ -278,6 +350,8 @@ macro_rules! impl_archive_for_primitive {
                     out.copy_from_slice(&archived.to_le_bytes());
                 }
             }
+
+            impl ArchivedValidate for $t {}
 
             impl Archive for $t {
                 type Archived = $t;
@@ -300,23 +374,33 @@ macro_rules! impl_archive_for_primitive {
                     ))
                 }
             }
-
-            impl<C: ?Sized> Validate<C> for $t {
-                unsafe fn validate(_ptr: *const Self, _context: &mut C) -> Result<(), ZebinError> {
-                    Ok(())
-                }
-            }
         )*
     };
 }
 
 impl_archive_for_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
-impl ArchivedBytes for bool {
+impl ArchivedLayout for bool {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
         out[0] = *archived as u8;
+    }
+}
+
+impl ArchivedValidate for bool {
+    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const Self,
+        _context: &mut C,
+    ) -> Result<(), ZebinError> {
+        let val = unsafe { *(ptr as *const u8) };
+        if val > 1 {
+            return Err(ZebinError::ValidationError {
+                message: "Invalid bool value".to_string(),
+                pos: ptr as usize,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -341,19 +425,6 @@ impl Serialize for bool {
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ByteState::new([*self as u8], NonZeroUsize::new(1).unwrap()))
-    }
-}
-
-impl<C: ?Sized> Validate<C> for bool {
-    unsafe fn validate(ptr: *const Self, _context: &mut C) -> Result<(), ZebinError> {
-        let val = unsafe { *(ptr as *const u8) };
-        if val > 1 {
-            return Err(ZebinError::ValidationError {
-                message: "Invalid bool value".to_string(),
-                pos: ptr as usize,
-            });
-        }
-        Ok(())
     }
 }
 

@@ -81,7 +81,7 @@ fn record_field_inits(
                 {
                     let offset = #offset;
                     let size = ::core::mem::size_of::<<#ty as zebin::Archive>::Archived>();
-                    <<#ty as zebin::Archive>::Archived as zebin::ArchivedBytes>::write_archived_bytes(
+                    <<#ty as zebin::Archive>::Archived as zebin::ArchivedLayout>::write_archived_bytes(
                         &archived.#member,
                         &mut out[offset..offset + size],
                     );
@@ -98,13 +98,13 @@ fn record_schema_write(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStre
 
     Some(match record.style {
         RecordStyle::Named => quote! {
-            <u32 as zebin::ArchivedBytes>::write_archived_bytes(
+            <u32 as zebin::ArchivedLayout>::write_archived_bytes(
                 &archived.schema_id,
                 &mut out[0..::core::mem::size_of::<u32>()],
             );
         },
         RecordStyle::Unnamed => quote! {
-            <u32 as zebin::ArchivedBytes>::write_archived_bytes(
+            <u32 as zebin::ArchivedLayout>::write_archived_bytes(
                 &archived.0,
                 &mut out[0..::core::mem::size_of::<u32>()],
             );
@@ -156,10 +156,16 @@ fn helper_accessors(
     }
 }
 
-fn helper_validate(
+fn helper_bytes_impl(
     archived_name: &syn::Ident,
     record: &RecordSpec<'_>,
 ) -> proc_macro2::TokenStream {
+    let mut writes = Vec::new();
+    if let Some(write_schema) = record_schema_write(record) {
+        writes.push(write_schema);
+    }
+    writes.extend(record_field_inits(record, archived_name));
+
     let layout_checks = if has_schema(record) {
         let schema_expr = schema_access_expr(record, &format_ident!("archived"));
         let checks = record.fields.iter().enumerate().map(|(index, field)| {
@@ -185,40 +191,13 @@ fn helper_validate(
         quote! {
             {
                 let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
-                unsafe { <<#ty as zebin::Archive>::Archived as zebin::Validate<zebin::Validator<'_>>>::validate(field_ptr, context)?; }
+                unsafe { <<#ty as zebin::Archive>::Archived as zebin::ArchivedValidate>::validate(field_ptr, context)?; }
             }
         }
     });
 
     quote! {
-        impl zebin::Validate<zebin::Validator<'_>> for #archived_name {
-            unsafe fn validate(
-                ptr: *const Self,
-                context: &mut zebin::Validator<'_>,
-            ) -> Result<(), zebin::ZebinError> {
-                let _guard = context.enter()?;
-                context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedBytes>::ALIGNMENT)?;
-                context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
-                #layout_checks
-                #(#field_validations)*
-                Ok(())
-            }
-        }
-    }
-}
-
-fn helper_bytes_impl(
-    archived_name: &syn::Ident,
-    record: &RecordSpec<'_>,
-) -> proc_macro2::TokenStream {
-    let mut writes = Vec::new();
-    if let Some(write_schema) = record_schema_write(record) {
-        writes.push(write_schema);
-    }
-    writes.extend(record_field_inits(record, archived_name));
-
-    quote! {
-        impl zebin::ArchivedBytes for #archived_name {
+        impl zebin::ArchivedLayout for #archived_name {
             const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
                 ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
             };
@@ -226,6 +205,20 @@ fn helper_bytes_impl(
             fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
                 out.fill(0);
                 #(#writes)*
+            }
+        }
+
+        impl zebin::ArchivedValidate for #archived_name {
+            unsafe fn validate<C: zebin::ArchivedValidationContext + ?Sized>(
+                ptr: *const Self,
+                context: &mut C,
+            ) -> Result<(), zebin::ZebinError> {
+                let _guard = context.guard()?;
+                context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
+                context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                #layout_checks
+                #(#field_validations)*
+                Ok(())
             }
         }
     }
@@ -250,7 +243,6 @@ fn helper_record(archived_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_ma
         fields.push(record_field_decl(record, field.ty, index));
     }
     let bytes_impl = helper_bytes_impl(archived_name, record);
-    let validate = helper_validate(archived_name, record);
     let accessors = helper_accessors(archived_name, record);
 
     let definition = match record.style {
@@ -276,7 +268,6 @@ fn helper_record(archived_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_ma
         #definition
         #bytes_impl
         #accessors
-        #validate
     }
 }
 
@@ -399,7 +390,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         variant_write_arms.push(quote! {
             #idx_lit => {
                 let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                let bytes = #helper_name::archived_bytes(unsafe { &*ptr });
+                let bytes = zebin::archived_bytes(unsafe { &*ptr });
                 out[payload_offset..payload_offset + bytes.len()].copy_from_slice(&bytes);
             }
         });
@@ -491,7 +482,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
 
     let root_bytes = if variants.is_empty() {
         quote! {
-            impl zebin::ArchivedBytes for #archived_name {
+            impl zebin::ArchivedLayout for #archived_name {
                 const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
                     ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
                 };
@@ -500,17 +491,29 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                     out.fill(0);
                 }
             }
+
+            impl zebin::ArchivedValidate for #archived_name {
+                unsafe fn validate<C: zebin::ArchivedValidationContext + ?Sized>(
+                    ptr: *const Self,
+                    context: &mut C,
+                ) -> Result<(), zebin::ZebinError> {
+                    let _guard = context.guard()?;
+                    context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
+                    context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                    Ok(())
+                }
+            }
         }
     } else {
         quote! {
-            impl zebin::ArchivedBytes for #archived_name {
+            impl zebin::ArchivedLayout for #archived_name {
                 const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
                     ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
                 };
 
                 fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
                     out.fill(0);
-                    <u32 as zebin::ArchivedBytes>::write_archived_bytes(
+                    <u32 as zebin::ArchivedLayout>::write_archived_bytes(
                         &archived.tag,
                         &mut out[0..::core::mem::size_of::<u32>()],
                     );
@@ -519,6 +522,28 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                         #(#variant_write_arms)*
                         _ => {}
                     }
+                }
+            }
+
+            impl zebin::ArchivedValidate for #archived_name {
+                unsafe fn validate<C: zebin::ArchivedValidationContext + ?Sized>(
+                    ptr: *const Self,
+                    context: &mut C,
+                ) -> Result<(), zebin::ZebinError> {
+                    let _guard = context.guard()?;
+                    context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedLayout>::ALIGNMENT)?;
+                    context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                    let archived = unsafe { &*ptr };
+                    match archived.tag {
+                        #(#variant_validate_arms)*
+                        _ => {
+                            return Err(zebin::ZebinError::ValidationError {
+                                message: "Invalid enum discriminant".to_string(),
+                                pos: ptr as usize,
+                            });
+                        }
+                    }
+                    Ok(())
                 }
             }
         }
@@ -533,29 +558,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         }
     };
 
-    let root_validate = quote! {
-        impl zebin::Validate<zebin::Validator<'_>> for #archived_name {
-            unsafe fn validate(
-                ptr: *const Self,
-                context: &mut zebin::Validator<'_>,
-            ) -> Result<(), zebin::ZebinError> {
-                let _guard = context.enter()?;
-                context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedBytes>::ALIGNMENT)?;
-                context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
-                let archived = unsafe { &*ptr };
-                match archived.tag {
-                    #(#variant_validate_arms)*
-                    _ => {
-                        return Err(zebin::ZebinError::ValidationError {
-                            message: "Invalid enum discriminant".to_string(),
-                            pos: ptr as usize,
-                        });
-                    }
-                }
-                Ok(())
-            }
-        }
-    };
+    let root_validate = quote! {};
 
     let root_archive = if variants.is_empty() {
         quote! {

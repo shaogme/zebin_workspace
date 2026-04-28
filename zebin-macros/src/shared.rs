@@ -50,7 +50,7 @@ pub fn resolver_name(name: &Ident) -> Ident {
 }
 
 pub fn state_name(name: &Ident) -> Ident {
-    format_ident!("{}SerializeState", name)
+    format_ident!("{}ArchiveState", name)
 }
 
 pub fn payload_name(name: &Ident) -> Ident {
@@ -66,7 +66,7 @@ pub fn variant_resolver_name(enum_name: &Ident, variant: &Ident) -> Ident {
 }
 
 pub fn variant_state_name(enum_name: &Ident, variant: &Ident) -> Ident {
-    format_ident!("{}{}SerializeState", enum_name, variant)
+    format_ident!("{}{}ArchiveState", enum_name, variant)
 }
 
 pub fn variant_method_name(prefix: &str, variant: &Ident) -> Ident {

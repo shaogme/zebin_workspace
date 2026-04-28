@@ -21,12 +21,13 @@ pub mod prelude {
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{
-        Archive, ArchivedBytes, ByteState, Encoder, Serialize, Validate, ZebinError,
+        Archive, ArchivedDepthGuard, ArchivedLayout, ArchivedValidate, ArchivedValidationContext,
+        ByteState, Encoder, Serialize, ZebinError, archived_bytes,
     };
     pub use crate::{
-        ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader, ArchiveView,
-        ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr,
-        SerializeState, Storage, Validator, decode, encode, encode_chunked, encode_into, validate,
+        ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader, ArchiveState,
+        ArchiveView, ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView,
+        RelPtr, Storage, Validator, decode, encode, encode_chunked, encode_into, validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
@@ -40,7 +41,8 @@ pub use crate::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::storage::mmap::Mmap;
 pub use crate::traits::{
-    Archive, ArchivedBytes, ByteState, Encoder, Serialize, SerializeState, Validate, ZebinError,
+    Archive, ArchiveState, ArchivedDepthGuard, ArchivedLayout, ArchivedValidate,
+    ArchivedValidationContext, ByteState, Encoder, Serialize, ZebinError, archived_bytes,
 };
 pub use memoffset;
 pub use zebin_macros::*;
@@ -75,7 +77,7 @@ where
         }
     };
 
-    encoder.align(<T::Archived as crate::ArchivedBytes>::ALIGNMENT)?;
+    encoder.align(<T::Archived as crate::ArchivedLayout>::ALIGNMENT)?;
     let root_offset = encoder.pos();
     let root_offset = usize_to_nonzero_u32(
         root_offset,
@@ -91,7 +93,7 @@ where
 
     let root_pos = u32_to_usize(root_offset.get(), || ZebinError::WriteError)?;
     let archived = value.resolve(root_pos, resolver)?;
-    let archived_bytes = T::archived_bytes(&archived);
+    let archived_bytes = crate::archived_bytes(&archived);
     encoder.write(&archived_bytes)?;
 
     let layout_offset = encoder.pos();
@@ -227,10 +229,10 @@ where
                     }
                 },
                 EncodePhase::RootAlign { resolver } => {
-                    encoder.align(<T::Archived as crate::ArchivedBytes>::ALIGNMENT)?;
+                    encoder.align(<T::Archived as crate::ArchivedLayout>::ALIGNMENT)?;
                     if !encoder
                         .pos()
-                        .is_multiple_of(<T::Archived as crate::ArchivedBytes>::ALIGNMENT.get())
+                        .is_multiple_of(<T::Archived as crate::ArchivedLayout>::ALIGNMENT.get())
                     {
                         break;
                     }
@@ -245,7 +247,7 @@ where
                         .take()
                         .expect("resolver available while entering root alignment");
                     let archived = self.value.resolve(encoder.pos(), resolver)?;
-                    let bytes = T::archived_bytes(&archived);
+                    let bytes = crate::archived_bytes(&archived);
                     self.phase = EncodePhase::Root {
                         state: RootWriteState::new(bytes),
                     };
@@ -348,7 +350,7 @@ where
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: Validate<Validator<'a>>,
+    T::Archived: ArchivedLayout + ArchivedValidate,
 {
     access::decode(bytes)
 }
@@ -358,7 +360,7 @@ pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
     T::Archived: 'a,
-    T::Archived: Validate<Validator<'a>>,
+    T::Archived: ArchivedLayout + ArchivedValidate,
 {
     access::validate::<T>(bytes)
 }

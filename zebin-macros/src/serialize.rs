@@ -192,7 +192,7 @@ fn record_state_impl(
 
     if has_schema(record) {
         quote! {
-            impl<'a> zebin::SerializeState for #state_name<'a> {
+            impl<'a> zebin::ArchiveState for #state_name<'a> {
                 type Resolver = #resolver_name;
 
                 fn poll<E: zebin::Encoder + ?Sized>(
@@ -209,7 +209,7 @@ fn record_state_impl(
         }
     } else {
         quote! {
-            impl<'a> zebin::SerializeState for #state_name<'a> {
+            impl<'a> zebin::ArchiveState for #state_name<'a> {
                 type Resolver = #resolver_name;
 
                 fn poll<E: zebin::Encoder + ?Sized>(
@@ -444,7 +444,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             #(#resolver_enum_variants),*
         }
 
-        impl<'a> zebin::SerializeState for #state_name<'a> {
+        impl<'a> zebin::ArchiveState for #state_name<'a> {
             type Resolver = #resolver_name;
 
             fn poll<E: zebin::Encoder + ?Sized>(

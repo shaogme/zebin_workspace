@@ -3,8 +3,9 @@ use core::{num::NonZeroUsize, str, task::Poll};
 use alloc::string::{String, ToString};
 
 use crate::{
-    ArchivedBytes, Encoder, Serialize, SerializeState, Validate, ZebinError,
-    core::{rel_ptr::RelPtr, validator::Validator},
+    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
+    ZebinError,
+    core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
     traits::Archive,
 };
@@ -39,7 +40,7 @@ impl ArchivedString {
     }
 }
 
-impl ArchivedBytes for ArchivedString {
+impl ArchivedLayout for ArchivedString {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
@@ -47,18 +48,54 @@ impl ArchivedBytes for ArchivedString {
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }
-        <u32 as ArchivedBytes>::write_archived_bytes(&archived.len, &mut out[8..12]);
+        <u32 as ArchivedLayout>::write_archived_bytes(&archived.len, &mut out[8..12]);
+    }
+}
+
+impl ArchivedValidate for ArchivedString {
+    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const Self,
+        context: &mut C,
+    ) -> Result<(), ZebinError> {
+        let _guard = context.guard()?;
+        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*ptr };
+
+        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
+            message: "ArchivedString length exceeds usize range".to_string(),
+            pos: ptr as usize,
+        })?;
+        if len > 0 {
+            let data_ptr = archived
+                .ptr
+                .as_ref()
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Null pointer in non-empty ArchivedString".to_string(),
+                    pos: ptr as usize,
+                })?;
+            let data_ptr = unsafe { data_ptr.as_ptr() };
+            context.check_range(data_ptr, len)?;
+
+            let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
+            str::from_utf8(bytes).map_err(|_| ZebinError::ValidationError {
+                message: "Invalid UTF-8 sequence".to_string(),
+                pos: data_ptr as usize,
+            })?;
+        }
+
+        Ok(())
     }
 }
 
 /// Resumable serialization state for `String` and `str`.
-pub struct StringSerializeState<'a> {
+pub struct StringArchiveState<'a> {
     bytes: &'a [u8],
     cursor: usize,
     start_pos: Option<usize>,
 }
 
-impl<'a> StringSerializeState<'a> {
+impl<'a> StringArchiveState<'a> {
     pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
         Ok(Self {
             bytes,
@@ -68,7 +105,7 @@ impl<'a> StringSerializeState<'a> {
     }
 }
 
-impl<'a> SerializeState for StringSerializeState<'a> {
+impl<'a> ArchiveState for StringArchiveState<'a> {
     type Resolver = usize;
 
     fn poll<E: Encoder + ?Sized>(
@@ -108,12 +145,12 @@ impl Archive for String {
 
 impl Serialize for String {
     type State<'a>
-        = StringSerializeState<'a>
+        = StringArchiveState<'a>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        StringSerializeState::new(self.as_bytes())
+        StringArchiveState::new(self.as_bytes())
     }
 }
 
@@ -136,44 +173,11 @@ impl Archive for str {
 
 impl Serialize for str {
     type State<'a>
-        = StringSerializeState<'a>
+        = StringArchiveState<'a>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        StringSerializeState::new(self.as_bytes())
-    }
-}
-
-impl<'v> Validate<Validator<'v>> for ArchivedString {
-    unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
-        let _guard = context.enter()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-
-        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "ArchivedString length exceeds usize range".to_string(),
-            pos: ptr as usize,
-        })?;
-        if len > 0 {
-            let data_ptr = archived
-                .ptr
-                .as_ref()
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty ArchivedString".to_string(),
-                    pos: ptr as usize,
-                })?;
-            let data_ptr = unsafe { data_ptr.as_ptr() };
-            context.check_range(data_ptr, len)?;
-
-            let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
-            str::from_utf8(bytes).map_err(|_| ZebinError::ValidationError {
-                message: "Invalid UTF-8 sequence".to_string(),
-                pos: data_ptr as usize,
-            })?;
-        }
-
-        Ok(())
+        StringArchiveState::new(self.as_bytes())
     }
 }

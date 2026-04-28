@@ -2,10 +2,11 @@ use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
-    ArchivedBytes, Encoder, Serialize, SerializeState, Validate, ZebinError,
-    core::{rel_ptr::RelPtr, validator::Validator},
+    ArchiveState, ArchivedLayout, ArchivedValidate, ArchivedValidationContext, Encoder, Serialize,
+    ZebinError,
+    core::rel_ptr::RelPtr,
     num::{u32_to_usize, usize_to_u32},
-    traits::{Archive, SequenceResolverBuffer, SequenceSource},
+    traits::{Archive, SequenceResolverBuffer, SequenceSource, archived_bytes},
 };
 
 /// An archived vector that uses a relative pointer.
@@ -51,9 +52,9 @@ impl<T> ArchivedVec<T> {
     }
 }
 
-impl<T> ArchivedBytes for ArchivedVec<T>
+impl<T> ArchivedLayout for ArchivedVec<T>
 where
-    T: ArchivedBytes,
+    T: ArchivedLayout,
 {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
@@ -62,7 +63,52 @@ where
         if let Some(ptr) = &archived.ptr {
             out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
         }
-        <u32 as ArchivedBytes>::write_archived_bytes(&archived.len, &mut out[8..12]);
+        <u32 as ArchivedLayout>::write_archived_bytes(&archived.len, &mut out[8..12]);
+    }
+}
+
+impl<T> ArchivedValidate for ArchivedVec<T>
+where
+    T: ArchivedLayout + ArchivedValidate,
+{
+    unsafe fn validate<C: ArchivedValidationContext + ?Sized>(
+        ptr: *const Self,
+        context: &mut C,
+    ) -> Result<(), ZebinError> {
+        let _guard = context.guard()?;
+        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*ptr };
+
+        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
+            message: "ArchivedVec length exceeds usize range".to_string(),
+            pos: ptr as usize,
+        })?;
+        if len > 0 {
+            let data_ptr = archived
+                .ptr
+                .as_ref()
+                .ok_or_else(|| ZebinError::ValidationError {
+                    message: "Null pointer in non-empty ArchivedVec".to_string(),
+                    pos: ptr as usize,
+                })?;
+            let data_ptr = unsafe { data_ptr.as_ptr() };
+            let total_size = len.checked_mul(core::mem::size_of::<T>()).ok_or_else(|| {
+                ZebinError::ValidationError {
+                    message: "ArchivedVec size overflow".to_string(),
+                    pos: ptr as usize,
+                }
+            })?;
+            context.check_range(data_ptr as *const u8, total_size)?;
+            context.check_alignment(data_ptr as *const u8, T::ALIGNMENT)?;
+
+            for i in 0..len {
+                let element_ptr = unsafe { data_ptr.add(i) };
+                unsafe { T::validate(element_ptr, context)? };
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -209,7 +255,7 @@ where
 
 /// Resumable serialization state for indexed sequence containers with an
 /// out-of-line data block.
-pub struct SequenceSerializeState<'a, S, T>
+pub struct SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Serialize + Archive + 'a,
@@ -222,7 +268,7 @@ where
     current_cursor: usize,
 }
 
-impl<'a, S, T> SequenceSerializeState<'a, S, T>
+impl<'a, S, T> SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Serialize + Archive + 'a,
@@ -249,10 +295,10 @@ where
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
-        encoder.align(<T::Archived as ArchivedBytes>::ALIGNMENT)?;
+        encoder.align(<T::Archived as ArchivedLayout>::ALIGNMENT)?;
         if !encoder
             .pos()
-            .is_multiple_of(<T::Archived as ArchivedBytes>::ALIGNMENT.get())
+            .is_multiple_of(<T::Archived as ArchivedLayout>::ALIGNMENT.get())
         {
             return Ok(Poll::Pending);
         }
@@ -279,7 +325,7 @@ where
                 .source()
                 .get(self.write_index)
                 .resolve(element_pos, resolver)?;
-            self.current_bytes = Some(T::archived_bytes(&archived));
+            self.current_bytes = Some(archived_bytes(&archived));
             self.current_cursor = 0;
         }
 
@@ -299,7 +345,7 @@ where
     }
 }
 
-impl<'a, S, T> SerializeState for SequenceSerializeState<'a, S, T>
+impl<'a, S, T> ArchiveState for SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Serialize + Archive + 'a,
@@ -342,14 +388,14 @@ where
     }
 }
 
-pub struct ArraySerializeState<'a, T, const N: usize>
+pub struct ArrayArchiveState<'a, T, const N: usize>
 where
     T: Serialize + Archive + 'a,
 {
     children: SequenceChildDriver<'a, [T; N], T, SequenceResolverArray<T, N>>,
 }
 
-impl<'a, T, const N: usize> ArraySerializeState<'a, T, N>
+impl<'a, T, const N: usize> ArrayArchiveState<'a, T, N>
 where
     T: Serialize + Archive + 'a,
 {
@@ -369,7 +415,7 @@ where
     }
 }
 
-impl<'a, T, const N: usize> SerializeState for ArraySerializeState<'a, T, N>
+impl<'a, T, const N: usize> ArchiveState for ArrayArchiveState<'a, T, N>
 where
     T: Serialize + Archive + 'a,
 {
@@ -386,9 +432,9 @@ where
     }
 }
 
-pub type VecSerializeState<'a, T> = SequenceSerializeState<'a, [T], T>;
-pub type VecDequeSerializeState<'a, T> = SequenceSerializeState<'a, VecDeque<T>, T>;
-pub type SliceSerializeState<'a, T> = SequenceSerializeState<'a, [T], T>;
+pub type VecArchiveState<'a, T> = SequenceArchiveState<'a, [T], T>;
+pub type VecDequeArchiveState<'a, T> = SequenceArchiveState<'a, VecDeque<T>, T>;
+pub type SliceArchiveState<'a, T> = SequenceArchiveState<'a, [T], T>;
 
 pub(crate) fn resolve_sequence_archive<S, T>(
     source: &S,
@@ -410,48 +456,6 @@ where
     })
 }
 
-impl<'v, T> Validate<Validator<'v>> for ArchivedVec<T>
-where
-    T: Validate<Validator<'v>>,
-{
-    unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
-        let _guard = context.enter()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-
-        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "ArchivedVec length exceeds usize range".to_string(),
-            pos: ptr as usize,
-        })?;
-        if len > 0 {
-            let data_ptr = archived
-                .ptr
-                .as_ref()
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty ArchivedVec".to_string(),
-                    pos: ptr as usize,
-                })?;
-            let data_ptr = unsafe { data_ptr.as_ptr() };
-            let total_size = len.checked_mul(core::mem::size_of::<T>()).ok_or_else(|| {
-                ZebinError::ValidationError {
-                    message: "ArchivedVec size overflow".to_string(),
-                    pos: ptr as usize,
-                }
-            })?;
-            context.check_range(data_ptr as *const u8, total_size)?;
-            context.check_alignment(data_ptr as *const u8, T::ALIGNMENT)?;
-
-            for i in 0..len {
-                let element_ptr = unsafe { data_ptr.add(i) };
-                unsafe { T::validate(element_ptr, context)? };
-            }
-        }
-
-        Ok(())
-    }
-}
-
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
@@ -466,12 +470,12 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = VecSerializeState<'a, T>
+        = VecArchiveState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(VecSerializeState::new(self.as_slice()))
+        Ok(VecArchiveState::new(self.as_slice()))
     }
 }
 
@@ -492,12 +496,12 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = VecDequeSerializeState<'a, T>
+        = VecDequeArchiveState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(VecDequeSerializeState::new(self))
+        Ok(VecDequeArchiveState::new(self))
     }
 }
 
@@ -518,12 +522,12 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = SliceSerializeState<'a, T>
+        = SliceArchiveState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(SliceSerializeState::new(self))
+        Ok(SliceArchiveState::new(self))
     }
 }
 
@@ -560,37 +564,11 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = ArraySerializeState<'a, T, N>
+        = ArrayArchiveState<'a, T, N>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(ArraySerializeState::new(self))
-    }
-}
-
-impl<'v, T, const N: usize> Validate<Validator<'v>> for [T; N]
-where
-    T: Validate<Validator<'v>>,
-{
-    unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
-        let _guard = context.enter()?;
-        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let data_ptr = ptr as *const T;
-        let elem_size = core::mem::size_of::<T>();
-
-        for index in 0..N {
-            let element_ptr = if elem_size == 0 {
-                data_ptr
-            } else {
-                unsafe { data_ptr.add(index) }
-            };
-            unsafe {
-                T::validate(element_ptr, context)?;
-            }
-        }
-
-        Ok(())
+        Ok(ArrayArchiveState::new(self))
     }
 }

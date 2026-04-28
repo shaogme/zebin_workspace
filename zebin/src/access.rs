@@ -7,7 +7,7 @@ use crate::{
     core::{schema::LayoutDirectory, validator::Validator},
     format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
     num::{u32_to_nonzero_usize, u32_to_usize},
-    traits::{Archive, ArchivedBytes, Validate, ZebinError},
+    traits::{Archive, ArchivedLayout, ArchivedValidate, ZebinError},
 };
 
 fn read_fixed<const N: usize>(
@@ -65,7 +65,7 @@ impl<'a, T: Archive> Deref for ArchiveView<'a, T> {
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: Validate<Validator<'a>>,
+    T::Archived: ArchivedLayout + ArchivedValidate,
 {
     check_archive(bytes)
 }
@@ -204,7 +204,7 @@ fn validate_layout_section(bytes: &[u8], layout_offset: NonZeroUsize) -> Result<
 fn check_archive<'a, T>(bytes: &'a [u8]) -> Result<ArchiveView<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: Validate<Validator<'a>>,
+    T::Archived: ArchivedLayout + ArchivedValidate,
 {
     let header = ArchiveHeader::parse(bytes)?;
     let root_pos = u32_to_usize(header.root_offset.get(), || ZebinError::ValidationError {
@@ -229,12 +229,12 @@ where
             pos: root_pos,
         });
     }
-    if root_pos % <T::Archived as ArchivedBytes>::ALIGNMENT.get() != 0 {
+    if root_pos % <T::Archived as ArchivedLayout>::ALIGNMENT.get() != 0 {
         return Err(ZebinError::AlignmentError {
-            expected: <T::Archived as ArchivedBytes>::ALIGNMENT,
+            expected: <T::Archived as ArchivedLayout>::ALIGNMENT,
             actual: unsafe {
                 NonZeroUsize::new_unchecked(
-                    root_pos % <T::Archived as ArchivedBytes>::ALIGNMENT.get(),
+                    root_pos % <T::Archived as ArchivedLayout>::ALIGNMENT.get(),
                 )
             },
             pos: root_pos,
@@ -284,7 +284,7 @@ where
     let root_ptr = unsafe { bytes.as_ptr().add(root_pos) as *const T::Archived };
 
     unsafe {
-        T::Archived::validate(root_ptr, &mut validator)?;
+        <T::Archived as ArchivedValidate>::validate(root_ptr, &mut validator)?;
     }
 
     Ok(ArchiveView {
@@ -299,7 +299,7 @@ pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
     T::Archived: 'a,
-    T::Archived: Validate<Validator<'a>>,
+    T::Archived: ArchivedLayout + ArchivedValidate,
 {
     decode::<T>(bytes).map(|_| ())
 }
