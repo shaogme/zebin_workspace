@@ -3,35 +3,47 @@ use alloc::{
     boxed::Box,
     collections::VecDeque,
     rc::Rc,
-    string::{String, ToString},
+    string::String,
     sync::Arc,
     vec,
     vec::Vec,
 };
-use core::num::NonZeroUsize;
+use core::{num::NonZeroUsize, task::Poll};
 
 use crate::core::schema::LayoutField;
+
+/// Archived-side byte layout contract.
+pub trait ArchivedBytes {
+    /// The alignment requirement for the archived representation.
+    const ALIGNMENT: NonZeroUsize;
+
+    /// Write a deterministic byte representation of an archived value.
+    fn write_archived_bytes(archived: &Self, out: &mut [u8]);
+
+    /// Convert an archived value to a freshly allocated byte vector.
+    fn archived_bytes(archived: &Self) -> Vec<u8>
+    where
+        Self: Sized,
+    {
+        let mut out = vec![0u8; core::mem::size_of::<Self>()];
+        Self::write_archived_bytes(archived, &mut out);
+        out
+    }
+}
 
 /// Object model layer: type-level archive/serialize/validate contracts.
 pub trait Archive {
     /// The archived version of this type.
-    type Archived;
+    type Archived: ArchivedBytes;
     /// The resolver used to construct the archived version.
     type Resolver;
-    /// The alignment requirement for the archived version.
-    const ALIGNMENT: NonZeroUsize;
 
     /// Resolve the archived version using the given resolver.
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError>;
 
-    /// Write a deterministic byte representation of an archived value.
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]);
-
     /// Convert an archived value to a freshly allocated byte vector.
     fn archived_bytes(archived: &Self::Archived) -> Vec<u8> {
-        let mut out = vec![0u8; core::mem::size_of::<Self::Archived>()];
-        Self::write_archived_bytes(archived, &mut out);
-        out
+        <Self::Archived as ArchivedBytes>::archived_bytes(archived)
     }
 }
 
@@ -89,25 +101,16 @@ impl From<core::convert::Infallible> for ZebinError {
 
 /// Trait for layout-aware encoders.
 pub trait Encoder {
-    type Error: core::error::Error + From<core::convert::Infallible>;
-
     fn pos(&self) -> usize;
 
     /// Write as many bytes as possible and return the amount consumed.
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, Self::Error>;
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError>;
 
     /// Write as many alignment bytes as possible and return the amount consumed.
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, Self::Error>;
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError>;
 
     /// Register a layout descriptor for the current object and return its schema id.
-    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, Self::Error>;
-}
-
-/// Result of polling a serialize state.
-pub enum SerializePoll<T> {
-    Pending,
-    Ready(T),
-    Error(ZebinError),
+    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError>;
 }
 
 /// Trait for resumable serialization states.
@@ -117,9 +120,7 @@ pub trait SerializeState {
     fn poll<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
-    where
-        E::Error: From<ZebinError>;
+    ) -> Result<Poll<Self::Resolver>, ZebinError>;
 }
 
 /// Trait for types that can create resumable serialization states.
@@ -131,29 +132,13 @@ pub trait Serialize: Archive {
     fn begin(&self) -> Result<Self::State<'_>, ZebinError>;
 }
 
-/// Leaf-shaped serializable values.
-pub trait LeafSerialize: Archive {
-    type State<'a>: SerializeState<Resolver = Self::Resolver>
-    where
-        Self: 'a;
-
-    fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError>;
-}
-
-/// Unary wrappers that simply delegate serialization to an inner value.
-pub trait UnarySerialize: Archive {
-    type Inner: ?Sized + Archive + Serialize;
-
-    fn as_inner(&self) -> &Self::Inner;
-}
-
-/// Variant-shaped serializable values such as `Option` and `Result`.
-pub trait VariantSerialize: Archive {
-    type State<'a>: SerializeState<Resolver = Self::Resolver>
-    where
-        Self: 'a;
-
-    fn begin_variant(&self) -> Result<Self::State<'_>, ZebinError>;
+/// Trait for types that can be validated for safety.
+pub trait Validate<C: ?Sized>: ArchivedBytes {
+    /// Validate the archived version of this type.
+    ///
+    /// # Safety
+    /// The pointer must point to a valid memory location that can be read.
+    unsafe fn validate(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>;
 }
 
 /// Source of indexed sequence items.
@@ -205,6 +190,23 @@ impl<T> SequenceSource<T> for VecDeque<T> {
     }
 }
 
+impl<T: ArchivedBytes, const N: usize> ArchivedBytes for [T; N] {
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+
+    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+        out.fill(0);
+        let elem_size = core::mem::size_of::<T>();
+        if elem_size == 0 {
+            return;
+        }
+        for (index, item) in archived.iter().enumerate() {
+            let start = index * elem_size;
+            let end = start + elem_size;
+            T::write_archived_bytes(item, &mut out[start..end]);
+        }
+    }
+}
+
 /// Buffer for sequence element resolvers while a sequence is being serialized.
 pub trait SequenceResolverBuffer<T: Archive> {
     type Resolver;
@@ -218,27 +220,6 @@ pub trait SequenceResolverBuffer<T: Archive> {
     fn take(&mut self, index: usize) -> T::Resolver;
 
     fn finish(self, data_pos: usize) -> Self::Resolver;
-}
-
-/// Sequence-shaped serializable values.
-pub trait SequenceSerialize: Archive {
-    type State<'a>: SerializeState<Resolver = Self::Resolver>
-    where
-        Self: 'a;
-
-    fn begin_sequence(&self) -> Result<Self::State<'_>, ZebinError>;
-}
-
-/// Trait for types that can be validated for safety.
-pub trait Validate<C: ?Sized> {
-    /// The alignment requirement for the archived representation.
-    const ALIGNMENT: NonZeroUsize;
-
-    /// Validate the archived version of this type.
-    ///
-    /// # Safety
-    /// The pointer must point to a valid memory location that can be read.
-    unsafe fn validate(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>;
 }
 
 /// Byte-oriented state used by fixed-width primitive encoders.
@@ -266,14 +247,11 @@ impl<const N: usize> SerializeState for ByteState<N> {
     fn poll<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<Self::Resolver>, ZebinError> {
         if !self.aligned {
             encoder.align(self.alignment)?;
             if !encoder.pos().is_multiple_of(self.alignment.get()) {
-                return Ok(SerializePoll::Pending);
+                return Ok(Poll::Pending);
             }
             self.aligned = true;
         }
@@ -281,9 +259,9 @@ impl<const N: usize> SerializeState for ByteState<N> {
         let written = encoder.write(&self.bytes[self.cursor..])?;
         self.cursor += written;
         if self.cursor < N {
-            Ok(SerializePoll::Pending)
+            Ok(Poll::Pending)
         } else {
-            Ok(SerializePoll::Ready(()))
+            Ok(Poll::Ready(()))
         }
     }
 }
@@ -291,26 +269,29 @@ impl<const N: usize> SerializeState for ByteState<N> {
 macro_rules! impl_archive_for_primitive {
     ($($t:ty),* $(,)?) => {
         $(
-            impl Archive for $t {
-                type Archived = $t;
-                type Resolver = ();
+            impl ArchivedBytes for $t {
                 const ALIGNMENT: NonZeroUsize = unsafe {
                     NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                 };
 
-                fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-                    Ok(*self)
-                }
-
-                fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+                fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
                     out.copy_from_slice(&archived.to_le_bytes());
                 }
             }
 
-            impl LeafSerialize for $t {
+            impl Archive for $t {
+                type Archived = $t;
+                type Resolver = ();
+
+                fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+                    Ok(*self)
+                }
+            }
+
+            impl Serialize for $t {
                 type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
 
-                fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError> {
+                fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
                     Ok(ByteState::new(
                         self.to_le_bytes(),
                         unsafe {
@@ -320,19 +301,7 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl Serialize for $t {
-                type State<'a> = <Self as LeafSerialize>::State<'a> where Self: 'a;
-
-                fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-                    self.begin_leaf()
-                }
-            }
-
             impl<C: ?Sized> Validate<C> for $t {
-                const ALIGNMENT: NonZeroUsize = unsafe {
-                    NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
-                };
-
                 unsafe fn validate(_ptr: *const Self, _context: &mut C) -> Result<(), ZebinError> {
                     Ok(())
                 }
@@ -343,10 +312,17 @@ macro_rules! impl_archive_for_primitive {
 
 impl_archive_for_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
+impl ArchivedBytes for bool {
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+
+    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+        out[0] = *archived as u8;
+    }
+}
+
 impl Archive for bool {
     type Archived = bool;
     type Resolver = ();
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 
     fn resolve(
         &self,
@@ -355,39 +331,20 @@ impl Archive for bool {
     ) -> Result<Self::Archived, ZebinError> {
         Ok(*self)
     }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        out[0] = *archived as u8;
-    }
 }
 
-impl LeafSerialize for bool {
+impl Serialize for bool {
     type State<'a>
         = ByteState<1>
     where
         Self: 'a;
 
-    fn begin_leaf(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(ByteState::new([*self as u8], unsafe {
-            NonZeroUsize::new_unchecked(1)
-        }))
-    }
-}
-
-impl Serialize for bool {
-    type State<'a>
-        = <Self as LeafSerialize>::State<'a>
-    where
-        Self: 'a;
-
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.begin_leaf()
+        Ok(ByteState::new([*self as u8], NonZeroUsize::new(1).unwrap()))
     }
 }
 
 impl<C: ?Sized> Validate<C> for bool {
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-
     unsafe fn validate(ptr: *const Self, _context: &mut C) -> Result<(), ZebinError> {
         let val = unsafe { *(ptr as *const u8) };
         if val > 1 {
@@ -400,31 +357,15 @@ impl<C: ?Sized> Validate<C> for bool {
     }
 }
 
-impl<T> UnarySerialize for Box<T>
-where
-    T: Archive + Serialize,
-{
-    type Inner = T;
-
-    fn as_inner(&self) -> &Self::Inner {
-        self.as_ref()
-    }
-}
-
 impl<T> Archive for Box<T>
 where
     T: Archive,
 {
     type Archived = T::Archived;
     type Resolver = T::Resolver;
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        T::write_archived_bytes(archived, out)
     }
 }
 
@@ -438,18 +379,7 @@ where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_inner().begin()
-    }
-}
-
-impl<T> UnarySerialize for Rc<T>
-where
-    T: Archive + Serialize,
-{
-    type Inner = T;
-
-    fn as_inner(&self) -> &Self::Inner {
-        self.as_ref()
+        self.as_ref().begin()
     }
 }
 
@@ -459,14 +389,9 @@ where
 {
     type Archived = T::Archived;
     type Resolver = T::Resolver;
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        T::write_archived_bytes(archived, out)
     }
 }
 
@@ -480,18 +405,7 @@ where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_inner().begin()
-    }
-}
-
-impl<T> UnarySerialize for Arc<T>
-where
-    T: Archive + Serialize,
-{
-    type Inner = T;
-
-    fn as_inner(&self) -> &Self::Inner {
-        self.as_ref()
+        self.as_ref().begin()
     }
 }
 
@@ -501,14 +415,9 @@ where
 {
     type Archived = T::Archived;
     type Resolver = T::Resolver;
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        T::write_archived_bytes(archived, out)
     }
 }
 
@@ -522,18 +431,7 @@ where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_inner().begin()
-    }
-}
-
-impl<'a, B> UnarySerialize for Cow<'a, B>
-where
-    B: ?Sized + ToOwned + Archive + Serialize,
-{
-    type Inner = B;
-
-    fn as_inner(&self) -> &Self::Inner {
-        self.as_ref()
+        self.as_ref().begin()
     }
 }
 
@@ -543,14 +441,9 @@ where
 {
     type Archived = B::Archived;
     type Resolver = B::Resolver;
-    const ALIGNMENT: NonZeroUsize = B::ALIGNMENT;
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         self.as_ref().resolve(pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        B::write_archived_bytes(archived, out)
     }
 }
 
@@ -564,6 +457,6 @@ where
         Self: 'b;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_inner().begin()
+        self.as_ref().begin()
     }
 }

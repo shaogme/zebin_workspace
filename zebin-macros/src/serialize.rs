@@ -130,11 +130,8 @@ fn poll_steps(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
             quote! {
                 if self.#resolver_ident.is_none() {
                     match self.#state_ident.poll(encoder)? {
-                        zebin::SerializePoll::Pending => return Ok(zebin::SerializePoll::Pending),
-                        zebin::SerializePoll::Error(err) => {
-                            return Ok(zebin::SerializePoll::Error(err))
-                        }
-                        zebin::SerializePoll::Ready(resolver) => {
+                        ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
+                        ::core::task::Poll::Ready(resolver) => {
                             self.#resolver_ident = ::core::option::Option::Some(resolver);
                         }
                     }
@@ -201,14 +198,12 @@ fn record_state_impl(
                 fn poll<E: zebin::Encoder + ?Sized>(
                     &mut self,
                     encoder: &mut E,
-                ) -> Result<zebin::SerializePoll<Self::Resolver>, E::Error>
-                where
-                    E::Error: ::core::convert::From<zebin::ZebinError>,
+                ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
                 {
                     #layout
                     #(#polls)*
 
-                    Ok(zebin::SerializePoll::Ready(#resolver_expr))
+                    Ok(::core::task::Poll::Ready(#resolver_expr))
                 }
             }
         }
@@ -220,13 +215,11 @@ fn record_state_impl(
                 fn poll<E: zebin::Encoder + ?Sized>(
                     &mut self,
                     encoder: &mut E,
-                ) -> Result<zebin::SerializePoll<Self::Resolver>, E::Error>
-                where
-                    E::Error: ::core::convert::From<zebin::ZebinError>,
+                ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
                 {
                     #(#polls)*
 
-                    Ok(zebin::SerializePoll::Ready(#resolver_expr))
+                    Ok(::core::task::Poll::Ready(#resolver_expr))
                 }
             }
         }
@@ -430,10 +423,9 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         let variant_ident = variant.ident;
         quote! {
             #state_name::#variant_ident(state) => match state.poll(encoder)? {
-                zebin::SerializePoll::Pending => Ok(zebin::SerializePoll::Pending),
-                zebin::SerializePoll::Error(err) => Ok(zebin::SerializePoll::Error(err)),
-                zebin::SerializePoll::Ready(resolver) => {
-                    Ok(zebin::SerializePoll::Ready(#resolver_name::#variant_ident(resolver)))
+                ::core::task::Poll::Pending => Ok(::core::task::Poll::Pending),
+                ::core::task::Poll::Ready(resolver) => {
+                    Ok(::core::task::Poll::Ready(#resolver_name::#variant_ident(resolver)))
                 }
             }
         }
@@ -458,9 +450,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             fn poll<E: zebin::Encoder + ?Sized>(
                 &mut self,
                 encoder: &mut E,
-            ) -> Result<zebin::SerializePoll<Self::Resolver>, E::Error>
-            where
-                E::Error: ::core::convert::From<zebin::ZebinError>,
+            ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
             {
                 match self {
                     #(#poll_arms),*

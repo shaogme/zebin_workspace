@@ -7,7 +7,7 @@ use crate::{
     core::{schema::LayoutDirectory, validator::Validator},
     format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
     num::{u32_to_nonzero_usize, u32_to_usize},
-    traits::{Archive, Validate, ZebinError},
+    traits::{Archive, ArchivedBytes, Validate, ZebinError},
 };
 
 fn read_fixed<const N: usize>(
@@ -229,10 +229,14 @@ where
             pos: root_pos,
         });
     }
-    if root_pos % T::ALIGNMENT.get() != 0 {
+    if root_pos % <T::Archived as ArchivedBytes>::ALIGNMENT.get() != 0 {
         return Err(ZebinError::AlignmentError {
-            expected: T::ALIGNMENT,
-            actual: unsafe { NonZeroUsize::new_unchecked(root_pos % T::ALIGNMENT.get()) },
+            expected: <T::Archived as ArchivedBytes>::ALIGNMENT,
+            actual: unsafe {
+                NonZeroUsize::new_unchecked(
+                    root_pos % <T::Archived as ArchivedBytes>::ALIGNMENT.get(),
+                )
+            },
             pos: root_pos,
         });
     }

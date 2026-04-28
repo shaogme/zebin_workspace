@@ -81,7 +81,7 @@ fn record_field_inits(
                 {
                     let offset = #offset;
                     let size = ::core::mem::size_of::<<#ty as zebin::Archive>::Archived>();
-                    <#ty as zebin::Archive>::write_archived_bytes(
+                    <<#ty as zebin::Archive>::Archived as zebin::ArchivedBytes>::write_archived_bytes(
                         &archived.#member,
                         &mut out[offset..offset + size],
                     );
@@ -98,13 +98,13 @@ fn record_schema_write(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStre
 
     Some(match record.style {
         RecordStyle::Named => quote! {
-            <u32 as zebin::Archive>::write_archived_bytes(
+            <u32 as zebin::ArchivedBytes>::write_archived_bytes(
                 &archived.schema_id,
                 &mut out[0..::core::mem::size_of::<u32>()],
             );
         },
         RecordStyle::Unnamed => quote! {
-            <u32 as zebin::Archive>::write_archived_bytes(
+            <u32 as zebin::ArchivedBytes>::write_archived_bytes(
                 &archived.0,
                 &mut out[0..::core::mem::size_of::<u32>()],
             );
@@ -192,16 +192,12 @@ fn helper_validate(
 
     quote! {
         impl zebin::Validate<zebin::Validator<'_>> for #archived_name {
-            const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
-                ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
-            };
-
             unsafe fn validate(
                 ptr: *const Self,
                 context: &mut zebin::Validator<'_>,
             ) -> Result<(), zebin::ZebinError> {
                 let _guard = context.enter()?;
-                context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+                context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedBytes>::ALIGNMENT)?;
                 context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
                 #layout_checks
                 #(#field_validations)*
@@ -222,16 +218,14 @@ fn helper_bytes_impl(
     writes.extend(record_field_inits(record, archived_name));
 
     quote! {
-        impl #archived_name {
-            pub fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+        impl zebin::ArchivedBytes for #archived_name {
+            const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
+                ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
+            };
+
+            fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
                 out.fill(0);
                 #(#writes)*
-            }
-
-            pub fn archived_bytes(archived: &Self) -> ::zebin::alloc::vec::Vec<u8> {
-                let mut out = ::zebin::alloc::vec![0u8; ::core::mem::size_of::<Self>()];
-                Self::write_archived_bytes(archived, &mut out);
-                out
             }
         }
     }
@@ -292,7 +286,6 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
     let archived_name = archived_name(name);
     let resolver_name = crate::shared::resolver_name(name);
     let include_schema = has_schema(record);
-    let align = quote! { ::core::mem::align_of::<#archived_name>() };
     let helper = helper_record(&archived_name, record);
 
     let resolve_expr = match record.style {
@@ -338,9 +331,6 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
         impl zebin::Archive for #name {
             type Archived = #archived_name;
             type Resolver = #resolver_name;
-            const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
-                ::core::num::NonZeroUsize::new_unchecked(#align)
-            };
 
             fn resolve(
                 &self,
@@ -348,10 +338,6 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
                 resolver: Self::Resolver,
             ) -> Result<Self::Archived, zebin::ZebinError> {
                 Ok(#resolve_expr)
-            }
-
-            fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-                #archived_name::write_archived_bytes(archived, out)
             }
         }
     }
@@ -503,6 +489,41 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         }
     };
 
+    let root_bytes = if variants.is_empty() {
+        quote! {
+            impl zebin::ArchivedBytes for #archived_name {
+                const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
+                    ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
+                };
+
+                fn write_archived_bytes(_archived: &Self, out: &mut [u8]) {
+                    out.fill(0);
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl zebin::ArchivedBytes for #archived_name {
+                const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
+                    ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
+                };
+
+                fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+                    out.fill(0);
+                    <u32 as zebin::ArchivedBytes>::write_archived_bytes(
+                        &archived.tag,
+                        &mut out[0..::core::mem::size_of::<u32>()],
+                    );
+                    let payload_offset = zebin::memoffset::offset_of!(#archived_name, payload);
+                    match archived.tag {
+                        #(#variant_write_arms)*
+                        _ => {}
+                    }
+                }
+            }
+        }
+    };
+
     let root_accessors = quote! {
         impl #archived_name {
             pub fn tag(&self) -> u32 {
@@ -514,16 +535,12 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
 
     let root_validate = quote! {
         impl zebin::Validate<zebin::Validator<'_>> for #archived_name {
-            const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
-                ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>())
-            };
-
             unsafe fn validate(
                 ptr: *const Self,
                 context: &mut zebin::Validator<'_>,
             ) -> Result<(), zebin::ZebinError> {
                 let _guard = context.enter()?;
-                context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+                context.check_alignment(ptr as *const u8, <Self as zebin::ArchivedBytes>::ALIGNMENT)?;
                 context.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
                 let archived = unsafe { &*ptr };
                 match archived.tag {
@@ -545,9 +562,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             impl zebin::Archive for #name {
                 type Archived = #archived_name;
                 type Resolver = #resolver_name;
-                const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
-                    ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self::Archived>())
-                };
 
                 fn resolve(
                     &self,
@@ -556,8 +570,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 ) -> Result<Self::Archived, zebin::ZebinError> {
                     match *self {}
                 }
-
-                fn write_archived_bytes(_archived: &Self::Archived, _out: &mut [u8]) {}
             }
         }
     } else {
@@ -565,9 +577,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             impl zebin::Archive for #name {
                 type Archived = #archived_name;
                 type Resolver = #resolver_name;
-                const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
-                    ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self::Archived>())
-                };
 
                 fn resolve(
                     &self,
@@ -577,19 +586,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                     match (self, resolver) {
                         #(#variant_resolve_arms),*
                         _ => unreachable!("mismatched enum resolver"),
-                    }
-                }
-
-                fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-                    out.fill(0);
-                    <u32 as zebin::Archive>::write_archived_bytes(
-                        &archived.tag,
-                        &mut out[0..::core::mem::size_of::<u32>()],
-                    );
-                    let payload_offset = zebin::memoffset::offset_of!(#archived_name, payload);
-                    match archived.tag {
-                        #(#variant_write_arms)*
-                        _ => {}
                     }
                 }
             }
@@ -606,6 +602,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         }
 
         #payload_struct
+        #root_bytes
         #root_accessors
         #root_validate
         #root_archive

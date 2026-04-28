@@ -65,13 +65,11 @@ impl MeasureEncoder {
 }
 
 impl Encoder for MeasureEncoder {
-    type Error = ZebinError;
-
     fn pos(&self) -> usize {
         self.pos
     }
 
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, Self::Error> {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
         self.pos = self
             .pos
             .checked_add(bytes.len())
@@ -79,7 +77,7 @@ impl Encoder for MeasureEncoder {
         Ok(bytes.len())
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, Self::Error> {
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
         let alignment = alignment.get();
         let pos = self.pos;
         let padding = (alignment - (pos % alignment)) % alignment;
@@ -90,7 +88,7 @@ impl Encoder for MeasureEncoder {
         Ok(padding)
     }
 
-    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, Self::Error> {
+    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError> {
         self.layouts.register(layout)
     }
 }
@@ -123,13 +121,11 @@ impl<'a> SliceEncoder<'a> {
 }
 
 impl<'a> Encoder for SliceEncoder<'a> {
-    type Error = ZebinError;
-
     fn pos(&self) -> usize {
         self.archive_pos
     }
 
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, Self::Error> {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
         let remaining = self.buf.len().saturating_sub(self.written);
         if remaining == 0 || bytes.is_empty() {
             return Ok(0);
@@ -145,7 +141,7 @@ impl<'a> Encoder for SliceEncoder<'a> {
         Ok(written)
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, Self::Error> {
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
         let alignment = alignment.get();
         let padding = (alignment - (self.archive_pos % alignment)) % alignment;
         if padding == 0 {
@@ -165,7 +161,7 @@ impl<'a> Encoder for SliceEncoder<'a> {
         Ok(written)
     }
 
-    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, Self::Error> {
+    fn register_layout(&mut self, layout: &[LayoutField]) -> Result<u32, ZebinError> {
         self.layouts.register(layout)
     }
 }

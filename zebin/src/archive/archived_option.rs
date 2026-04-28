@@ -1,9 +1,9 @@
 use alloc::{boxed::Box, string::ToString};
-use core::{mem::MaybeUninit, num::NonZeroUsize};
+use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, VariantSerialize,
-    ZebinError, core::validator::Validator,
+    ArchivedBytes, Encoder, Serialize, SerializeState, Validate, ZebinError,
+    core::validator::Validator, traits::Archive,
 };
 
 /// Archived representation for `Option<T>`.
@@ -31,6 +31,26 @@ impl<T> ArchivedOption<T> {
             0 => None,
             1 => Some(unsafe { self.value.assume_init_ref() }),
             _ => None,
+        }
+    }
+}
+
+impl<T> ArchivedBytes for ArchivedOption<T>
+where
+    T: ArchivedBytes,
+{
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+
+    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+        out.fill(0);
+        out[0] = archived.tag;
+        if archived.tag == 1 {
+            let value_offset = crate::memoffset::offset_of!(ArchivedOption<T>, value);
+            let value = unsafe { archived.value.assume_init_ref() };
+            T::write_archived_bytes(
+                value,
+                &mut out[value_offset..value_offset + core::mem::size_of::<T>()],
+            );
         }
     }
 }
@@ -71,12 +91,9 @@ where
     fn poll<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<Self::Resolver>, ZebinError> {
         if !self.is_some {
-            return Ok(SerializePoll::Ready(None));
+            return Ok(Poll::Ready(None));
         }
 
         match self
@@ -85,12 +102,11 @@ where
             .expect("inner state initialized for Some option")
             .poll(encoder)?
         {
-            SerializePoll::Pending => Ok(SerializePoll::Pending),
-            SerializePoll::Error(err) => Ok(SerializePoll::Error(err)),
-            SerializePoll::Ready(resolver) => {
+            Poll::Pending => Ok(Poll::Pending),
+            Poll::Ready(resolver) => {
                 self.is_some = false;
                 self.inner = None;
-                Ok(SerializePoll::Ready(Some(resolver)))
+                Ok(Poll::Ready(Some(resolver)))
             }
         }
     }
@@ -102,7 +118,6 @@ where
 {
     type Archived = ArchivedOption<T::Archived>;
     type Resolver = Option<T::Resolver>;
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         match (self, resolver) {
@@ -121,22 +136,9 @@ where
             _ => Err(ZebinError::WriteError),
         }
     }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        out.fill(0);
-        out[0] = archived.tag;
-        if archived.tag == 1 {
-            let value_offset = crate::memoffset::offset_of!(ArchivedOption<T::Archived>, value);
-            let value = unsafe { archived.value.assume_init_ref() };
-            T::write_archived_bytes(
-                value,
-                &mut out[value_offset..value_offset + core::mem::size_of::<T::Archived>()],
-            );
-        }
-    }
 }
 
-impl<T> VariantSerialize for Option<T>
+impl<T> Serialize for Option<T>
 where
     T: Serialize + Archive,
 {
@@ -145,22 +147,8 @@ where
     where
         Self: 'a;
 
-    fn begin_variant(&self) -> Result<Self::State<'_>, ZebinError> {
-        OptionSerializeState::new(self.as_ref())
-    }
-}
-
-impl<T> Serialize for Option<T>
-where
-    T: Serialize + Archive,
-{
-    type State<'a>
-        = <Self as VariantSerialize>::State<'a>
-    where
-        Self: 'a;
-
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.begin_variant()
+        OptionSerializeState::new(self.as_ref())
     }
 }
 
@@ -168,8 +156,6 @@ impl<'v, T> Validate<Validator<'v>> for ArchivedOption<T>
 where
     T: Validate<Validator<'v>>,
 {
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
-
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;
         context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;

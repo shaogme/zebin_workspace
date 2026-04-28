@@ -1,12 +1,11 @@
-use core::num::NonZeroUsize;
-
 use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
+use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
-    Archive, Encoder, SequenceResolverBuffer, SequenceSerialize, SequenceSource, Serialize,
-    SerializePoll, SerializeState, Validate, ZebinError,
+    ArchivedBytes, Encoder, Serialize, SerializeState, Validate, ZebinError,
     core::{rel_ptr::RelPtr, validator::Validator},
     num::{u32_to_usize, usize_to_u32},
+    traits::{Archive, SequenceResolverBuffer, SequenceSource},
 };
 
 /// An archived vector that uses a relative pointer.
@@ -49,6 +48,21 @@ impl<T> ArchivedVec<T> {
     /// Check if the vector is empty.
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+impl<T> ArchivedBytes for ArchivedVec<T>
+where
+    T: ArchivedBytes,
+{
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+
+    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+        out.fill(0);
+        if let Some(ptr) = &archived.ptr {
+            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
+        }
+        <u32 as ArchivedBytes>::write_archived_bytes(&archived.len, &mut out[8..12]);
     }
 }
 
@@ -154,13 +168,10 @@ where
     fn poll_children<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<()>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<()>, ZebinError> {
         loop {
             if self.index >= self.len {
-                return Ok(SerializePoll::Ready(()));
+                return Ok(Poll::Ready(()));
             }
 
             if self.current_state.is_none() {
@@ -173,9 +184,8 @@ where
                 .expect("state initialized above")
                 .poll(encoder)?
             {
-                SerializePoll::Pending => return Ok(SerializePoll::Pending),
-                SerializePoll::Error(err) => return Ok(SerializePoll::Error(err)),
-                SerializePoll::Ready(resolver) => {
+                Poll::Pending => return Ok(Poll::Pending),
+                Poll::Ready(resolver) => {
                     self.resolvers.store(self.index, resolver);
                     self.current_state = None;
                     self.index += 1;
@@ -231,37 +241,31 @@ where
     fn poll_serializing<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<()>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<()>, ZebinError> {
         self.children.poll_children(encoder)
     }
 
     fn poll_aligning<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<()>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
-        encoder.align(T::ALIGNMENT)?;
-        if !encoder.pos().is_multiple_of(T::ALIGNMENT.get()) {
-            return Ok(SerializePoll::Pending);
+    ) -> Result<Poll<()>, ZebinError> {
+        encoder.align(<T::Archived as ArchivedBytes>::ALIGNMENT)?;
+        if !encoder
+            .pos()
+            .is_multiple_of(<T::Archived as ArchivedBytes>::ALIGNMENT.get())
+        {
+            return Ok(Poll::Pending);
         }
         self.data_pos = Some(encoder.pos());
-        Ok(SerializePoll::Ready(()))
+        Ok(Poll::Ready(()))
     }
 
     fn poll_writing<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<usize>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<usize>, ZebinError> {
         if self.write_index >= self.children.len() {
-            return Ok(SerializePoll::Ready(
+            return Ok(Poll::Ready(
                 self.data_pos
                     .expect("data_pos set when entering writing phase"),
             ));
@@ -286,12 +290,12 @@ where
         let written = encoder.write(&archived_bytes[self.current_cursor..])?;
         self.current_cursor += written;
         if self.current_cursor < archived_bytes.len() {
-            return Ok(SerializePoll::Pending);
+            return Ok(Poll::Pending);
         }
 
         self.current_bytes = None;
         self.write_index += 1;
-        Ok(SerializePoll::Pending)
+        Ok(Poll::Pending)
     }
 }
 
@@ -305,36 +309,30 @@ where
     fn poll<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<Self::Resolver>, ZebinError> {
         loop {
             match self.phase {
                 SequencePhase::Serializing => match self.poll_serializing(encoder)? {
-                    SerializePoll::Pending => return Ok(SerializePoll::Pending),
-                    SerializePoll::Error(err) => return Ok(SerializePoll::Error(err)),
-                    SerializePoll::Ready(()) => {
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(()) => {
                         self.phase = SequencePhase::Aligning;
                     }
                 },
                 SequencePhase::Aligning => match self.poll_aligning(encoder)? {
-                    SerializePoll::Pending => return Ok(SerializePoll::Pending),
-                    SerializePoll::Error(err) => return Ok(SerializePoll::Error(err)),
-                    SerializePoll::Ready(()) => {
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(()) => {
                         self.phase = SequencePhase::Writing;
                     }
                 },
                 SequencePhase::Writing => match self.poll_writing(encoder)? {
-                    SerializePoll::Pending => return Ok(SerializePoll::Pending),
-                    SerializePoll::Error(err) => return Ok(SerializePoll::Error(err)),
-                    SerializePoll::Ready(resolver) => {
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(resolver) => {
                         self.phase = SequencePhase::Done;
-                        return Ok(SerializePoll::Ready(resolver));
+                        return Ok(Poll::Ready(resolver));
                     }
                 },
                 SequencePhase::Done => {
-                    return Ok(SerializePoll::Ready(
+                    return Ok(Poll::Ready(
                         self.data_pos
                             .expect("data_pos set when entering writing phase"),
                     ));
@@ -380,14 +378,10 @@ where
     fn poll<E: Encoder + ?Sized>(
         &mut self,
         encoder: &mut E,
-    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
-    where
-        E::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<Self::Resolver>, ZebinError> {
         match self.children.poll_children(encoder)? {
-            SerializePoll::Pending => Ok(SerializePoll::Pending),
-            SerializePoll::Error(err) => Ok(SerializePoll::Error(err)),
-            SerializePoll::Ready(()) => Ok(SerializePoll::Ready(self.finish_resolvers())),
+            Poll::Pending => Ok(Poll::Pending),
+            Poll::Ready(()) => Ok(Poll::Ready(self.finish_resolvers())),
         }
     }
 }
@@ -416,20 +410,10 @@ where
     })
 }
 
-pub(crate) fn write_sequence_archive_bytes<T>(archived: &ArchivedVec<T>, out: &mut [u8]) {
-    out.fill(0);
-    if let Some(ptr) = &archived.ptr {
-        out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
-    }
-    <u32 as Archive>::write_archived_bytes(&archived.len, &mut out[8..12]);
-}
-
 impl<'v, T> Validate<Validator<'v>> for ArchivedVec<T>
 where
     T: Validate<Validator<'v>>,
 {
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
-
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;
         context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
@@ -471,28 +455,9 @@ where
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         resolve_sequence_archive(self.as_slice(), pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        write_sequence_archive_bytes(archived, out);
-    }
-}
-
-impl<T> SequenceSerialize for Vec<T>
-where
-    T: Serialize + Archive,
-{
-    type State<'a>
-        = VecSerializeState<'a, T>
-    where
-        Self: 'a;
-
-    fn begin_sequence(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(VecSerializeState::new(self.as_slice()))
     }
 }
 
@@ -501,12 +466,12 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = <Self as SequenceSerialize>::State<'a>
+        = VecSerializeState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.begin_sequence()
+        Ok(VecSerializeState::new(self.as_slice()))
     }
 }
 
@@ -516,28 +481,9 @@ where
 {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         resolve_sequence_archive(self, pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        write_sequence_archive_bytes(archived, out);
-    }
-}
-
-impl<T> SequenceSerialize for VecDeque<T>
-where
-    T: Serialize + Archive,
-{
-    type State<'a>
-        = VecDequeSerializeState<'a, T>
-    where
-        Self: 'a;
-
-    fn begin_sequence(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(VecDequeSerializeState::new(self))
     }
 }
 
@@ -546,12 +492,12 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = <Self as SequenceSerialize>::State<'a>
+        = VecDequeSerializeState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.begin_sequence()
+        Ok(VecDequeSerializeState::new(self))
     }
 }
 
@@ -561,28 +507,9 @@ where
 {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         resolve_sequence_archive(self, pos, resolver)
-    }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        write_sequence_archive_bytes(archived, out);
-    }
-}
-
-impl<T> SequenceSerialize for [T]
-where
-    T: Serialize + Archive,
-{
-    type State<'a>
-        = SliceSerializeState<'a, T>
-    where
-        Self: 'a;
-
-    fn begin_sequence(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(SliceSerializeState::new(self))
     }
 }
 
@@ -591,12 +518,12 @@ where
     T: Serialize + Archive,
 {
     type State<'a>
-        = <Self as SequenceSerialize>::State<'a>
+        = SliceSerializeState<'a, T>
     where
         Self: 'a;
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.begin_sequence()
+        Ok(SliceSerializeState::new(self))
     }
 }
 
@@ -606,7 +533,6 @@ where
 {
     type Archived = [T::Archived; N];
     type Resolver = [T::Resolver; N];
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         let elem_size = core::mem::size_of::<T::Archived>();
@@ -627,23 +553,9 @@ where
 
         Ok(unsafe { out.assume_init() })
     }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        out.fill(0);
-        let elem_size = core::mem::size_of::<T::Archived>();
-        if elem_size == 0 {
-            return;
-        }
-
-        for (index, item) in archived.iter().enumerate() {
-            let start = index * elem_size;
-            let end = start + elem_size;
-            T::write_archived_bytes(item, &mut out[start..end]);
-        }
-    }
 }
 
-impl<T, const N: usize> SequenceSerialize for [T; N]
+impl<T, const N: usize> Serialize for [T; N]
 where
     T: Serialize + Archive,
 {
@@ -652,22 +564,8 @@ where
     where
         Self: 'a;
 
-    fn begin_sequence(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(ArraySerializeState::new(self))
-    }
-}
-
-impl<T, const N: usize> Serialize for [T; N]
-where
-    T: Serialize + Archive,
-{
-    type State<'a>
-        = <Self as SequenceSerialize>::State<'a>
-    where
-        Self: 'a;
-
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.begin_sequence()
+        Ok(ArraySerializeState::new(self))
     }
 }
 
@@ -675,8 +573,6 @@ impl<'v, T, const N: usize> Validate<Validator<'v>> for [T; N]
 where
     T: Validate<Validator<'v>>,
 {
-    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
-
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;
         context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;

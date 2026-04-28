@@ -21,14 +21,12 @@ pub mod prelude {
     #[cfg(feature = "mmap")]
     pub use crate::storage::mmap::Mmap;
     pub use crate::traits::{
-        ByteState, Encoder, LeafSerialize, SequenceSerialize, Serialize, UnarySerialize, Validate,
-        VariantSerialize, ZebinError,
+        Archive, ArchivedBytes, ByteState, Encoder, Serialize, Validate, ZebinError,
     };
     pub use crate::{
-        ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, Archive, ArchiveHeader, ArchiveView,
+        ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader, ArchiveView,
         ArchiveWriter, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, RelPtr,
-        SerializePoll, SerializeState, Storage, Validator, decode, encode, encode_chunked,
-        encode_into, validate,
+        SerializeState, Storage, Validator, decode, encode, encode_chunked, encode_into, validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
@@ -41,7 +39,9 @@ pub use crate::format::{ARCHIVE_HEADER_SIZE, ARCHIVE_MAGIC, ARCHIVE_VERSION, Arc
 pub use crate::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::storage::mmap::Mmap;
-pub use crate::traits::*;
+pub use crate::traits::{
+    Archive, ArchivedBytes, ByteState, Encoder, Serialize, SerializeState, Validate, ZebinError,
+};
 pub use memoffset;
 pub use zebin_macros::*;
 
@@ -70,13 +70,12 @@ where
     let mut state = value.begin()?;
     let resolver = loop {
         match state.poll(&mut encoder)? {
-            SerializePoll::Pending => continue,
-            SerializePoll::Error(err) => return Err(err),
-            SerializePoll::Ready(resolver) => break resolver,
+            ::core::task::Poll::Pending => continue,
+            ::core::task::Poll::Ready(resolver) => break resolver,
         }
     };
 
-    encoder.align(T::ALIGNMENT)?;
+    encoder.align(<T::Archived as crate::ArchivedBytes>::ALIGNMENT)?;
     let root_offset = encoder.pos();
     let root_offset = usize_to_nonzero_u32(
         root_offset,
@@ -220,17 +219,19 @@ where
                     self.phase = EncodePhase::Body { state };
                 }
                 EncodePhase::Body { state } => match state.poll(&mut encoder)? {
-                    SerializePoll::Pending => break,
-                    SerializePoll::Error(err) => return Err(err),
-                    SerializePoll::Ready(resolver) => {
+                    ::core::task::Poll::Pending => break,
+                    ::core::task::Poll::Ready(resolver) => {
                         self.phase = EncodePhase::RootAlign {
                             resolver: Some(resolver),
                         };
                     }
                 },
                 EncodePhase::RootAlign { resolver } => {
-                    encoder.align(T::ALIGNMENT)?;
-                    if !encoder.pos().is_multiple_of(T::ALIGNMENT.get()) {
+                    encoder.align(<T::Archived as crate::ArchivedBytes>::ALIGNMENT)?;
+                    if !encoder
+                        .pos()
+                        .is_multiple_of(<T::Archived as crate::ArchivedBytes>::ALIGNMENT.get())
+                    {
                         break;
                     }
                     if encoder.pos() != self.plan.root_pos {

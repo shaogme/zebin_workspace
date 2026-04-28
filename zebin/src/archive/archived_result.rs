@@ -1,9 +1,9 @@
 use alloc::{boxed::Box, string::ToString};
-use core::{mem::MaybeUninit, num::NonZeroUsize};
+use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, VariantSerialize,
-    ZebinError, core::validator::Validator,
+    ArchivedBytes, Encoder, Serialize, SerializeState, Validate, ZebinError,
+    core::validator::Validator, traits::Archive,
 };
 
 /// Archived representation for `Result<T, E>`.
@@ -48,6 +48,38 @@ impl<T, E> ArchivedResult<T, E> {
     }
 }
 
+impl<T, E> ArchivedBytes for ArchivedResult<T, E>
+where
+    T: ArchivedBytes,
+    E: ArchivedBytes,
+{
+    const ALIGNMENT: NonZeroUsize = if T::ALIGNMENT.get() >= E::ALIGNMENT.get() {
+        T::ALIGNMENT
+    } else {
+        E::ALIGNMENT
+    };
+
+    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+        out.fill(0);
+        out[0] = archived.tag;
+        if archived.tag == 0 {
+            let value_offset = crate::memoffset::offset_of!(ArchivedResult<T, E>, ok);
+            let value = unsafe { archived.ok.assume_init_ref() };
+            T::write_archived_bytes(
+                value,
+                &mut out[value_offset..value_offset + core::mem::size_of::<T>()],
+            );
+        } else if archived.tag == 1 {
+            let value_offset = crate::memoffset::offset_of!(ArchivedResult<T, E>, err);
+            let value = unsafe { archived.err.assume_init_ref() };
+            E::write_archived_bytes(
+                value,
+                &mut out[value_offset..value_offset + core::mem::size_of::<E>()],
+            );
+        }
+    }
+}
+
 /// Resumable serialization state for `Result<T, E>`.
 pub enum ResultSerializeState<'a, T, E>
 where
@@ -81,20 +113,15 @@ where
     fn poll<R: Encoder + ?Sized>(
         &mut self,
         encoder: &mut R,
-    ) -> Result<SerializePoll<Self::Resolver>, R::Error>
-    where
-        R::Error: From<ZebinError>,
-    {
+    ) -> Result<Poll<Self::Resolver>, ZebinError> {
         match self {
             ResultSerializeState::Ok(state) => match state.as_mut().poll(encoder)? {
-                SerializePoll::Pending => Ok(SerializePoll::Pending),
-                SerializePoll::Error(err) => Ok(SerializePoll::Error(err)),
-                SerializePoll::Ready(resolver) => Ok(SerializePoll::Ready(Ok(resolver))),
+                Poll::Pending => Ok(Poll::Pending),
+                Poll::Ready(resolver) => Ok(Poll::Ready(Ok(resolver))),
             },
             ResultSerializeState::Err(state) => match state.as_mut().poll(encoder)? {
-                SerializePoll::Pending => Ok(SerializePoll::Pending),
-                SerializePoll::Error(err) => Ok(SerializePoll::Error(err)),
-                SerializePoll::Ready(resolver) => Ok(SerializePoll::Ready(Err(resolver))),
+                Poll::Pending => Ok(Poll::Pending),
+                Poll::Ready(resolver) => Ok(Poll::Ready(Err(resolver))),
             },
         }
     }
@@ -107,11 +134,6 @@ where
 {
     type Archived = ArchivedResult<T::Archived, E::Archived>;
     type Resolver = Result<T::Resolver, E::Resolver>;
-    const ALIGNMENT: NonZeroUsize = if T::ALIGNMENT.get() >= E::ALIGNMENT.get() {
-        T::ALIGNMENT
-    } else {
-        E::ALIGNMENT
-    };
 
     fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         match (self, resolver) {
@@ -138,31 +160,9 @@ where
             _ => Err(ZebinError::WriteError),
         }
     }
-
-    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
-        out.fill(0);
-        out[0] = archived.tag;
-        if archived.tag == 0 {
-            let value_offset =
-                crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, ok);
-            let value = unsafe { archived.ok.assume_init_ref() };
-            T::write_archived_bytes(
-                value,
-                &mut out[value_offset..value_offset + core::mem::size_of::<T::Archived>()],
-            );
-        } else if archived.tag == 1 {
-            let value_offset =
-                crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, err);
-            let value = unsafe { archived.err.assume_init_ref() };
-            E::write_archived_bytes(
-                value,
-                &mut out[value_offset..value_offset + core::mem::size_of::<E::Archived>()],
-            );
-        }
-    }
 }
 
-impl<T, E> VariantSerialize for Result<T, E>
+impl<T, E> Serialize for Result<T, E>
 where
     T: Serialize + Archive,
     E: Serialize + Archive,
@@ -172,23 +172,8 @@ where
     where
         Self: 'a;
 
-    fn begin_variant(&self) -> Result<Self::State<'_>, ZebinError> {
-        ResultSerializeState::new(self.as_ref())
-    }
-}
-
-impl<T, E> Serialize for Result<T, E>
-where
-    T: Serialize + Archive,
-    E: Serialize + Archive,
-{
-    type State<'a>
-        = <Self as VariantSerialize>::State<'a>
-    where
-        Self: 'a;
-
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.begin_variant()
+        ResultSerializeState::new(self.as_ref())
     }
 }
 
@@ -197,12 +182,6 @@ where
     T: Validate<Validator<'v>>,
     E: Validate<Validator<'v>>,
 {
-    const ALIGNMENT: NonZeroUsize = if T::ALIGNMENT.get() >= E::ALIGNMENT.get() {
-        T::ALIGNMENT
-    } else {
-        E::ALIGNMENT
-    };
-
     unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
         let _guard = context.enter()?;
         context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
