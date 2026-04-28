@@ -12,8 +12,8 @@ use crate::{
 /// An archived string that uses a relative pointer.
 #[repr(C)]
 pub struct ArchivedString {
-    ptr: Option<RelPtr<u8>>,
-    len: u32,
+    pub(crate) ptr: Option<RelPtr<u8>>,
+    pub(crate) len: u32,
 }
 
 impl ArchivedString {
@@ -39,7 +39,7 @@ impl ArchivedString {
     }
 }
 
-/// Resumable serialization state for `String`.
+/// Resumable serialization state for `String` and `str`.
 pub struct StringSerializeState<'a> {
     bytes: &'a [u8],
     cursor: usize,
@@ -47,7 +47,7 @@ pub struct StringSerializeState<'a> {
 }
 
 impl<'a> StringSerializeState<'a> {
-    fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
         Ok(Self {
             bytes,
             cursor: 0,
@@ -109,6 +109,43 @@ impl Archive for String {
 }
 
 impl Serialize for String {
+    type State<'a>
+        = StringSerializeState<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        StringSerializeState::new(self.as_bytes())
+    }
+}
+
+impl Archive for str {
+    type Archived = ArchivedString;
+    type Resolver = usize;
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        let ptr = if self.is_empty() {
+            None
+        } else {
+            Some(RelPtr::new(pos, resolver)?)
+        };
+        Ok(ArchivedString {
+            ptr,
+            len: usize_to_u32(self.len(), || ZebinError::WriteError)?,
+        })
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        out.fill(0);
+        if let Some(ptr) = &archived.ptr {
+            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
+        }
+        <u32 as Archive>::write_archived_bytes(&archived.len, &mut out[8..12]);
+    }
+}
+
+impl Serialize for str {
     type State<'a>
         = StringSerializeState<'a>
     where

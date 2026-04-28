@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 
 use crate::{
     Archive, Encoder, Serialize, SerializePoll, SerializeState, Validate, ZebinError,
@@ -11,8 +11,8 @@ use crate::{
 /// An archived vector that uses a relative pointer.
 #[repr(C)]
 pub struct ArchivedVec<T> {
-    ptr: Option<RelPtr<T>>,
-    len: u32,
+    pub(crate) ptr: Option<RelPtr<T>>,
+    pub(crate) len: u32,
 }
 
 impl<T> ArchivedVec<T> {
@@ -51,14 +51,14 @@ impl<T> ArchivedVec<T> {
     }
 }
 
-enum VecPhase {
+pub(crate) enum VecPhase {
     Serializing,
     Aligning,
     Writing,
     Done,
 }
 
-/// Resumable serialization state for `Vec<T>`.
+/// Resumable serialization state for `Vec<T>` and slices.
 pub struct VecSerializeState<'a, T>
 where
     T: Serialize + Archive,
@@ -78,7 +78,7 @@ impl<'a, T> VecSerializeState<'a, T>
 where
     T: Serialize + Archive,
 {
-    fn new(items: &'a [T]) -> Result<Self, ZebinError> {
+    pub(crate) fn new(items: &'a [T]) -> Result<Self, ZebinError> {
         let mut resolvers = Vec::with_capacity(items.len());
         resolvers.resize_with(items.len(), || None);
         Ok(Self {
@@ -92,6 +92,138 @@ where
             current_bytes: None,
             current_cursor: 0,
         })
+    }
+}
+
+/// Resumable serialization state for `VecDeque<T>`.
+pub struct VecDequeSerializeState<'a, T>
+where
+    T: Serialize + Archive,
+{
+    items: &'a VecDeque<T>,
+    phase: VecPhase,
+    serialize_index: usize,
+    write_index: usize,
+    current_state: Option<Box<<T as Serialize>::State<'a>>>,
+    resolvers: Vec<Option<T::Resolver>>,
+    data_pos: Option<usize>,
+    current_bytes: Option<Vec<u8>>,
+    current_cursor: usize,
+}
+
+impl<'a, T> VecDequeSerializeState<'a, T>
+where
+    T: Serialize + Archive,
+{
+    pub(crate) fn new(items: &'a VecDeque<T>) -> Result<Self, ZebinError> {
+        let mut resolvers = Vec::with_capacity(items.len());
+        resolvers.resize_with(items.len(), || None);
+        Ok(Self {
+            items,
+            phase: VecPhase::Serializing,
+            serialize_index: 0,
+            write_index: 0,
+            current_state: None,
+            resolvers,
+            data_pos: None,
+            current_bytes: None,
+            current_cursor: 0,
+        })
+    }
+}
+
+impl<'a, T> SerializeState for VecDequeSerializeState<'a, T>
+where
+    T: Serialize + Archive,
+{
+    type Resolver = usize;
+
+    fn poll<E: Encoder + ?Sized>(
+        &mut self,
+        encoder: &mut E,
+    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
+    where
+        E::Error: From<ZebinError>,
+    {
+        loop {
+            match self.phase {
+                VecPhase::Serializing => {
+                    if self.serialize_index >= self.items.len() {
+                        self.phase = VecPhase::Aligning;
+                        self.write_index = 0;
+                        continue;
+                    }
+
+                    if self.current_state.is_none() {
+                        self.current_state = Some(Box::new(
+                            self.items[self.serialize_index].begin()?,
+                        ));
+                    }
+
+                    match self
+                        .current_state
+                        .as_mut()
+                        .expect("state initialized above")
+                        .poll(encoder)?
+                    {
+                        SerializePoll::Pending => return Ok(SerializePoll::Pending),
+                        SerializePoll::Error(err) => return Ok(SerializePoll::Error(err)),
+                        SerializePoll::Ready(resolver) => {
+                            self.resolvers[self.serialize_index] = Some(resolver);
+                            self.current_state = None;
+                            self.serialize_index += 1;
+                        }
+                    }
+                }
+                VecPhase::Aligning => {
+                    encoder.align(T::ALIGNMENT)?;
+                    if !encoder.pos().is_multiple_of(T::ALIGNMENT.get()) {
+                        return Ok(SerializePoll::Pending);
+                    }
+                    self.data_pos = Some(encoder.pos());
+                    self.phase = VecPhase::Writing;
+                }
+                VecPhase::Writing => {
+                    if self.write_index >= self.items.len() {
+                        self.phase = VecPhase::Done;
+                        return Ok(SerializePoll::Ready(
+                            self.data_pos
+                                .expect("data_pos set when entering writing phase"),
+                        ));
+                    }
+
+                    if self.current_bytes.is_none() {
+                        let resolver = self.resolvers[self.write_index]
+                            .take()
+                            .expect("resolver stored when element serialization completed");
+                        let element_pos = encoder.pos();
+                        let archived =
+                            self.items[self.write_index].resolve(element_pos, resolver)?;
+                        self.current_bytes = Some(T::archived_bytes(&archived));
+                        self.current_cursor = 0;
+                    }
+
+                    let archived_bytes = self
+                        .current_bytes
+                        .as_ref()
+                        .expect("archived element initialized above");
+                    let written = encoder.write(&archived_bytes[self.current_cursor..])?;
+                    self.current_cursor += written;
+                    if self.current_cursor < archived_bytes.len() {
+                        return Ok(SerializePoll::Pending);
+                    }
+
+                    self.current_bytes = None;
+                    self.write_index += 1;
+                }
+                VecPhase::Done => {
+                    return Ok(SerializePoll::Ready(
+                        self.data_pos
+                            .expect("data_pos set when entering writing phase"),
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -226,6 +358,49 @@ where
 
     fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
         VecSerializeState::new(self.as_slice())
+    }
+}
+
+impl<T> Archive for VecDeque<T>
+where
+    T: Archive,
+{
+    type Archived = ArchivedVec<T::Archived>;
+    type Resolver = usize;
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        let ptr = if self.is_empty() {
+            None
+        } else {
+            Some(RelPtr::new(pos, resolver)?)
+        };
+        Ok(ArchivedVec {
+            ptr,
+            len: usize_to_u32(self.len(), || ZebinError::WriteError)?,
+        })
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        out.fill(0);
+        if let Some(ptr) = &archived.ptr {
+            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
+        }
+        <u32 as Archive>::write_archived_bytes(&archived.len, &mut out[8..12]);
+    }
+}
+
+impl<T> Serialize for VecDeque<T>
+where
+    T: Serialize + Archive,
+{
+    type State<'a>
+        = VecDequeSerializeState<'a, T>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        VecDequeSerializeState::new(self)
     }
 }
 

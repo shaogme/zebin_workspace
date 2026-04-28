@@ -1,11 +1,15 @@
 use alloc::{
+    borrow::{Cow, ToOwned},
+    boxed::Box,
+    rc::Rc,
+    sync::Arc,
     string::{String, ToString},
     vec,
     vec::Vec,
 };
 use core::num::NonZeroUsize;
 
-use crate::core::schema::LayoutField;
+use crate::core::{schema::LayoutField, validator::Validator};
 
 /// Object model layer: type-level archive/serialize/validate contracts.
 pub trait Archive {
@@ -274,6 +278,326 @@ impl<C: ?Sized> Validate<C> for bool {
                 pos: ptr as usize,
             });
         }
+        Ok(())
+    }
+}
+
+impl<T> Archive for Box<T>
+where
+    T: Archive,
+{
+    type Archived = T::Archived;
+    type Resolver = T::Resolver;
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(pos, resolver)
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        T::write_archived_bytes(archived, out)
+    }
+}
+
+impl<T> Serialize for Box<T>
+where
+    T: Serialize + Archive,
+{
+    type State<'a>
+        = <T as Serialize>::State<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin()
+    }
+}
+
+impl<T> Archive for Rc<T>
+where
+    T: Archive,
+{
+    type Archived = T::Archived;
+    type Resolver = T::Resolver;
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(pos, resolver)
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        T::write_archived_bytes(archived, out)
+    }
+}
+
+impl<T> Serialize for Rc<T>
+where
+    T: Serialize + Archive,
+{
+    type State<'a>
+        = <T as Serialize>::State<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin()
+    }
+}
+
+impl<T> Archive for Arc<T>
+where
+    T: Archive,
+{
+    type Archived = T::Archived;
+    type Resolver = T::Resolver;
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(pos, resolver)
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        T::write_archived_bytes(archived, out)
+    }
+}
+
+impl<T> Serialize for Arc<T>
+where
+    T: Serialize + Archive,
+{
+    type State<'a>
+        = <T as Serialize>::State<'a>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin()
+    }
+}
+
+impl<'a, B> Archive for Cow<'a, B>
+where
+    B: ?Sized + ToOwned + Archive,
+{
+    type Archived = B::Archived;
+    type Resolver = B::Resolver;
+    const ALIGNMENT: NonZeroUsize = B::ALIGNMENT;
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(pos, resolver)
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        B::write_archived_bytes(archived, out)
+    }
+}
+
+impl<'a, B> Serialize for Cow<'a, B>
+where
+    B: ?Sized + ToOwned + Serialize + Archive,
+{
+    type State<'b>
+        = <B as Serialize>::State<'b>
+    where
+        Self: 'b;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin()
+    }
+}
+
+impl<T> Archive for [T]
+where
+    T: Archive,
+{
+    type Archived = crate::archive::archived_vec::ArchivedVec<T::Archived>;
+    type Resolver = usize;
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        let ptr = if self.is_empty() {
+            None
+        } else {
+            Some(crate::core::rel_ptr::RelPtr::new(pos, resolver)?)
+        };
+        Ok(crate::archive::archived_vec::ArchivedVec {
+            ptr,
+            len: crate::num::usize_to_u32(self.len(), || ZebinError::WriteError)?,
+        })
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        out.fill(0);
+        if let Some(ptr) = &archived.ptr {
+            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
+        }
+        <u32 as Archive>::write_archived_bytes(&archived.len, &mut out[8..12]);
+    }
+}
+
+impl<T> Serialize for [T]
+where
+    T: Serialize + Archive,
+{
+    type State<'a>
+        = crate::archive::archived_vec::VecSerializeState<'a, T>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        crate::archive::archived_vec::VecSerializeState::new(self)
+    }
+}
+
+
+pub struct ArraySerializeState<'a, T, const N: usize>
+where
+    T: Serialize + Archive,
+{
+    items: &'a [T; N],
+    index: usize,
+    current_state: Option<Box<<T as Serialize>::State<'a>>>,
+    resolvers: [Option<T::Resolver>; N],
+}
+
+impl<'a, T, const N: usize> ArraySerializeState<'a, T, N>
+where
+    T: Serialize + Archive,
+{
+    fn new(items: &'a [T; N]) -> Result<Self, ZebinError> {
+        Ok(Self {
+            items,
+            index: 0,
+            current_state: None,
+            resolvers: core::array::from_fn(|_| None),
+        })
+    }
+}
+
+impl<'a, T, const N: usize> SerializeState for ArraySerializeState<'a, T, N>
+where
+    T: Serialize + Archive,
+{
+    type Resolver = [T::Resolver; N];
+
+    fn poll<E: Encoder + ?Sized>(
+        &mut self,
+        encoder: &mut E,
+    ) -> Result<SerializePoll<Self::Resolver>, E::Error>
+    where
+        E::Error: From<ZebinError>,
+    {
+        loop {
+            if self.index >= N {
+                return Ok(SerializePoll::Ready(core::array::from_fn(|i| {
+                    self.resolvers[i]
+                        .take()
+                        .expect("array resolver stored when element serialization completed")
+                })));
+            }
+
+            if self.current_state.is_none() {
+                self.current_state = Some(Box::new(self.items[self.index].begin()?));
+            }
+
+            match self
+                .current_state
+                .as_mut()
+                .expect("state initialized above")
+                .poll(encoder)?
+            {
+                SerializePoll::Pending => return Ok(SerializePoll::Pending),
+                SerializePoll::Error(err) => return Ok(SerializePoll::Error(err)),
+                SerializePoll::Ready(resolver) => {
+                    self.resolvers[self.index] = Some(resolver);
+                    self.current_state = None;
+                    self.index += 1;
+                }
+            }
+        }
+    }
+}
+
+impl<T, const N: usize> Archive for [T; N]
+where
+    T: Archive,
+{
+    type Archived = [T::Archived; N];
+    type Resolver = [T::Resolver; N];
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+
+    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        let elem_size = core::mem::size_of::<T::Archived>();
+        let mut out = core::mem::MaybeUninit::<[T::Archived; N]>::uninit();
+        let out_ptr = out.as_mut_ptr() as *mut T::Archived;
+        let mut resolver_iter = resolver.into_iter();
+
+        for index in 0..N {
+            let item_resolver = resolver_iter.next().expect("array resolver length matches");
+            let item_pos = pos
+                .checked_add(index.checked_mul(elem_size).ok_or(ZebinError::WriteError)?)
+                .ok_or(ZebinError::WriteError)?;
+            let item = self[index].resolve(item_pos, item_resolver)?;
+            unsafe {
+                out_ptr.add(index).write(item);
+            }
+        }
+
+        Ok(unsafe { out.assume_init() })
+    }
+
+    fn write_archived_bytes(archived: &Self::Archived, out: &mut [u8]) {
+        out.fill(0);
+        let elem_size = core::mem::size_of::<T::Archived>();
+        if elem_size == 0 {
+            return;
+        }
+
+        for (index, item) in archived.iter().enumerate() {
+            let start = index * elem_size;
+            let end = start + elem_size;
+            T::write_archived_bytes(item, &mut out[start..end]);
+        }
+    }
+}
+
+impl<T, const N: usize> Serialize for [T; N]
+where
+    T: Serialize + Archive,
+{
+    type State<'a>
+        = ArraySerializeState<'a, T, N>
+    where
+        Self: 'a;
+
+    fn begin(&self) -> Result<Self::State<'_>, ZebinError> {
+        ArraySerializeState::new(self)
+    }
+}
+
+
+impl<'v, T, const N: usize> Validate<Validator<'v>> for [T; N]
+where
+    T: Validate<Validator<'v>>,
+{
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+
+    unsafe fn validate(ptr: *const Self, context: &mut Validator<'v>) -> Result<(), ZebinError> {
+        let _guard = context.enter()?;
+        context.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
+        context.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
+        let data_ptr = ptr as *const T;
+        let elem_size = core::mem::size_of::<T>();
+
+        for index in 0..N {
+            let element_ptr = if elem_size == 0 {
+                data_ptr
+            } else {
+                unsafe { data_ptr.add(index) }
+            };
+            unsafe { T::validate(element_ptr, context)?; }
+        }
+
         Ok(())
     }
 }
