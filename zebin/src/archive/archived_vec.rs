@@ -438,7 +438,7 @@ pub type SliceArchiveState<'a, T> = SequenceArchiveState<'a, [T], T>;
 
 pub(crate) fn resolve_sequence_archive<S, T>(
     source: &S,
-    pos: usize,
+    archive_pos: usize,
     resolver: usize,
 ) -> Result<ArchivedVec<T::Archived>, ZebinError>
 where
@@ -448,7 +448,7 @@ where
     let ptr = if source.len() == 0 {
         None
     } else {
-        Some(RelPtr::new(pos, resolver)?)
+        Some(RelPtr::new(archive_pos, resolver)?)
     };
     Ok(ArchivedVec {
         ptr,
@@ -460,8 +460,8 @@ impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        resolve_sequence_archive(self.as_slice(), pos, resolver)
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        resolve_sequence_archive(self.as_slice(), archive_pos, resolver)
     }
 }
 
@@ -486,8 +486,8 @@ where
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        resolve_sequence_archive(self, pos, resolver)
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        resolve_sequence_archive(self, archive_pos, resolver)
     }
 }
 
@@ -512,8 +512,8 @@ where
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = usize;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        resolve_sequence_archive(self, pos, resolver)
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        resolve_sequence_archive(self, archive_pos, resolver)
     }
 }
 
@@ -538,7 +538,7 @@ where
     type Archived = [T::Archived; N];
     type Resolver = [T::Resolver; N];
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         let elem_size = core::mem::size_of::<T::Archived>();
         let mut out = core::mem::MaybeUninit::<[T::Archived; N]>::uninit();
         let out_ptr = out.as_mut_ptr() as *mut T::Archived;
@@ -546,7 +546,7 @@ where
 
         for (index, item) in self.iter().enumerate() {
             let item_resolver = resolver_iter.next().expect("array resolver length matches");
-            let item_pos = pos
+            let item_pos = archive_pos
                 .checked_add(index.checked_mul(elem_size).ok_or(ZebinError::WriteError)?)
                 .ok_or(ZebinError::WriteError)?;
             let item = item.resolve(item_pos, item_resolver)?;

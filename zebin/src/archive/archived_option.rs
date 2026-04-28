@@ -150,11 +150,11 @@ where
     type Archived = ArchivedOption<T::Archived>;
     type Resolver = Option<T::Resolver>;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         match (self, resolver) {
             (Some(value), Some(resolver)) => {
                 let value_offset = crate::memoffset::offset_of!(ArchivedOption<T::Archived>, value);
-                let archived = value.resolve(pos + value_offset, resolver)?;
+                let archived = value.resolve(archive_pos + value_offset, resolver)?;
                 Ok(ArchivedOption {
                     tag: 1,
                     value: MaybeUninit::new(archived),

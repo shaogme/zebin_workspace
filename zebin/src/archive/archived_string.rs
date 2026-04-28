@@ -130,11 +130,11 @@ impl Archive for String {
     type Archived = ArchivedString;
     type Resolver = usize;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         let ptr = if self.is_empty() {
             None
         } else {
-            Some(RelPtr::new(pos, resolver)?)
+            Some(RelPtr::new(archive_pos, resolver)?)
         };
         Ok(ArchivedString {
             ptr,
@@ -158,11 +158,11 @@ impl Archive for str {
     type Archived = ArchivedString;
     type Resolver = usize;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         let ptr = if self.is_empty() {
             None
         } else {
-            Some(RelPtr::new(pos, resolver)?)
+            Some(RelPtr::new(archive_pos, resolver)?)
         };
         Ok(ArchivedString {
             ptr,

@@ -175,12 +175,12 @@ where
     type Archived = ArchivedResult<T::Archived, E::Archived>;
     type Resolver = Result<T::Resolver, E::Resolver>;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
         match (self, resolver) {
             (Ok(value), Ok(resolver)) => {
                 let value_offset =
                     crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, ok);
-                let archived = value.resolve(pos + value_offset, resolver)?;
+                let archived = value.resolve(archive_pos + value_offset, resolver)?;
                 Ok(ArchivedResult {
                     tag: 0,
                     ok: MaybeUninit::new(archived),
@@ -190,7 +190,7 @@ where
             (Err(value), Err(resolver)) => {
                 let value_offset =
                     crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, err);
-                let archived = value.resolve(pos + value_offset, resolver)?;
+                let archived = value.resolve(archive_pos + value_offset, resolver)?;
                 Ok(ArchivedResult {
                     tag: 1,
                     ok: MaybeUninit::uninit(),

@@ -53,7 +53,7 @@ pub trait Archive {
     type Resolver;
 
     /// Resolve the archived version using the given resolver.
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError>;
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError>;
 }
 
 /// Convert an archived value to a freshly allocated byte vector.
@@ -435,8 +435,8 @@ where
     type Archived = T::Archived;
     type Resolver = T::Resolver;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        self.as_ref().resolve(pos, resolver)
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
@@ -461,8 +461,8 @@ where
     type Archived = T::Archived;
     type Resolver = T::Resolver;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        self.as_ref().resolve(pos, resolver)
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
@@ -487,8 +487,8 @@ where
     type Archived = T::Archived;
     type Resolver = T::Resolver;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        self.as_ref().resolve(pos, resolver)
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
@@ -513,8 +513,8 @@ where
     type Archived = B::Archived;
     type Resolver = B::Resolver;
 
-    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
-        self.as_ref().resolve(pos, resolver)
+    fn resolve(&self, archive_pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+        self.as_ref().resolve(archive_pos, resolver)
     }
 }
 
