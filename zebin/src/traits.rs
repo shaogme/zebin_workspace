@@ -14,7 +14,7 @@ use crate::byteops;
 use crate::core::schema::{LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey};
 
 /// Archived-side binary layout contract.
-pub trait ArchivedLayout {
+pub trait ArchivedLayout: Sized {
     /// The alignment requirement for the archived representation.
     const ALIGNMENT: NonZeroUsize;
 
@@ -22,10 +22,7 @@ pub trait ArchivedLayout {
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Fixed;
 
     /// Optional byte width used when the archived form is not a plain fixed-size overlay.
-    fn encoded_len(archived: &Self) -> usize
-    where
-        Self: Sized,
-    {
+    fn encoded_len(archived: &Self) -> usize {
         let _ = archived;
         core::mem::size_of::<Self>()
     }
@@ -34,10 +31,7 @@ pub trait ArchivedLayout {
     fn write_archived_bytes(archived: &Self, out: &mut [u8]);
 
     /// Convert an archived value to a freshly allocated byte vector.
-    fn archived_bytes(archived: &Self) -> Vec<u8>
-    where
-        Self: Sized,
-    {
+    fn archived_bytes(archived: &Self) -> Vec<u8> {
         let mut out = vec![0u8; Self::encoded_len(archived)];
         Self::write_archived_bytes(archived, &mut out);
         out
@@ -368,12 +362,10 @@ where
 }
 
 /// Buffer for sequence element resolvers while a sequence is being serialized.
-pub trait SequenceResolverBuffer<T: Archive> {
+pub trait SequenceResolverBuffer<T: Archive>: Sized {
     type Resolver;
 
-    fn new(len: usize) -> Self
-    where
-        Self: Sized;
+    fn new(len: usize) -> Self;
 
     fn store(&mut self, index: usize, resolver: T::Resolver);
 
