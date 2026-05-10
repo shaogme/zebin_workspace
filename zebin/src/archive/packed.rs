@@ -1,6 +1,7 @@
 use alloc::{vec, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
+#[cfg(feature = "simd")]
 use wide::u8x16;
 
 use crate::{
@@ -85,29 +86,43 @@ fn pack_bools(values: &[bool]) -> Vec<u8> {
     let out_len = packed_byte_len(values.len(), 1).expect("bool packing length should fit");
     let mut out = vec![0u8; out_len];
 
-    let mut out_cursor = 0usize;
-    let mut chunks = values.chunks_exact(16);
-    for chunk in &mut chunks {
-        let mut lanes = [0u8; 16];
-        for (index, value) in chunk.iter().enumerate() {
-            lanes[index] = *value as u8;
+    #[cfg(feature = "simd")]
+    {
+        let mut out_cursor = 0usize;
+        let mut chunks = values.chunks_exact(16);
+        for chunk in &mut chunks {
+            let mut lanes = [0u8; 16];
+            for (index, value) in chunk.iter().enumerate() {
+                lanes[index] = *value as u8;
+            }
+
+            let mask = u8x16::from(lanes).simd_gt(u8x16::splat(0)).to_bitmask();
+            out[out_cursor] = (mask & 0x00FF) as u8;
+            if out_cursor + 1 < out.len() {
+                out[out_cursor + 1] = ((mask >> 8) & 0x00FF) as u8;
+            }
+            out_cursor += 2;
         }
 
-        let mask = u8x16::from(lanes).simd_gt(u8x16::splat(0)).to_bitmask();
-        out[out_cursor] = (mask & 0x00FF) as u8;
-        if out_cursor + 1 < out.len() {
-            out[out_cursor + 1] = ((mask >> 8) & 0x00FF) as u8;
+        let remainder = chunks.remainder();
+        for (index, value) in remainder.iter().enumerate() {
+            if *value {
+                let bit = index;
+                let byte_index = out_cursor + (bit / 8);
+                let bit_in_byte = bit % 8;
+                out[byte_index] |= 1 << bit_in_byte;
+            }
         }
-        out_cursor += 2;
     }
 
-    let remainder = chunks.remainder();
-    for (index, value) in remainder.iter().enumerate() {
-        if *value {
-            let bit = index;
-            let byte_index = out_cursor + (bit / 8);
-            let bit_in_byte = bit % 8;
-            out[byte_index] |= 1 << bit_in_byte;
+    #[cfg(not(feature = "simd"))]
+    {
+        for (index, &value) in values.iter().enumerate() {
+            if value {
+                let byte_index = index / 8;
+                let bit_in_byte = index % 8;
+                out[byte_index] |= 1 << bit_in_byte;
+            }
         }
     }
 

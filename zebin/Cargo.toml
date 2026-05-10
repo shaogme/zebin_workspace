@@ -9,12 +9,13 @@ authors.workspace = true
 zebin-macros.workspace = true
 memoffset = "0.9"
 memmap2 = { version = "0.9", optional = true }
-wide = { version = "1.3.0", default-features = false }
+wide = { version = "1.3.0", default-features = false, optional = true }
 
 [features]
-default = ["std"]
+default = ["std", "simd"]
 std = ["alloc"]
 alloc = []
+simd = ["dep:wide"]
 mmap = ["dep:memmap2", "std"]
 
 [lints]
