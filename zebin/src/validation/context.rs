@@ -1,9 +1,10 @@
 use crate::{
     core::schema::{SchemaRevision, StableSchemaKey},
-    error::{ValidateError, ValidationPathSegment},
+    error::ValidateError,
     format::ArchiveHeader,
     read::ResolvedLayout,
     traits::ArchiveHeader as ArchiveHeaderTrait,
+    validation::validator::ValidationPathSegment,
 };
 use core::{marker::PhantomData, num::NonZeroUsize};
 

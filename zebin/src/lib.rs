@@ -63,9 +63,7 @@ pub use crate::core::schema::{
     FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
     SchemaRevision, StableSchemaKey,
 };
-pub use crate::error::{
-    AccessError, ArchiveError, ValidateError, ValidationPathSegment, ZebinError,
-};
+pub use crate::error::{AccessError, ArchiveError, ValidateError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::sink::{ByteSink, LayoutSink};
 pub use crate::io::storage::Storage;
@@ -77,7 +75,7 @@ pub use crate::traits::{
     Validate,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
-pub use crate::validation::validator::Validator;
+pub use crate::validation::validator::{ValidationPathSegment, ValidationPathStack, Validator};
 pub use crate::write::{ArchiveWriter, ZebinWriter};
 
 pub use memoffset;
