@@ -246,6 +246,12 @@ pub struct ValidationPathStack {
     extra: Option<Vec<ValidationPathSegment>>,
 }
 
+impl Default for ValidationPathStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ValidationPathStack {
     pub const fn new() -> Self {
         Self {
