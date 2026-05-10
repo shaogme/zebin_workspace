@@ -3,13 +3,18 @@ use core::num::NonZeroUsize;
 use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError},
-    traits::{Access, Archive, ArchivedDefault, Layout, Validate},
+    traits::{
+        Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView, Validate,
+    },
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
     },
     validation::context::ValidationContext,
 };
+
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 
 pub(crate) fn packed_byte_len(
     value_count: usize,
@@ -104,7 +109,7 @@ impl Layout for ArchivedPackedBoolSlice {
 impl Validate for ArchivedPackedBoolSlice {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let mut guard = context.guard()?;
@@ -141,7 +146,7 @@ impl<'a> Access<'a> for ArchivedPackedBoolSlice {
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let typed_ptr = ptr as *const Self;
@@ -219,7 +224,7 @@ impl<const BITS: u8> Layout for ArchivedPackedU8Slice<BITS> {
 impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let mut guard = context.guard()?;
@@ -275,7 +280,7 @@ impl<'a, const BITS: u8> Access<'a> for ArchivedPackedU8Slice<BITS> {
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let typed_ptr = ptr as *const Self;
@@ -371,5 +376,33 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
                 pos: archive_pos,
             })?,
         })
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T, const BITS: u8, U> Restore<Vec<U>> for PackedSlice<'_, T, BITS>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Vec<U>, crate::error::ZebinError> {
+        self.values.restore()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'a, T, const BITS: u8, U, H: ArchiveHeader> RestoreFromView<'a, Vec<U>, H>
+    for PackedSlice<'_, T, BITS>
+where
+    T: RestoreFromView<'a, U, H>,
+{
+    fn restore_from_view(
+        &self,
+        layout: &crate::read::ResolvedLayout<'a, H>,
+    ) -> Result<Vec<U>, crate::error::ZebinError> {
+        let mut out = Vec::with_capacity(self.values.len());
+        for item in self.values {
+            out.push(item.restore_from_view(layout)?);
+        }
+        Ok(out)
     }
 }

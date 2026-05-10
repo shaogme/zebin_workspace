@@ -5,7 +5,7 @@ use zebin::{ZebinArchive, ZebinSerialize};
 #[derive(ZebinArchive, ZebinSerialize)]
 struct NativeContainers {
     maybe_name: Option<String>,
-    boxed_name: Box<String>,
+    boxed_name: Box<str>,
     tags: [String; 2],
     numbers: [u32; 4],
     outcome: Result<String, String>,
@@ -28,7 +28,7 @@ fn test_native_container_round_trip_some() {
 
     let value = NativeContainers {
         maybe_name: Some("Alice".to_string()),
-        boxed_name: Box::new("boxed".to_string()),
+        boxed_name: "boxed".into(),
         tags: ["alpha".to_string(), "beta".to_string()],
         numbers: [1, 2, 3, 4],
         outcome: Ok("success".to_string()),
@@ -66,7 +66,7 @@ fn test_native_container_round_trip_none() {
 
     let value = NativeContainers {
         maybe_name: None,
-        boxed_name: Box::new("root".to_string()),
+        boxed_name: "root".into(),
         tags: ["one".to_string(), "two".to_string()],
         numbers: [9, 8, 7, 6],
         outcome: Err("failure".to_string()),

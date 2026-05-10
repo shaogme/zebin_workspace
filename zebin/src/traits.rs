@@ -132,16 +132,6 @@ pub trait RestoreFromView<'a, T, H: ArchiveHeader> {
     fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<T, ZebinError>;
 }
 
-impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, U, H> for &'a T
-where
-    T: RestoreFromView<'a, U, H> + Layout,
-{
-    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<U, ZebinError> {
-        let item_layout = crate::read::get_nested_layout(layout, *self)?;
-        (*self).restore_from_view(&item_layout)
-    }
-}
-
 /// Byte-stream sink used by archive state machines.
 pub trait ByteSink {
     fn pos(&self) -> usize;

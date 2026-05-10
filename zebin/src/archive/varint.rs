@@ -2,8 +2,10 @@ use core::{num::NonZeroUsize, ops::Deref};
 
 use crate::{
     core::schema::ObjectEncoding,
-    error::{AccessError, ArchiveError, ValidateError},
-    traits::{Access, Archive, ArchivedDefault, Layout, Restore, Validate},
+    error::{AccessError, ArchiveError, ValidateError, ZebinError},
+    traits::{
+        Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView, Validate,
+    },
     validation::context::ValidationContext,
 };
 
@@ -112,7 +114,7 @@ macro_rules! impl_varint_number {
         impl Validate for $archived {
             unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
             where
-                H: crate::traits::ArchiveHeader,
+                H: ArchiveHeader,
                 C: ValidationContext<H> + ?Sized,
             {
                 let mut guard = context.guard()?;
@@ -129,7 +131,7 @@ macro_rules! impl_varint_number {
                 context: &mut C,
             ) -> Result<(Self::View, usize), AccessError>
             where
-                H: crate::traits::ArchiveHeader,
+                H: ArchiveHeader,
                 C: ValidationContext<H> + ?Sized,
             {
                 let typed_ptr = ptr as *const Self;
@@ -140,15 +142,13 @@ macro_rules! impl_varint_number {
             }
         }
 
-        impl crate::traits::Restore<$t> for $archived {
+        impl Restore<$t> for $archived {
             fn restore(&self) -> Result<$t, crate::error::ZebinError> {
                 Ok(self.get())
             }
         }
 
-        impl<'a, H: crate::traits::ArchiveHeader> crate::traits::RestoreFromView<'a, $t, H>
-            for $archived
-        {
+        impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for $archived {
             fn restore_from_view(
                 &self,
                 _layout: &crate::read::ResolvedLayout<'a, H>,
@@ -157,7 +157,7 @@ macro_rules! impl_varint_number {
             }
         }
 
-        impl crate::traits::Restore<crate::archive::varint::VarInt<$t>> for $archived {
+        impl Restore<crate::archive::varint::VarInt<$t>> for $archived {
             fn restore(
                 &self,
             ) -> Result<crate::archive::varint::VarInt<$t>, crate::error::ZebinError> {
@@ -165,8 +165,7 @@ macro_rules! impl_varint_number {
             }
         }
 
-        impl<'a, H: crate::traits::ArchiveHeader>
-            crate::traits::RestoreFromView<'a, crate::archive::varint::VarInt<$t>, H>
+        impl<'a, H: ArchiveHeader> RestoreFromView<'a, crate::archive::varint::VarInt<$t>, H>
             for $archived
         {
             fn restore_from_view(
@@ -200,6 +199,66 @@ macro_rules! impl_varint_number {
                 let mut bytes = [0u8; $max_bytes];
                 encode_u64(self as u64, &mut bytes);
                 $archived { bytes }
+            }
+        }
+
+        impl Restore<$t> for VarInt<$t> {
+            fn restore(&self) -> Result<$t, ZebinError> {
+                Ok(self.value)
+            }
+        }
+
+        impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for VarInt<$t> {
+            fn restore_from_view(
+                &self,
+                _layout: &crate::read::ResolvedLayout<'a, H>,
+            ) -> Result<$t, ZebinError> {
+                Ok(self.value)
+            }
+        }
+
+        impl Restore<VarInt<$t>> for VarInt<$t> {
+            fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
+                Ok(*self)
+            }
+        }
+
+        impl<'a, H: ArchiveHeader> RestoreFromView<'a, VarInt<$t>, H> for VarInt<$t> {
+            fn restore_from_view(
+                &self,
+                _layout: &crate::read::ResolvedLayout<'a, H>,
+            ) -> Result<VarInt<$t>, ZebinError> {
+                Ok(*self)
+            }
+        }
+
+        impl Restore<$t> for VarIntView<$t> {
+            fn restore(&self) -> Result<$t, ZebinError> {
+                Ok(self.value)
+            }
+        }
+
+        impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for VarIntView<$t> {
+            fn restore_from_view(
+                &self,
+                _layout: &crate::read::ResolvedLayout<'a, H>,
+            ) -> Result<$t, ZebinError> {
+                Ok(self.value)
+            }
+        }
+
+        impl Restore<VarInt<$t>> for VarIntView<$t> {
+            fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
+                Ok(VarInt { value: self.value })
+            }
+        }
+
+        impl<'a, H: ArchiveHeader> RestoreFromView<'a, VarInt<$t>, H> for VarIntView<$t> {
+            fn restore_from_view(
+                &self,
+                _layout: &crate::read::ResolvedLayout<'a, H>,
+            ) -> Result<VarInt<$t>, ZebinError> {
+                Ok(VarInt { value: self.value })
             }
         }
     };
@@ -243,7 +302,7 @@ pub(crate) fn encode_u64(mut value: u64, out: &mut [u8]) {
 fn decode_u64<T, H, C>(bytes: *const u8, context: &mut C) -> Result<(T, usize), ValidateError>
 where
     T: VarIntNumber,
-    H: crate::traits::ArchiveHeader,
+    H: ArchiveHeader,
     C: ValidationContext<H> + ?Sized,
 {
     let mut guard = context.guard()?;
@@ -293,7 +352,7 @@ where
 {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let (value, _) = decode_u64::<T, H, C>(ptr as *const u8, context)?;
@@ -313,7 +372,7 @@ where
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let (value, consumed) = decode_u64::<T, H, C>(ptr, context)?;

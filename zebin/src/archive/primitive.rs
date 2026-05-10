@@ -2,8 +2,9 @@ use crate::{
     ZebinError,
     error::{AccessError, ArchiveError, ValidateError},
     traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
-        LayoutSink, Restore, Serialize, SerializeState, Validate,
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchiveHeader, ArchivedDefault,
+        ByteSink, Layout, LayoutSink, Restore, RestoreFromView, Serialize, SerializeState,
+        Validate,
     },
     validation::context::ValidationContext,
 };
@@ -85,7 +86,7 @@ macro_rules! impl_archive_for_primitive {
                     context: &mut C,
                 ) -> Result<(Self::View, usize), AccessError>
                 where
-                    H: crate::traits::ArchiveHeader,
+                    H: ArchiveHeader,
                     C: ValidationContext<H> + ?Sized,
                 {
                     context.check_range(ptr, core::mem::size_of::<Self>())?;
@@ -123,13 +124,13 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl crate::traits::Restore<$t> for $t {
+            impl Restore<$t> for $t {
                 fn restore(&self) -> Result<$t, ZebinError> {
                     Ok(*self)
                 }
             }
 
-            impl<'a, H: crate::traits::ArchiveHeader> crate::traits::RestoreFromView<'a, $t, H> for $t {
+            impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for $t {
                 fn restore_from_view(&self, _layout: &crate::ResolvedLayout<'a, H>) -> Result<$t, ZebinError> {
                     Ok(*self)
                 }
@@ -151,7 +152,7 @@ impl Layout for bool {
 impl Validate for bool {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let val = unsafe { *(ptr as *const u8) };
@@ -176,7 +177,7 @@ impl<'a> Access<'a> for bool {
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         context.check_range(ptr, core::mem::size_of::<Self>())?;
@@ -218,7 +219,7 @@ impl Restore<bool> for bool {
     }
 }
 
-impl<'a, H: crate::traits::ArchiveHeader> crate::traits::RestoreFromView<'a, bool, H> for bool {
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, bool, H> for bool {
     fn restore_from_view(
         &self,
         _layout: &crate::ResolvedLayout<'a, H>,

@@ -3,7 +3,8 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
     traits::{
-        Access, Archive, ByteSink, Layout, LayoutSink, Restore, Serialize, SerializeState, Validate,
+        Access, Archive, ArchiveHeader, ByteSink, Layout, LayoutSink, Restore, RestoreFromView,
+        Serialize, SerializeState, Validate,
     },
     utils::byteops,
     validation::context::ValidationContext,
@@ -90,7 +91,7 @@ where
 {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let mut guard = context.guard()?;
@@ -139,7 +140,7 @@ where
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let typed_ptr = ptr as *const Self;
@@ -164,11 +165,10 @@ where
     }
 }
 
-impl<'a, T, E, U, V, H: crate::traits::ArchiveHeader>
-    crate::traits::RestoreFromView<'a, Result<U, V>, H> for ArchivedResult<T, E>
+impl<'a, T, E, U, V, H: ArchiveHeader> RestoreFromView<'a, Result<U, V>, H> for ArchivedResult<T, E>
 where
-    T: Restore<U> + for<'b> crate::traits::RestoreFromView<'b, U, H> + crate::traits::Layout,
-    E: Restore<V> + for<'b> crate::traits::RestoreFromView<'b, V, H> + crate::traits::Layout,
+    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+    E: Restore<V> + for<'b> RestoreFromView<'b, V, H> + Layout,
 {
     fn restore_from_view(
         &self,
@@ -186,6 +186,41 @@ where
                 Ok(Err(err.restore_from_view(&item_layout)?))
             }
             _ => unreachable!("validated tag"),
+        }
+    }
+}
+
+impl<T, E, U, V> Restore<Result<U, V>> for Result<T, E>
+where
+    T: Restore<U>,
+    E: Restore<V>,
+{
+    fn restore(&self) -> Result<Result<U, V>, ZebinError> {
+        match self {
+            Ok(v) => Ok(Ok(v.restore()?)),
+            Err(e) => Ok(Err(e.restore()?)),
+        }
+    }
+}
+
+impl<'a, T, E, U, V, H: ArchiveHeader> RestoreFromView<'a, Result<U, V>, H> for Result<&'a T, &'a E>
+where
+    T: RestoreFromView<'a, U, H> + Layout,
+    E: RestoreFromView<'a, V, H> + Layout,
+{
+    fn restore_from_view(
+        &self,
+        layout: &crate::ResolvedLayout<'a, H>,
+    ) -> Result<Result<U, V>, ZebinError> {
+        match *self {
+            Ok(val) => {
+                let item_layout = crate::read::get_nested_layout(layout, val)?;
+                Ok(Ok(val.restore_from_view(&item_layout)?))
+            }
+            Err(err) => {
+                let item_layout = crate::read::get_nested_layout(layout, err)?;
+                Ok(Err(err.restore_from_view(&item_layout)?))
+            }
         }
     }
 }

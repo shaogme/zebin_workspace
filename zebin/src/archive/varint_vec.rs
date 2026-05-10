@@ -5,9 +5,10 @@ use crate::{
     archive::varint::{VarIntNumber, encode_u64, encoded_len_u64},
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
+    read::ResolvedLayout,
     traits::{
-        Access, Archive, ArchivedDefault, ByteSink, Layout, LayoutSink, Serialize, SerializeState,
-        Validate,
+        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
+        RestoreFromView, Serialize, SerializeState, Validate,
     },
     validation::context::ValidationContext,
 };
@@ -140,7 +141,7 @@ impl<T: VarIntNumber> Layout for ArchivedVarIntVec<T> {
 impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let mut guard = context.guard()?;
@@ -187,7 +188,7 @@ impl<'a, T: VarIntNumber + 'a> Access<'a> for ArchivedVarIntVec<T> {
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let typed_ptr = ptr as *const Self;
@@ -432,5 +433,101 @@ where
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntArchiveState::new(self.get()))
+    }
+}
+
+impl<T: VarIntNumber> Restore<Vec<T>> for ArchivedVarIntVec<T> {
+    fn restore(&self) -> Result<Vec<T>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for val in self.iter() {
+            out.push(val);
+        }
+        Ok(out)
+    }
+}
+
+impl<'a, T: VarIntNumber, H: ArchiveHeader> RestoreFromView<'a, Vec<T>, H>
+    for ArchivedVarIntVec<T>
+{
+    fn restore_from_view(
+        &self,
+        _layout: &crate::read::ResolvedLayout<'a, H>,
+    ) -> Result<Vec<T>, ZebinError> {
+        self.restore()
+    }
+}
+
+impl<T: VarIntNumber> Restore<VarIntVec<T>> for ArchivedVarIntVec<T> {
+    fn restore(&self) -> Result<VarIntVec<T>, ZebinError> {
+        Ok(VarIntVec {
+            values: self.restore()?,
+        })
+    }
+}
+
+impl<'a, T: VarIntNumber, H: ArchiveHeader> RestoreFromView<'a, VarIntVec<T>, H>
+    for ArchivedVarIntVec<T>
+{
+    fn restore_from_view(
+        &self,
+        layout: &crate::read::ResolvedLayout<'a, H>,
+    ) -> Result<VarIntVec<T>, ZebinError> {
+        Ok(VarIntVec {
+            values: self.restore_from_view(layout)?,
+        })
+    }
+}
+
+impl<T, U> Restore<VarIntVec<U>> for VarIntVec<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<VarIntVec<U>, ZebinError> {
+        Ok(VarIntVec {
+            values: self.values.restore()?,
+        })
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, VarIntVec<U>, H> for VarIntVec<T>
+where
+    T: RestoreFromView<'a, U, H>,
+{
+    fn restore_from_view(
+        &self,
+        layout: &ResolvedLayout<'a, H>,
+    ) -> Result<VarIntVec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.values.len());
+        for item in &self.values {
+            out.push(item.restore_from_view(layout)?);
+        }
+        Ok(VarIntVec { values: out })
+    }
+}
+
+impl<'a, T, U> Restore<VarIntVec<U>> for PackedVarIntSlice<'a, T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<VarIntVec<U>, ZebinError> {
+        Ok(VarIntVec {
+            values: self.values.restore()?,
+        })
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, VarIntVec<U>, H> for PackedVarIntSlice<'a, T>
+where
+    T: RestoreFromView<'a, U, H>,
+{
+    fn restore_from_view(
+        &self,
+        layout: &ResolvedLayout<'a, H>,
+    ) -> Result<VarIntVec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.values.len());
+        for item in self.values {
+            out.push(item.restore_from_view(layout)?);
+        }
+        Ok(VarIntVec { values: out })
     }
 }

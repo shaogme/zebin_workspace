@@ -312,3 +312,86 @@ impl<'a, const BITS: u8, H: ArchiveHeader> RestoreFromView<'a, Vec<u8>, H>
         self.restore()
     }
 }
+
+impl<T, const BITS: u8, U> Restore<Vec<U>> for PackedVec<T, BITS>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        self.values.restore()
+    }
+}
+
+impl<'a, T, const BITS: u8, U, H: ArchiveHeader> RestoreFromView<'a, Vec<U>, H>
+    for PackedVec<T, BITS>
+where
+    T: RestoreFromView<'a, U, H>,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.values.len());
+        for item in &self.values {
+            out.push(item.restore_from_view(layout)?);
+        }
+        Ok(out)
+    }
+}
+
+impl<T, const BITS: u8, U> Restore<PackedVec<U, BITS>> for PackedVec<T, BITS>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<PackedVec<U, BITS>, ZebinError> {
+        Ok(PackedVec {
+            values: self.values.restore()?,
+        })
+    }
+}
+
+impl<'a, T, const BITS: u8, U, H: ArchiveHeader> RestoreFromView<'a, PackedVec<U, BITS>, H>
+    for PackedVec<T, BITS>
+where
+    T: RestoreFromView<'a, U, H>,
+{
+    fn restore_from_view(
+        &self,
+        layout: &ResolvedLayout<'a, H>,
+    ) -> Result<PackedVec<U, BITS>, ZebinError> {
+        let mut out = Vec::with_capacity(self.values.len());
+        for item in &self.values {
+            out.push(item.restore_from_view(layout)?);
+        }
+        Ok(PackedVec { values: out })
+    }
+}
+
+impl Restore<PackedVec<bool, 1>> for ArchivedPackedBoolSlice {
+    fn restore(&self) -> Result<PackedVec<bool, 1>, ZebinError> {
+        Ok(PackedVec::new(self.restore()?))
+    }
+}
+
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, PackedVec<bool, 1>, H> for ArchivedPackedBoolSlice {
+    fn restore_from_view(
+        &self,
+        layout: &ResolvedLayout<'a, H>,
+    ) -> Result<PackedVec<bool, 1>, ZebinError> {
+        Ok(PackedVec::new(self.restore_from_view(layout)?))
+    }
+}
+
+impl<const BITS: u8> Restore<PackedVec<u8, BITS>> for ArchivedPackedU8Slice<BITS> {
+    fn restore(&self) -> Result<PackedVec<u8, BITS>, ZebinError> {
+        Ok(PackedVec::new(self.restore()?))
+    }
+}
+
+impl<'a, const BITS: u8, H: ArchiveHeader> RestoreFromView<'a, PackedVec<u8, BITS>, H>
+    for ArchivedPackedU8Slice<BITS>
+{
+    fn restore_from_view(
+        &self,
+        layout: &ResolvedLayout<'a, H>,
+    ) -> Result<PackedVec<u8, BITS>, ZebinError> {
+        Ok(PackedVec::new(self.restore_from_view(layout)?))
+    }
+}

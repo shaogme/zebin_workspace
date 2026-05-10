@@ -4,15 +4,12 @@ use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
     read::ResolvedLayout,
     traits::{
-        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
-        RestoreFromView, Serialize, SerializeState, Validate,
+        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, OptRestorer,
+        OptRestorerOption, Restore, RestoreFromView, Serialize, SerializeState, Validate,
     },
     utils::byteops,
     validation::context::ValidationContext,
 };
-
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
 
 /// Archived representation for `Option<T>`.
 #[repr(C)]
@@ -69,7 +66,7 @@ where
 {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let mut guard = context.guard()?;
@@ -106,7 +103,7 @@ where
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let typed_ptr = ptr as *const Self;
@@ -141,7 +138,7 @@ where
 
 impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Option<U>, H> for ArchivedOption<T>
 where
-    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+    T: for<'b> RestoreFromView<'b, U, H> + Layout,
 {
     fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Option<U>, ZebinError> {
         match unsafe { self.as_ref() } {
@@ -151,29 +148,6 @@ where
             }
             None => Ok(None),
         }
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<T, U> Restore<Box<Option<U>>> for ArchivedOption<T>
-where
-    T: Restore<U>,
-{
-    fn restore(&self) -> Result<Box<Option<U>>, ZebinError> {
-        Ok(Box::new(self.restore()?))
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Box<Option<U>>, H> for ArchivedOption<T>
-where
-    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
-{
-    fn restore_from_view(
-        &self,
-        layout: &ResolvedLayout<'a, H>,
-    ) -> Result<Box<Option<U>>, ZebinError> {
-        Ok(Box::new(self.restore_from_view(layout)?))
     }
 }
 
@@ -299,8 +273,8 @@ where
     }
 }
 
-impl<'a, A, T, H: ArchiveHeader> crate::traits::OptRestorerOption<'a, T, H>
-    for crate::traits::OptRestorer<'a, ArchivedOption<A>, H>
+impl<'a, A, T, H: ArchiveHeader> OptRestorerOption<'a, T, H>
+    for OptRestorer<'a, ArchivedOption<A>, H>
 where
     ArchivedOption<A>: RestoreFromView<'a, Option<T>, H> + Layout,
 {

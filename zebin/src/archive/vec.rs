@@ -1,4 +1,4 @@
-use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
 use crate::ResolvedLayout;
@@ -501,29 +501,6 @@ where
     }
 }
 
-impl<T, U> Restore<Cow<'static, [U]>> for ArchivedVec<T>
-where
-    T: Restore<U>,
-    U: Clone,
-{
-    fn restore(&self) -> Result<Cow<'static, [U]>, ZebinError> {
-        Ok(Cow::Owned(self.restore()?))
-    }
-}
-
-impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Cow<'static, [U]>, H> for ArchivedVec<T>
-where
-    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
-    U: Clone,
-{
-    fn restore_from_view(
-        &self,
-        layout: &ResolvedLayout<'a, H>,
-    ) -> Result<Cow<'static, [U]>, ZebinError> {
-        Ok(Cow::Owned(self.restore_from_view(layout)?))
-    }
-}
-
 impl<T, U> Restore<VecDeque<U>> for ArchivedVec<T>
 where
     T: Restore<U>,
@@ -553,20 +530,83 @@ where
     }
 }
 
-impl<T, U> Restore<Box<Vec<U>>> for ArchivedVec<T>
+impl<T, U> Restore<Vec<U>> for Vec<T>
 where
     T: Restore<U>,
 {
-    fn restore(&self) -> Result<Box<Vec<U>>, ZebinError> {
-        Ok(Box::new(self.restore()?))
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for item in self {
+            out.push(item.restore()?);
+        }
+        Ok(out)
     }
 }
 
-impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Box<Vec<U>>, H> for ArchivedVec<T>
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Vec<U>, H> for Vec<&'a T>
 where
-    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+    T: RestoreFromView<'a, U, H> + Layout,
 {
-    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Box<Vec<U>>, ZebinError> {
-        Ok(Box::new(self.restore_from_view(layout)?))
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for item in self {
+            let item_layout = crate::read::get_nested_layout(layout, *item)?;
+            out.push(item.restore_from_view(&item_layout)?);
+        }
+        Ok(out)
+    }
+}
+
+impl<T, U> Restore<VecDeque<U>> for VecDeque<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
+        let mut out = VecDeque::with_capacity(self.len());
+        for item in self {
+            out.push_back(item.restore()?);
+        }
+        Ok(out)
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, VecDeque<U>, H> for VecDeque<&'a T>
+where
+    T: RestoreFromView<'a, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<VecDeque<U>, ZebinError> {
+        let mut out = VecDeque::with_capacity(self.len());
+        for item in self {
+            let item_layout = crate::read::get_nested_layout(layout, *item)?;
+            out.push_back(item.restore_from_view(&item_layout)?);
+        }
+        Ok(out)
+    }
+}
+
+impl<T, U> Restore<Vec<U>> for [T]
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for item in self {
+            out.push(item.restore()?);
+        }
+        Ok(out)
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Vec<U>, H> for &'a [T]
+where
+    T: RestoreFromView<'a, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for item in *self {
+            let item_layout = crate::read::get_nested_layout(layout, item)?;
+            out.push(item.restore_from_view(&item_layout)?);
+        }
+        Ok(out)
     }
 }

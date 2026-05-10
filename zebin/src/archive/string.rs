@@ -1,6 +1,6 @@
 use core::{num::NonZeroUsize, str, task::Poll};
 
-use alloc::{borrow::Cow, string::String};
+use alloc::string::String;
 
 use crate::{
     core::rel_ptr::RelPtr,
@@ -62,7 +62,7 @@ impl Layout for ArchivedString {
 impl Validate for ArchivedString {
     unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let mut guard = context.guard()?;
@@ -97,7 +97,7 @@ impl<'a> Access<'a> for ArchivedString {
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
-        H: crate::traits::ArchiveHeader,
+        H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let typed_ptr = ptr as *const Self;
@@ -126,34 +126,6 @@ impl<'a, H: ArchiveHeader> RestoreFromView<'a, String, H> for ArchivedString {
         self.restore()
     }
 }
-
-impl Restore<Cow<'static, str>> for ArchivedString {
-    fn restore(&self) -> Result<Cow<'static, str>, ZebinError> {
-        Ok(Cow::Owned(self.restore()?))
-    }
-}
-
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, Cow<'static, str>, H> for ArchivedString {
-    fn restore_from_view(
-        &self,
-        _layout: &ResolvedLayout<'a, H>,
-    ) -> Result<Cow<'static, str>, ZebinError> {
-        self.restore()
-    }
-}
-
-impl Restore<Box<String>> for ArchivedString {
-    fn restore(&self) -> Result<Box<String>, ZebinError> {
-        Ok(Box::new(self.restore()?))
-    }
-}
-
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, Box<String>, H> for ArchivedString {
-    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Box<String>, ZebinError> {
-        Ok(Box::new(self.restore_from_view(layout)?))
-    }
-}
-
 /// Resumable serialization state for `String` and `str`.
 pub struct StringArchiveState<'a> {
     bytes: &'a [u8],
@@ -257,5 +229,29 @@ impl Serialize for str {
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         StringArchiveState::new(self.as_bytes())
+    }
+}
+
+impl Restore<String> for String {
+    fn restore(&self) -> Result<String, ZebinError> {
+        Ok(self.clone())
+    }
+}
+
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, String, H> for String {
+    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<String, ZebinError> {
+        Ok(self.clone())
+    }
+}
+
+impl Restore<String> for str {
+    fn restore(&self) -> Result<String, ZebinError> {
+        Ok(self.to_string())
+    }
+}
+
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, String, H> for str {
+    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<String, ZebinError> {
+        Ok(self.to_string())
     }
 }
