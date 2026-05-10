@@ -2,7 +2,9 @@ use crate::{
     core::schema::{LayoutDirectory, LayoutView},
     error::{ValidateError, ZebinError},
     format::ArchiveHeader,
-    traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Validate},
+    traits::{
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, SchemaAware, Validate,
+    },
     utils::num::{u32_to_nonzero_usize, u32_to_usize},
     validation::validator::Validator,
 };
@@ -43,6 +45,11 @@ where
         schema_revision: u32,
     ) -> Result<ResolvedLayout<'a, H>, ZebinError> {
         ResolvedLayout::new(self.bytes, stable_schema_key, schema_revision)
+    }
+
+    /// Automatically resolve the layout for a schema-aware object.
+    pub fn get_layout<S: SchemaAware>(&self, obj: &S) -> Result<ResolvedLayout<'a, H>, ZebinError> {
+        self.resolved_layout(obj.stable_schema_key(), obj.schema_revision())
     }
 
     /// Decode and validate the archived root object.

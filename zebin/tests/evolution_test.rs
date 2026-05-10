@@ -40,8 +40,8 @@ fn test_evolution_optional_and_default() {
     let reader = zebin::decode::<Version2>(&buf).unwrap();
     let archived = reader.root();
 
-    // We need the layout of the object in the buffer
-    let layout = reader.resolved_layout(0x100, 0).unwrap();
+    // Automatically resolve the layout from the object's self-describing metadata
+    let layout = reader.get_layout(archived).unwrap();
 
     assert_eq!(unsafe { archived.id(&layout) }.unwrap(), &42);
     assert_eq!(unsafe { archived.name(&layout).unwrap().as_str() }, "Alice");
@@ -68,7 +68,7 @@ fn test_version2_with_all_fields() {
     let buf = zebin::encode(&v2).unwrap();
     let reader = zebin::decode::<Version2>(&buf).unwrap();
     let archived = reader.root();
-    let layout = reader.resolved_layout(0x100, 0).unwrap();
+    let layout = reader.get_layout(archived).unwrap();
 
     assert_eq!(unsafe { archived.id(&layout) }.unwrap(), &1);
     assert_eq!(unsafe { archived.name(&layout).unwrap().as_str() }, "Bob");
@@ -113,7 +113,7 @@ fn test_enum_evolution() {
     // Check if it's Login variant
     let login = unsafe { archived.as_login() }.expect("Should be Login variant");
 
-    let layout = reader.resolved_layout(0x201, 0).unwrap();
+    let layout = reader.get_layout(login).unwrap();
 
     assert_eq!(unsafe { login.user(&layout).unwrap().as_str() }, "Alice");
     assert!(unsafe { login.device(&layout) }.unwrap().is_none());

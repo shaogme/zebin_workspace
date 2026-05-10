@@ -222,7 +222,8 @@ pub fn user_member(record: &RecordSpec<'_>, index: usize) -> Member {
         }
         RecordStyle::Unnamed => {
             let active_index = record.fields[..index].iter().filter(|f| !f.skip).count();
-            Member::Unnamed(Index::from(active_index + usize::from(has_schema(record))))
+            let schema_offset = if has_schema(record) { 2 } else { 0 };
+            Member::Unnamed(Index::from(active_index + schema_offset))
         }
         RecordStyle::Unit => unreachable!("unit has no fields"),
     }

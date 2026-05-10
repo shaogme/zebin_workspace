@@ -35,8 +35,8 @@ pub mod prelude {
     #[cfg(feature = "mmap")]
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, Serialize,
-        SerializeState, Validate,
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, SchemaAware,
+        Serialize, SerializeState, Validate,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::{
@@ -71,8 +71,8 @@ pub use crate::io::storage::Storage;
 pub use crate::io::storage::mmap::Mmap;
 pub use crate::read::{ResolvedLayout, ZebinReader};
 pub use crate::traits::{
-    Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, Serialize,
-    SerializeState, Validate,
+    Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, SchemaAware,
+    Serialize, SerializeState, Validate,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::validator::{ValidationPathSegment, ValidationPathStack, Validator};

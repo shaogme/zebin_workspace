@@ -15,8 +15,11 @@ mod enums;
 pub fn record_schema_field(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStream> {
     if !has_schema(record) { return None; }
     Some(match record.style {
-        RecordStyle::Named => quote! { pub stable_schema_key: u32 },
-        RecordStyle::Unnamed => quote! { pub u32 },
+        RecordStyle::Named => quote! {
+            pub stable_schema_key: u32,
+            pub schema_revision: u32
+        },
+        RecordStyle::Unnamed => quote! { pub u32, pub u32 },
         RecordStyle::Unit => unreachable!("unit never has schema"),
     })
 }
@@ -58,10 +61,12 @@ pub fn record_schema_write(record: &RecordSpec<'_>) -> Option<proc_macro2::Token
     if !has_schema(record) { return None; }
     Some(match record.style {
         RecordStyle::Named => quote! {
-            <u32 as zebin::Layout>::write_archived_bytes(&archived.stable_schema_key, &mut out[0..::core::mem::size_of::<u32>()]);
+            <u32 as zebin::Layout>::write_archived_bytes(&archived.stable_schema_key, &mut out[0..4]);
+            <u32 as zebin::Layout>::write_archived_bytes(&archived.schema_revision, &mut out[4..8]);
         },
         RecordStyle::Unnamed => quote! {
-            <u32 as zebin::Layout>::write_archived_bytes(&archived.0, &mut out[0..::core::mem::size_of::<u32>()]);
+            <u32 as zebin::Layout>::write_archived_bytes(&archived.0, &mut out[0..4]);
+            <u32 as zebin::Layout>::write_archived_bytes(&archived.1, &mut out[4..8]);
         },
         RecordStyle::Unit => unreachable!("unit never has schema"),
     })
@@ -169,7 +174,22 @@ pub fn helper_bytes_impl(archived_name: &Ident, record: &RecordSpec<'_>) -> proc
     let layout_checks = record_layout_checks_logic(record, archived_name);
     let field_validations = record_field_validations(record);
     let fixed_range = if has_schema(record) { quote! {} } else { quote! { guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?; } };
-    let span_expr = if has_schema(record) { quote! { 4 } } else { quote! { ::core::mem::size_of::<Self>() } };
+    let span_expr = if has_schema(record) { quote! { 8 } } else { quote! { ::core::mem::size_of::<Self>() } };
+    let schema_aware_impl = if has_schema(record) {
+        let (key_member, rev_member) = match record.style {
+            RecordStyle::Named => (quote! { stable_schema_key }, quote! { schema_revision }),
+            RecordStyle::Unnamed => (quote! { 0 }, quote! { 1 }),
+            RecordStyle::Unit => unreachable!(),
+        };
+        quote! {
+            impl zebin::SchemaAware for #archived_name {
+                fn stable_schema_key(&self) -> u32 { self.#key_member }
+                fn schema_revision(&self) -> u32 { self.#rev_member }
+            }
+        }
+    } else {
+        quote! {}
+    };
     quote! {
         impl zebin::Layout for #archived_name {
             const ALIGNMENT: ::core::num::NonZeroUsize = unsafe { ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>()) };
@@ -191,6 +211,7 @@ pub fn helper_bytes_impl(archived_name: &Ident, record: &RecordSpec<'_>) -> proc
                 Ok((unsafe { &*typed_ptr }, #span_expr))
             }
         }
+        #schema_aware_impl
     }
 }
 
@@ -226,7 +247,9 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
         RecordStyle::Named => {
             let mut fields = Vec::new();
             if let Some(key) = &stable_key {
+                let revision = record.schema_revision;
                 fields.push(quote! { stable_schema_key: #key });
+                fields.push(quote! { schema_revision: #revision });
             }
             for (index, field) in record.fields.iter().enumerate() {
                 if field.skip { continue; }
@@ -246,7 +269,9 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
         RecordStyle::Unnamed => {
             let mut items = Vec::new();
             if let Some(key) = &stable_key {
+                let revision = record.schema_revision;
                 items.push(quote! { #key });
+                items.push(quote! { #revision });
             }
             for (index, field) in record.fields.iter().enumerate() {
                 if field.skip { continue; }

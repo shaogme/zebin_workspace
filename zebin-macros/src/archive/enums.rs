@@ -102,9 +102,16 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
 
         let mut fields = Vec::new();
         if let Some(key) = &helper_stable_schema_key {
+            let revision = record.schema_revision;
             match record.style {
-                RecordStyle::Named => fields.push(quote! { stable_schema_key: #key }),
-                RecordStyle::Unnamed => fields.push(quote! { #key }),
+                RecordStyle::Named => {
+                    fields.push(quote! { stable_schema_key: #key });
+                    fields.push(quote! { schema_revision: #revision });
+                }
+                RecordStyle::Unnamed => {
+                    fields.push(quote! { #key });
+                    fields.push(quote! { #revision });
+                }
                 RecordStyle::Unit => {}
             }
         }

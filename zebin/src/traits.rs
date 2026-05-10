@@ -102,6 +102,23 @@ pub trait ArchivedDefault {
     fn archived_default() -> &'static Self;
 }
 
+/// Contract for archived representations that carry their own schema metadata.
+pub trait SchemaAware {
+    /// Returns the stable schema key for this archived object.
+    fn stable_schema_key(&self) -> u32;
+    /// Returns the schema revision for this archived object.
+    fn schema_revision(&self) -> u32;
+}
+
+impl<T: SchemaAware + ?Sized> SchemaAware for &T {
+    fn stable_schema_key(&self) -> u32 {
+        (**self).stable_schema_key()
+    }
+    fn schema_revision(&self) -> u32 {
+        (**self).schema_revision()
+    }
+}
+
 /// Re-export Serialize and SerializeState from write module.
 pub use crate::write::state::{Serialize, SerializeState};
 
