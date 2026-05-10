@@ -1,10 +1,9 @@
 use crate::{
     ZebinError,
     error::{AccessError, ArchiveError, ValidateError},
-    io::sink::{ByteSink, LayoutSink},
     traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, Serialize,
-        Validate,
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
+        LayoutSink, Serialize, SerializeState, Validate,
     },
     validation::context::ValidationContext,
 };
@@ -29,8 +28,6 @@ impl<const N: usize> ByteState<N> {
         }
     }
 }
-
-use crate::write::state::SerializeState;
 
 impl<'a, const N: usize> SerializeState<'a> for ByteState<N> {
     type Resolver = ();

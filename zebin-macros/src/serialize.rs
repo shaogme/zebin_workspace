@@ -49,7 +49,9 @@ pub fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
         let state_ident = &field.state_ident;
         let resolver_ident = resolver_slot_ident(record, index);
         let input_member = input_member(record, index);
-        let init = if let Some(init) = packed_begin_expr(field, quote! { self.#input_member }) { init } else {
+        let init = if let Some(init) = packed_begin_expr(field, quote! { self.#input_member }) {
+            init
+        } else {
             let ty = field.ty;
             quote! { <#ty as zebin::Serialize>::begin_serialize(&self.#input_member)? }
         };
@@ -64,7 +66,9 @@ pub fn record_state_poll_logic(
     stable_schema_key: &proc_macro2::TokenStream,
     prefix: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    let layout = if !has_schema(record) { quote! {} } else {
+    let layout = if !has_schema(record) {
+        quote! {}
+    } else {
         let entries = layout_field_entries(record, archived_name);
         let schema_revision = record.schema_revision;
         quote! {
@@ -119,7 +123,8 @@ pub fn record_state_impl(
     archived_name: &Ident,
     stable_schema_key: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    let poll_logic = record_state_poll_logic(record, archived_name, stable_schema_key, quote! { self });
+    let poll_logic =
+        record_state_poll_logic(record, archived_name, stable_schema_key, quote! { self });
     let res_expr = resolver_expr(record, resolver_name, quote! { self });
     quote! {
         impl<'a> zebin::SerializeState<'a> for #state_name<'a> {
@@ -141,9 +146,13 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
     let res_def = resolver_def(&resolver_name, record);
     let s_def = state_def(&state_name, record);
     let key = if has_schema(record) {
-        let k = record.stable_schema_key.expect("schema-bearing records require key");
+        let k = record
+            .stable_schema_key
+            .expect("schema-bearing records require key");
         quote! { #k }
-    } else { quote! { 0 } };
+    } else {
+        quote! { 0 }
+    };
     let s_impl = record_state_impl(&state_name, &resolver_name, record, &archived_name, &key);
     let init = state_init(record);
     quote! { #s_def #res_def #s_impl impl zebin::Serialize for #name { type State<'a> = #state_name<'a> where Self: 'a; fn begin_serialize(&self) -> Result<Self::State<'_>, zebin::ZebinError> { Ok(#state_name { #init }) } } }
@@ -153,7 +162,10 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
 
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
-    let spec = match parse_item(&input) { Ok(s) => s, Err(e) => return e.to_compile_error().into() };
+    let spec = match parse_item(&input) {
+        Ok(s) => s,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let name = input.ident.clone();
     let expanded = match spec {
         ItemSpec::Struct(record) => struct_impl(&name, &record),

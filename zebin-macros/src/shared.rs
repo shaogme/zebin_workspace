@@ -1,16 +1,14 @@
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{
-    Data, DataEnum, DataStruct, DeriveInput, Fields, Ident,
-    Index, Member, Result, Type, spanned::Spanned,
+    Data, DataEnum, DataStruct, DeriveInput, Fields, Ident, Index, Member, Result, Type,
+    spanned::Spanned,
 };
 
 mod attrs;
 mod packed;
 
-pub use packed::{
-    packed_begin_expr, packed_wrapper_type_expr,
-};
+pub use packed::{packed_begin_expr, packed_wrapper_type_expr};
 
 /// Represents the style of a struct or enum variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,10 +240,7 @@ pub fn input_member(record: &RecordSpec<'_>, index: usize) -> Member {
     }
 }
 
-pub fn layout_field_entries(
-    record: &RecordSpec<'_>,
-    archived_name: &Ident,
-) -> Vec<TokenStream> {
+pub fn layout_field_entries(record: &RecordSpec<'_>, archived_name: &Ident) -> Vec<TokenStream> {
     let mut fields: Vec<_> = record
         .fields
         .iter()

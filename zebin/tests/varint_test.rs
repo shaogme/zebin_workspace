@@ -85,7 +85,7 @@ fn test_varint_enum_round_trip() {
     let archived = zebin::decode::<VarIntEnum>(&buf).unwrap();
 
     assert_eq!(archived.tag(), 1);
-    let large = unsafe { archived.as_large().unwrap() };
+    let large = archived.as_large().unwrap();
     assert_eq!(large.0.get(), 0x123456789ABCDEF0);
 }
 

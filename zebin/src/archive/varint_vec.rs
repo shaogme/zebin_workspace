@@ -5,8 +5,10 @@ use crate::{
     archive::varint::{VarIntNumber, encode_u64, encoded_len_u64},
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, ArchivedDefault, Layout, Serialize, SerializeState, Validate},
+    traits::{
+        Access, Archive, ArchivedDefault, ByteSink, Layout, LayoutSink, Serialize, SerializeState,
+        Validate,
+    },
     validation::context::ValidationContext,
 };
 

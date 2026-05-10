@@ -5,7 +5,7 @@ use crate::{
     core::schema::{
         LayoutDescriptor, LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey,
     },
-    io::sink::{ByteSink, LayoutSink},
+    traits::{ByteSink, LayoutSink},
     utils::byteops,
 };
 

@@ -1,13 +1,11 @@
+use super::{record_state_impl, record_state_poll_logic, resolver_def, resolver_expr, state_def};
+use crate::shared::{
+    RecordStyle, VariantSpec, binder_slot_ident, has_schema, packed_begin_expr, resolver_name,
+    resolver_slot_ident, state_name, variant_archived_name, variant_resolver_name,
+    variant_state_name,
+};
 use quote::quote;
 use syn::Ident;
-use crate::shared::{
-    RecordStyle, VariantSpec, binder_slot_ident, has_schema, packed_begin_expr,
-    resolver_slot_ident, state_name, resolver_name, variant_resolver_name,
-    variant_state_name, variant_archived_name,
-};
-use super::{
-    resolver_def, state_def, record_state_impl, record_state_poll_logic, resolver_expr,
-};
 
 pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::TokenStream {
     let state_name_outer = state_name(name);
@@ -31,13 +29,22 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
         variant_resolver_defs.push(resolver_def(&r_name, &variant.record));
 
         let stable_schema_key = if has_schema(&variant.record) {
-            let key = variant.record.stable_schema_key.expect("schema-bearing records require an explicit stable schema key");
+            let key = variant
+                .record
+                .stable_schema_key
+                .expect("schema-bearing records require an explicit stable schema key");
             quote! { #key }
         } else {
             quote! { 0 }
         };
 
-        variant_state_impls.push(record_state_impl(&s_name, &r_name, &variant.record, &a_name, &stable_schema_key));
+        variant_state_impls.push(record_state_impl(
+            &s_name,
+            &r_name,
+            &variant.record,
+            &a_name,
+            &stable_schema_key,
+        ));
 
         state_enum_variants.push(quote! { #variant_user_ident(#s_name<'a>) });
         resolver_enum_variants.push(quote! { #variant_user_ident(#r_name) });
@@ -49,14 +56,20 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             RecordStyle::Named => {
                 let binders = record.fields.iter().map(|f| {
                     let id = f.ident.expect("named field has ident");
-                    if f.skip { quote! { #id: _ } } else { quote! { #id } }
+                    if f.skip {
+                        quote! { #id: _ }
+                    } else {
+                        quote! { #id }
+                    }
                 });
                 let init_fields = record.active_fields().map(|(i, f)| {
                     let binder = binder_slot_ident(record, i);
                     let s_ident = &f.state_ident;
                     let r_ident = resolver_slot_ident(record, i);
                     let ty = f.ty;
-                    let begin = if let Some(b) = packed_begin_expr(f, quote! { #binder }) { b } else {
+                    let begin = if let Some(b) = packed_begin_expr(f, quote! { #binder }) {
+                        b
+                    } else {
                         quote! { <#ty as zebin::Serialize>::begin_serialize(&#binder)? }
                     };
                     quote! { #s_ident: #begin, #r_ident: ::core::option::Option::None, }
@@ -69,14 +82,21 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             }
             RecordStyle::Unnamed => {
                 let binders = record.fields.iter().enumerate().map(|(i, f)| {
-                    if f.skip { quote! { _ } } else { let b = binder_slot_ident(record, i); quote! { #b } }
+                    if f.skip {
+                        quote! { _ }
+                    } else {
+                        let b = binder_slot_ident(record, i);
+                        quote! { #b }
+                    }
                 });
                 let init_fields = record.active_fields().map(|(i, f)| {
                     let binder = binder_slot_ident(record, i);
                     let s_ident = &f.state_ident;
                     let r_ident = resolver_slot_ident(record, i);
                     let ty = f.ty;
-                    let begin = if let Some(b) = packed_begin_expr(f, quote! { #binder }) { b } else {
+                    let begin = if let Some(b) = packed_begin_expr(f, quote! { #binder }) {
+                        b
+                    } else {
                         quote! { <#ty as zebin::Serialize>::begin_serialize(&#binder)? }
                     };
                     quote! { #s_ident: #begin, #r_ident: ::core::option::Option::None, }
@@ -94,7 +114,8 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
         begin_arms.push(begin_arm);
 
         // poll arm
-        let poll_logic = record_state_poll_logic(record, &a_name, &stable_schema_key, quote! { state });
+        let poll_logic =
+            record_state_poll_logic(record, &a_name, &stable_schema_key, quote! { state });
         let res_expr = resolver_expr(record, &r_name, quote! { state });
         poll_arms.push(quote! {
             #state_name_outer::#variant_user_ident(state) => {

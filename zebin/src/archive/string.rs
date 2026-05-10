@@ -5,8 +5,10 @@ use alloc::string::String;
 use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, ArchivedDefault, Layout, Serialize, SerializeState, Validate},
+    traits::{
+        Access, Archive, ArchivedDefault, ByteSink, Layout, LayoutSink, Serialize, SerializeState,
+        Validate,
+    },
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},

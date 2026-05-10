@@ -176,7 +176,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
             pos: 0,
         })?;
         let layout = layouts.lookup(stable_schema_key, schema_revision)?;
-        let resolved = ResolvedLayout::from_parts(self.data, self.header, layout);
+        let resolved = ResolvedLayout::from_parts(self.data, self.header, Some(layout));
         self.cached_layout = Some((stable_schema_key, schema_revision, resolved));
         Ok(resolved)
     }

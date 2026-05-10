@@ -1,10 +1,8 @@
 use crate::{
-    core::schema::{LayoutDirectory, LayoutView},
+    core::schema::{LayoutDirectory, LayoutView, ObjectEncoding},
     error::{ValidateError, ZebinError},
     format::ArchiveHeader,
-    traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, SchemaAware, Validate,
-    },
+    traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, SchemaAware, Validate},
     utils::num::{u32_to_nonzero_usize, u32_to_usize},
     validation::validator::Validator,
 };
@@ -12,14 +10,15 @@ use core::num::NonZeroUsize;
 use core::ops::Deref;
 
 /// Safe access layer output that keeps the validated byte slice alive.
+///
+/// ZebinReader acts as a Root View of the archive. It implements Deref to the root [View],
+/// providing direct access to schema-aware fields and nested views.
 pub struct ZebinReader<'a, T: Archive, H: ArchiveHeaderTrait = ArchiveHeader>
 where
     T::Archived: Access<'a>,
     <T::Archived as Access<'a>>::View: Deref,
 {
-    pub(crate) bytes: &'a [u8],
-    pub(crate) header: H,
-    pub(crate) root: <T::Archived as Access<'a>>::View,
+    view: View<'a, <T::Archived as Access<'a>>::View, H>,
 }
 
 impl<'a, T: Archive, H: ArchiveHeaderTrait> ZebinReader<'a, T, H>
@@ -28,28 +27,21 @@ where
     <T::Archived as Access<'a>>::View: Deref,
 {
     pub fn bytes(&self) -> &'a [u8] {
-        self.bytes
+        self.view.layout().bytes()
     }
 
     pub fn header(&self) -> &H {
-        &self.header
+        self.view.layout().header()
     }
 
+    /// Returns the root object view.
     pub fn root(&self) -> &<T::Archived as Access<'a>>::View {
-        &self.root
+        &self.view.data
     }
 
-    pub fn resolved_layout(
-        &self,
-        stable_schema_key: u32,
-        schema_revision: u32,
-    ) -> Result<ResolvedLayout<'a, H>, ZebinError> {
-        ResolvedLayout::new(self.bytes, stable_schema_key, schema_revision)
-    }
-
-    /// Automatically resolve the layout for a schema-aware object.
-    pub fn get_layout<S: SchemaAware>(&self, obj: &S) -> Result<ResolvedLayout<'a, H>, ZebinError> {
-        self.resolved_layout(obj.stable_schema_key(), obj.schema_revision())
+    /// Wrap a schema-aware object into a view using this reader's archive context.
+    pub fn view<S: SchemaAware>(&self, obj: &'a S) -> Result<View<'a, &'a S, H>, ZebinError> {
+        self.view.view(obj)
     }
 
     /// Decode and validate the archived root object.
@@ -82,7 +74,7 @@ where
             .into());
         }
 
-        let _layout_offset = u32_to_usize(header.layout_offset().get(), || {
+        let layout_offset = u32_to_usize(header.layout_offset().get(), || {
             ValidateError::ValidationError {
                 message: "Layout offset exceeds usize range",
                 pos: 4,
@@ -120,7 +112,6 @@ where
             }
             .into());
         }
-        let layout_offset = header.layout_offset().get() as usize;
         if layout_offset < root_end {
             return Err(ValidateError::ValidationError {
                 message: "Layout section overlaps root",
@@ -129,10 +120,18 @@ where
             .into());
         }
 
+        // Automatically resolve root layout if it's schema-aware
+        let layout = if <T::Archived as Layout>::ENCODING == ObjectEncoding::SchemaAware {
+            // Safety: Schema-aware objects MUST start with 4-byte key and 4-byte revision
+            let key = unsafe { *(root_ptr as *const u32) };
+            let rev = unsafe { *(root_ptr as *const u32).add(1) };
+            ResolvedLayout::from_parts(bytes, header, Some(layout_dir.lookup(key, rev)?))
+        } else {
+            ResolvedLayout::context_only(bytes, header)
+        };
+
         Ok(Self {
-            bytes,
-            header,
-            root: root_view,
+            view: View::new_with_layout(root_view, layout),
         })
     }
 
@@ -150,10 +149,10 @@ where
     T::Archived: Access<'a>,
     <T::Archived as Access<'a>>::View: Deref,
 {
-    type Target = <<T::Archived as Access<'a>>::View as Deref>::Target;
+    type Target = View<'a, <T::Archived as Access<'a>>::View, H>;
 
     fn deref(&self) -> &Self::Target {
-        self.root.deref()
+        &self.view
     }
 }
 
@@ -162,16 +161,21 @@ where
 pub struct ResolvedLayout<'a, H: ArchiveHeaderTrait = ArchiveHeader> {
     bytes: &'a [u8],
     header: H,
-    layout: LayoutView<'a>,
+    layout: Option<LayoutView<'a>>,
 }
 
 impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
-    pub(crate) fn from_parts(bytes: &'a [u8], header: H, layout: LayoutView<'a>) -> Self {
+    pub(crate) fn from_parts(bytes: &'a [u8], header: H, layout: Option<LayoutView<'a>>) -> Self {
         Self {
             bytes,
             header,
             layout,
         }
+    }
+
+    /// Create a layout that only provides archive context (no object fields).
+    pub fn context_only(bytes: &'a [u8], header: H) -> Self {
+        Self::from_parts(bytes, header, None)
     }
 
     pub fn new(
@@ -195,7 +199,7 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
             )?,
         )?;
         let layout = layout_dir.lookup(stable_schema_key, schema_revision)?;
-        Ok(Self::from_parts(bytes, header, layout))
+        Ok(Self::from_parts(bytes, header, Some(layout)))
     }
 
     pub fn bytes(&self) -> &'a [u8] {
@@ -206,19 +210,75 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
         &self.header
     }
 
-    pub fn layout(&self) -> LayoutView<'a> {
+    pub fn layout(&self) -> Option<LayoutView<'a>> {
         self.layout
     }
 
     pub fn stable_schema_key(&self) -> u32 {
-        self.layout.stable_schema_key()
+        self.layout.map(|l| l.stable_schema_key()).unwrap_or(0)
     }
 
     pub fn schema_revision(&self) -> u32 {
-        self.layout.schema_revision()
+        self.layout.map(|l| l.schema_revision()).unwrap_or(0)
     }
 
     pub fn field_offset(&self, field_id: u16) -> Option<u32> {
-        self.layout.field_offset(field_id)
+        self.layout.and_then(|l| l.field_offset(field_id))
+    }
+
+    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), ValidateError> {
+        self.layout
+            .ok_or(ValidateError::ValidationError {
+                message: "Missing layout for field check",
+                pos: 0,
+            })?
+            .check_field(field_id, expected)
+    }
+
+    /// Resolve a nested layout using the same archive header and byte source.
+    pub fn resolve_nested(
+        &self,
+        stable_schema_key: u32,
+        schema_revision: u32,
+    ) -> Result<Self, ZebinError> {
+        Self::new(self.bytes, stable_schema_key, schema_revision)
+    }
+}
+
+/// A view wrapper that binds an archived object with its resolved layout.
+pub struct View<'a, T, H: ArchiveHeaderTrait = ArchiveHeader> {
+    data: T,
+    layout: ResolvedLayout<'a, H>,
+}
+
+impl<'a, T, H: ArchiveHeaderTrait> View<'a, T, H> {
+    /// Create a new view from archived data and its layout.
+    fn new_with_layout(data: T, layout: ResolvedLayout<'a, H>) -> Self {
+        Self { data, layout }
+    }
+
+    /// Returns the raw archived data.
+    pub fn data(&self) -> &T {
+        &self.data
+    }
+
+    /// Returns the resolved layout.
+    pub fn layout(&self) -> &ResolvedLayout<'a, H> {
+        &self.layout
+    }
+
+    /// Resolve a view for a nested schema-aware object using this view's context.
+    pub fn view<U: SchemaAware>(&self, data: &'a U) -> Result<View<'a, &'a U, H>, ZebinError> {
+        let layout = self
+            .layout
+            .resolve_nested(data.stable_schema_key(), data.schema_revision())?;
+        Ok(View::new_with_layout(data, layout))
+    }
+}
+
+impl<'a, T: Deref, H: ArchiveHeaderTrait> Deref for View<'a, T, H> {
+    type Target = T::Target;
+    fn deref(&self) -> &Self::Target {
+        self.data.deref()
     }
 }

@@ -2,8 +2,10 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, ArchivedDefault, Layout, Serialize, SerializeState, Validate},
+    traits::{
+        Access, Archive, ArchivedDefault, ByteSink, Layout, LayoutSink, Serialize, SerializeState,
+        Validate,
+    },
     utils::byteops,
     validation::context::ValidationContext,
 };

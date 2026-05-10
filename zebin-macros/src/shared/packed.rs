@@ -1,7 +1,7 @@
-use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
-use syn::{Field, Result, Type, spanned::Spanned};
 use super::FieldSpec;
+use proc_macro2::TokenStream;
+use quote::{ToTokens, quote};
+use syn::{Field, Result, Type, spanned::Spanned};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackedElementKind {
@@ -148,10 +148,7 @@ pub fn packed_archived_type(field: &FieldSpec<'_>) -> Option<TokenStream> {
     })
 }
 
-pub fn packed_begin_expr(
-    field: &FieldSpec<'_>,
-    value: TokenStream,
-) -> Option<TokenStream> {
+pub fn packed_begin_expr(field: &FieldSpec<'_>, value: TokenStream) -> Option<TokenStream> {
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
         PackedElementKind::Bool => quote! {

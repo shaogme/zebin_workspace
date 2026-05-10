@@ -1,11 +1,11 @@
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{DeriveInput, Ident};
 
 use crate::shared::{
-    ItemSpec, RecordSpec, RecordStyle, archived_name, field_archived_type,
-    field_user_ident, has_schema, input_member, layout_field_entries,
-    packed_wrapper_type_expr, parse_item, resolver_name, user_member,
+    ItemSpec, RecordSpec, RecordStyle, archived_name, field_archived_type, field_user_ident,
+    has_schema, input_member, layout_field_entries, packed_wrapper_type_expr, parse_item,
+    resolver_name, user_member,
 };
 
 mod enums;
@@ -13,7 +13,9 @@ mod enums;
 // --- Helper Functions for Record Archiving ---
 
 pub fn record_schema_field(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStream> {
-    if !has_schema(record) { return None; }
+    if !has_schema(record) {
+        return None;
+    }
     Some(match record.style {
         RecordStyle::Named => quote! {
             pub stable_schema_key: u32,
@@ -40,25 +42,30 @@ pub fn record_field_inits(
     record: &RecordSpec<'_>,
     archived_name: &Ident,
 ) -> Vec<proc_macro2::TokenStream> {
-    record.active_fields().map(|(index, field)| {
-        let archived_ty = field_archived_type(field);
-        let member = user_member(record, index);
-        let offset = quote! { zebin::memoffset::offset_of!(#archived_name, #member) };
-        quote! {
-            {
-                let offset = #offset;
-                let size = ::core::mem::size_of::<#archived_ty>();
-                <#archived_ty as zebin::Layout>::write_archived_bytes(
-                    &archived.#member,
-                    &mut out[offset..offset + size],
-                );
+    record
+        .active_fields()
+        .map(|(index, field)| {
+            let archived_ty = field_archived_type(field);
+            let member = user_member(record, index);
+            let offset = quote! { zebin::memoffset::offset_of!(#archived_name, #member) };
+            quote! {
+                {
+                    let offset = #offset;
+                    let size = ::core::mem::size_of::<#archived_ty>();
+                    <#archived_ty as zebin::Layout>::write_archived_bytes(
+                        &archived.#member,
+                        &mut out[offset..offset + size],
+                    );
+                }
             }
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 pub fn record_schema_write(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStream> {
-    if !has_schema(record) { return None; }
+    if !has_schema(record) {
+        return None;
+    }
     Some(match record.style {
         RecordStyle::Named => quote! {
             <u32 as zebin::Layout>::write_archived_bytes(&archived.stable_schema_key, &mut out[0..4]);
@@ -76,8 +83,12 @@ pub fn record_layout_checks_logic(
     record: &RecordSpec<'_>,
     archived_name: &Ident,
 ) -> proc_macro2::TokenStream {
-    if !has_schema(record) { return quote! {}; }
-    let stable_schema_key = record.stable_schema_key.expect("schema-bearing records require an explicit stable schema key");
+    if !has_schema(record) {
+        return quote! {};
+    }
+    let stable_schema_key = record
+        .stable_schema_key
+        .expect("schema-bearing records require an explicit stable schema key");
     let schema_revision = record.schema_revision;
     let checks: Vec<_> = record.active_fields().map(|(index, field)| {
         let field_id = field.field_id.expect("field ids are validated above");
@@ -92,7 +103,7 @@ pub fn record_layout_checks_logic(
                 let layout = guard.resolved_layout(#stable_schema_key, #schema_revision)?;
                 if let Some(actual_offset) = layout.field_offset(#field_id) {
                     if layout.schema_revision() == #schema_revision {
-                        layout.layout().check_field(#field_id, zebin::memoffset::offset_of!(#archived_name, #member) as u32)?;
+                        layout.check_field(#field_id, zebin::memoffset::offset_of!(#archived_name, #member) as u32)?;
                     }
                 } else { #on_missing }
             }
@@ -132,49 +143,119 @@ pub fn record_field_validations(record: &RecordSpec<'_>) -> Vec<proc_macro2::Tok
     }).collect()
 }
 
-pub fn helper_accessors(archived_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    if !has_schema(record) { return quote! {}; }
+pub fn helper_accessors(
+    archived_name: &Ident,
+    record: &RecordSpec<'_>,
+) -> proc_macro2::TokenStream {
+    if !has_schema(record) {
+        return quote! {};
+    }
     let layout_fields = layout_field_entries(record, archived_name);
-    let methods = record.active_fields().map(|(index, field)| {
+    let mut raw_methods = Vec::new();
+    let mut trait_methods = Vec::new();
+    let mut impl_methods = Vec::new();
+
+    for (index, field) in record.active_fields() {
         let field_id = field.field_id.expect("field ids are validated above");
         let method = field_user_ident(record, index);
         let ty = field_archived_type(field);
-        if field.optional {
+
+        let raw_method = if field.optional {
             quote! {
-                pub unsafe fn #method<'a>(&'a self, layout: &'a zebin::ResolvedLayout<'a>) -> Result<Option<&'a #ty>, zebin::ValidateError> {
+                pub unsafe fn #method<'view, H: zebin::ArchiveHeaderTrait>(&'view self, layout: &zebin::ResolvedLayout<H>) -> Result<Option<&'view #ty>, zebin::ValidateError> {
                     let offset = match layout.field_offset(#field_id) { Some(o) => o, None => return Ok(None) };
                     Ok(Some(&*(((self as *const _ as *const u8).add(offset as usize)) as *const #ty)))
                 }
             }
         } else if field.default || field.default_value.is_some() {
-            let def = if let Some(e) = &field.default_value { quote! { #e } } else { quote! { <#ty as zebin::ArchivedDefault>::archived_default() } };
+            let def = if let Some(e) = &field.default_value {
+                quote! { #e }
+            } else {
+                quote! { <#ty as zebin::ArchivedDefault>::archived_default() }
+            };
             quote! {
-                pub unsafe fn #method<'a>(&'a self, layout: &'a zebin::ResolvedLayout<'a>) -> Result<&'a #ty, zebin::ValidateError> {
+                pub unsafe fn #method<'view, H: zebin::ArchiveHeaderTrait>(&'view self, layout: &zebin::ResolvedLayout<H>) -> Result<&'view #ty, zebin::ValidateError> {
                     let offset = match layout.field_offset(#field_id) { Some(o) => o, None => return Ok(#def) };
                     Ok(&*(((self as *const _ as *const u8).add(offset as usize)) as *const #ty))
                 }
             }
         } else {
             quote! {
-                pub unsafe fn #method<'a>(&'a self, layout: &'a zebin::ResolvedLayout<'a>) -> Result<&'a #ty, zebin::ValidateError> {
+                pub unsafe fn #method<'view, H: zebin::ArchiveHeaderTrait>(&'view self, layout: &zebin::ResolvedLayout<H>) -> Result<&'view #ty, zebin::ValidateError> {
                     let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ValidateError::MissingLayoutField { field_id: #field_id, pos: self as *const _ as usize })?;
                     Ok(&*(((self as *const _ as *const u8).add(offset as usize)) as *const #ty))
                 }
             }
+        };
+        raw_methods.push(raw_method);
+
+        if field.optional {
+            trait_methods.push(quote! {
+                fn #method(&self) -> Result<Option<&'a #ty>, zebin::ZebinError>;
+            });
+            impl_methods.push(quote! {
+                fn #method(&self) -> Result<Option<&'a #ty>, zebin::ZebinError> {
+                    let layout: zebin::ResolvedLayout<'a, H> = *self.layout();
+                    unsafe { self.data().#method(&layout).map_err(Into::into) }
+                }
+            });
+        } else {
+            trait_methods.push(quote! {
+                fn #method(&self) -> Result<&'a #ty, zebin::ZebinError>;
+            });
+            impl_methods.push(quote! {
+                fn #method(&self) -> Result<&'a #ty, zebin::ZebinError> {
+                    let layout: zebin::ResolvedLayout<'a, H> = *self.layout();
+                    unsafe { self.data().#method(&layout).map_err(Into::into) }
+                }
+            });
+        };
+    }
+
+    let view_trait_name = format_ident!("{}ViewAccess", archived_name);
+
+    quote! {
+        impl #archived_name {
+            pub const LAYOUT_FIELDS: &'static [zebin::LayoutField] = &[ #(#layout_fields),* ];
+            #(#raw_methods)*
         }
-    });
-    quote! { impl #archived_name { pub const LAYOUT_FIELDS: &'static [zebin::LayoutField] = &[ #(#layout_fields),* ]; #(#methods)* } }
+
+        pub trait #view_trait_name<'a, H: zebin::ArchiveHeaderTrait> {
+            #(#trait_methods)*
+        }
+
+        impl<'a, H: zebin::ArchiveHeaderTrait> #view_trait_name<'a, H> for zebin::View<'a, &'a #archived_name, H> {
+            #(#impl_methods)*
+        }
+    }
 }
 
-pub fn helper_bytes_impl(archived_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let encoding = if has_schema(record) { quote! { zebin::ObjectEncoding::SchemaAware } } else { quote! { zebin::ObjectEncoding::Fixed } };
+pub fn helper_bytes_impl(
+    archived_name: &Ident,
+    record: &RecordSpec<'_>,
+) -> proc_macro2::TokenStream {
+    let encoding = if has_schema(record) {
+        quote! { zebin::ObjectEncoding::SchemaAware }
+    } else {
+        quote! { zebin::ObjectEncoding::Fixed }
+    };
     let mut writes = Vec::new();
-    if let Some(ws) = record_schema_write(record) { writes.push(ws); }
+    if let Some(ws) = record_schema_write(record) {
+        writes.push(ws);
+    }
     writes.extend(record_field_inits(record, archived_name));
     let layout_checks = record_layout_checks_logic(record, archived_name);
     let field_validations = record_field_validations(record);
-    let fixed_range = if has_schema(record) { quote! {} } else { quote! { guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?; } };
-    let span_expr = if has_schema(record) { quote! { 8 } } else { quote! { ::core::mem::size_of::<Self>() } };
+    let fixed_range = if has_schema(record) {
+        quote! {}
+    } else {
+        quote! { guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?; }
+    };
+    let span_expr = if has_schema(record) {
+        quote! { 8 }
+    } else {
+        quote! { ::core::mem::size_of::<Self>() }
+    };
     let schema_aware_impl = if has_schema(record) {
         let (key_member, rev_member) = match record.style {
             RecordStyle::Named => (quote! { stable_schema_key }, quote! { schema_revision }),
@@ -217,9 +298,13 @@ pub fn helper_bytes_impl(archived_name: &Ident, record: &RecordSpec<'_>) -> proc
 
 pub fn helper_record(archived_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let mut fields = Vec::new();
-    if let Some(s) = record_schema_field(record) { fields.push(s); }
+    if let Some(s) = record_schema_field(record) {
+        fields.push(s);
+    }
     for (index, field) in record.fields.iter().enumerate() {
-        if !field.skip { fields.push(record_field_decl(record, index)); }
+        if !field.skip {
+            fields.push(record_field_decl(record, index));
+        }
     }
     let bytes_impl = helper_bytes_impl(archived_name, record);
     let accessors = helper_accessors(archived_name, record);
@@ -238,7 +323,9 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
     let resolver_name = resolver_name(name);
     let helper = helper_record(&archived_name, record);
     let stable_key = if has_schema(record) {
-        let key = record.stable_schema_key.expect("schema-bearing records require an explicit stable schema key");
+        let key = record
+            .stable_schema_key
+            .expect("schema-bearing records require an explicit stable schema key");
         Some(quote! { #key })
     } else {
         None
@@ -252,7 +339,9 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
                 fields.push(quote! { schema_revision: #revision });
             }
             for (index, field) in record.fields.iter().enumerate() {
-                if field.skip { continue; }
+                if field.skip {
+                    continue;
+                }
                 let id = field.ident.expect("named field has ident");
                 let r_field = field.rename.as_ref().unwrap_or(id);
                 let s_member = input_member(record, index);
@@ -261,7 +350,9 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
                 if let Some(w) = packed_wrapper_type_expr(field) {
                     fields.push(quote! { #r_field: <#w as zebin::Archive>::resolve(&<#w>::new(self.#s_member.as_ref()), pos + #off, resolver.#r_field)? });
                 } else {
-                    fields.push(quote! { #r_field: self.#s_member.resolve(pos + #off, resolver.#r_field)? });
+                    fields.push(
+                        quote! { #r_field: self.#s_member.resolve(pos + #off, resolver.#r_field)? },
+                    );
                 }
             }
             quote! { #archived_name { #(#fields),* } }
@@ -274,7 +365,9 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
                 items.push(quote! { #revision });
             }
             for (index, field) in record.fields.iter().enumerate() {
-                if field.skip { continue; }
+                if field.skip {
+                    continue;
+                }
                 let s_member = input_member(record, index);
                 let a_member = user_member(record, index);
                 let res_idx = record.fields[..index].iter().filter(|f| !f.skip).count();
@@ -283,7 +376,8 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
                 if let Some(w) = packed_wrapper_type_expr(field) {
                     items.push(quote! { <#w as zebin::Archive>::resolve(&<#w>::new(self.#s_member.as_ref()), pos + #off, resolver.#res_member)? });
                 } else {
-                    items.push(quote! { self.#s_member.resolve(pos + #off, resolver.#res_member)? });
+                    items
+                        .push(quote! { self.#s_member.resolve(pos + #off, resolver.#res_member)? });
                 }
             }
             quote! { #archived_name( #(#items),* ) }
@@ -297,7 +391,10 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
 
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
-    let spec = match parse_item(&input) { Ok(s) => s, Err(e) => return e.to_compile_error().into() };
+    let spec = match parse_item(&input) {
+        Ok(s) => s,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let name = input.ident.clone();
     let expanded = match spec {
         ItemSpec::Struct(record) => struct_impl(&name, &record),

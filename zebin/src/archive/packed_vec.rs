@@ -5,8 +5,7 @@ use crate::{
     archive::packed::{ArchivedPackedBoolSlice, ArchivedPackedU8Slice},
     core::rel_ptr::RelPtr,
     error::{ArchiveError, ZebinError},
-    io::sink::{ByteSink, LayoutSink},
-    traits::{Archive, Serialize, SerializeState},
+    traits::{Archive, ByteSink, LayoutSink, Serialize, SerializeState},
     utils::num::usize_to_u32,
 };
 

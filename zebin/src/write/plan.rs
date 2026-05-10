@@ -1,13 +1,11 @@
 use crate::{
     error::{ValidateError, ZebinError},
     format::ArchiveHeader,
-    traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Layout},
-    utils::num::{u32_to_usize, usize_to_nonzero_u32},
-    write::{
-        encoder::{LayoutRegistry, MeasureEncoder},
-        state::Serialize,
-        state::SerializeState,
+    traits::{
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Layout, Serialize, SerializeState,
     },
+    utils::num::{u32_to_usize, usize_to_nonzero_u32},
+    write::encoder::{LayoutRegistry, MeasureEncoder},
 };
 
 pub(crate) struct EncodePlan<'a, H: ArchiveHeaderTrait = ArchiveHeader> {
@@ -23,8 +21,6 @@ where
     T: Serialize + Archive,
     H: ArchiveHeaderTrait,
 {
-    use crate::io::sink::ByteSink;
-
     let mut encoder = MeasureEncoder::new(H::SIZE);
     let mut state = value.begin_serialize()?;
     let resolver = loop {

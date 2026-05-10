@@ -38,22 +38,19 @@ fn test_evolution_optional_and_default() {
     let buf = zebin::encode(&v1).unwrap();
 
     let reader = zebin::decode::<Version2>(&buf).unwrap();
-    let archived = reader.root();
 
-    // Automatically resolve the layout from the object's self-describing metadata
-    let layout = reader.get_layout(archived).unwrap();
-
-    assert_eq!(unsafe { archived.id(&layout) }.unwrap(), &42);
-    assert_eq!(unsafe { archived.name(&layout).unwrap().as_str() }, "Alice");
+    // Directly access fields on the reader (it derefs to the root view)
+    assert_eq!(reader.id().unwrap(), &42);
+    assert_eq!(unsafe { reader.name().unwrap().as_str() }, "Alice");
 
     // Missing field with optional
-    assert!(unsafe { archived.email(&layout) }.unwrap().is_none());
+    assert!(reader.email().unwrap().is_none());
 
     // Missing field with default
-    assert_eq!(unsafe { archived.age(&layout) }.unwrap(), &0);
+    assert_eq!(reader.age().unwrap(), &0);
 
     // Missing field with custom default
-    assert_eq!(unsafe { archived.score(&layout) }.unwrap(), &100);
+    assert_eq!(reader.score().unwrap(), &100);
 }
 
 #[test]
@@ -67,17 +64,15 @@ fn test_version2_with_all_fields() {
     };
     let buf = zebin::encode(&v2).unwrap();
     let reader = zebin::decode::<Version2>(&buf).unwrap();
-    let archived = reader.root();
-    let layout = reader.get_layout(archived).unwrap();
 
-    assert_eq!(unsafe { archived.id(&layout) }.unwrap(), &1);
-    assert_eq!(unsafe { archived.name(&layout).unwrap().as_str() }, "Bob");
+    assert_eq!(reader.id().unwrap(), &1);
+    assert_eq!(unsafe { reader.name().unwrap().as_str() }, "Bob");
     assert_eq!(
-        unsafe { archived.email(&layout).unwrap().unwrap().as_str() },
+        unsafe { reader.email().unwrap().unwrap().as_str() },
         "bob@example.com"
     );
-    assert_eq!(unsafe { archived.age(&layout) }.unwrap(), &30);
-    assert_eq!(unsafe { archived.score(&layout) }.unwrap(), &95);
+    assert_eq!(reader.age().unwrap(), &30);
+    assert_eq!(reader.score().unwrap(), &95);
 }
 
 #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
@@ -108,13 +103,11 @@ fn test_enum_evolution() {
     let buf = zebin::encode(&m1).unwrap();
 
     let reader = zebin::decode::<MessageV2>(&buf).unwrap();
-    let archived = reader.root();
 
-    // Check if it's Login variant
-    let login = unsafe { archived.as_login() }.expect("Should be Login variant");
+    // Directly access variants on the reader.
+    // The variant accessor on View (for enums) returns a nested View for the variant record.
+    let login = reader.as_login().unwrap().expect("Should be Login variant");
 
-    let layout = reader.get_layout(login).unwrap();
-
-    assert_eq!(unsafe { login.user(&layout).unwrap().as_str() }, "Alice");
-    assert!(unsafe { login.device(&layout) }.unwrap().is_none());
+    assert_eq!(unsafe { login.user().unwrap().as_str() }, "Alice");
+    assert!(login.device().unwrap().is_none());
 }

@@ -70,7 +70,7 @@ fn test_enum_skip_rename() {
     };
     let buf1 = zebin::encode(&e1).unwrap();
     let archived1 = zebin::decode::<EnumTest>(&buf1).unwrap();
-    if let Some(v) = unsafe { archived1.as_variant1() } {
+    if let Some(v) = archived1.as_variant1() {
         assert_eq!(v.id, 10);
     } else {
         panic!("expected variant1");
@@ -79,7 +79,7 @@ fn test_enum_skip_rename() {
     let e2 = EnumTest::Variant2 { value: 20 };
     let buf2 = zebin::encode(&e2).unwrap();
     let archived2 = zebin::decode::<EnumTest>(&buf2).unwrap();
-    if let Some(v) = unsafe { archived2.as_new_variant() } {
+    if let Some(v) = archived2.as_new_variant() {
         // v.val should be 20 because 'value' was renamed to 'val'
         assert_eq!(v.val, 20);
     } else {

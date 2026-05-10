@@ -31,16 +31,15 @@ pub mod prelude {
     };
     pub use crate::error::{AccessError, ArchiveError, ValidateError, ZebinError};
     pub use crate::format::ArchiveHeader;
-    pub use crate::io::sink::{ByteSink, LayoutSink};
     #[cfg(feature = "mmap")]
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, SchemaAware,
-        Serialize, SerializeState, Validate,
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
+        LayoutSink, SchemaAware, Serialize, SerializeState, Validate,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::{
-        ResolvedLayout, Storage, Validator, ZebinReader, ZebinWriter, decode, encode_chunked,
+        ResolvedLayout, Storage, Validator, View, ZebinReader, ZebinWriter, decode, encode_chunked,
         validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
@@ -65,14 +64,13 @@ pub use crate::core::schema::{
 };
 pub use crate::error::{AccessError, ArchiveError, ValidateError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
-pub use crate::io::sink::{ByteSink, LayoutSink};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::io::storage::mmap::Mmap;
-pub use crate::read::{ResolvedLayout, ZebinReader};
+pub use crate::read::{ResolvedLayout, View, ZebinReader};
 pub use crate::traits::{
-    Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, SchemaAware,
-    Serialize, SerializeState, Validate,
+    Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
+    LayoutSink, SchemaAware, Serialize, SerializeState, Validate,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::validator::{ValidationPathSegment, ValidationPathStack, Validator};

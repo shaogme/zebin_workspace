@@ -3,6 +3,7 @@ use core::num::NonZeroUsize;
 use crate::core::schema::ObjectEncoding;
 use crate::error::{AccessError, ArchiveError, ParseHeaderError, ValidateError};
 use crate::validation::context::ValidationContext;
+use crate::{LayoutField, SchemaRevision, StableSchemaKey, ZebinError};
 use core::num::NonZeroU32;
 
 /// Archived-side binary layout contract.
@@ -119,8 +120,50 @@ impl<T: SchemaAware + ?Sized> SchemaAware for &T {
     }
 }
 
-/// Re-export Serialize and SerializeState from write module.
-pub use crate::write::state::{Serialize, SerializeState};
+/// Byte-stream sink used by archive state machines.
+pub trait ByteSink {
+    fn pos(&self) -> usize;
+
+    /// Write as many bytes as possible and return the amount consumed.
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError>;
+
+    /// Write as many alignment bytes as possible and return the amount consumed.
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError>;
+
+    /// Advance the position without writing actual data.
+    fn skip(&mut self, len: usize) -> Result<usize, ZebinError>;
+}
+
+/// Layout registration sink used by archive state machines.
+pub trait LayoutSink<'a> {
+    /// Register a layout descriptor for the current object.
+    fn register_layout(
+        &mut self,
+        stable_schema_key: StableSchemaKey,
+        schema_revision: SchemaRevision,
+        encoding: ObjectEncoding,
+        layout: &'a [LayoutField],
+    ) -> Result<(), ZebinError>;
+}
+
+/// Trait for resumable archive construction states.
+pub trait SerializeState<'a> {
+    type Resolver;
+
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
+        &mut self,
+        encoder: &mut E,
+    ) -> Result<core::task::Poll<Self::Resolver>, ZebinError>;
+}
+
+/// Trait for types that can create resumable archive states.
+pub trait Serialize: Archive {
+    type State<'a>: SerializeState<'a, Resolver = Self::Resolver>
+    where
+        Self: 'a;
+
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError>;
+}
 
 impl<T: Layout, const N: usize> Layout for [T; N] {
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;

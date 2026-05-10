@@ -1,4 +1,4 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{SchemaAware, ZebinArchive, ZebinSerialize};
 
 #[derive(ZebinArchive, ZebinSerialize)]
 #[zebin(schema_key = 324478056)]
@@ -89,11 +89,11 @@ fn test_safe_access() {
     };
     let buf = zebin::encode(&user).unwrap();
 
-    let archived = zebin::decode::<VersionedUser>(&buf).expect("Failed to validate archive");
-    assert_eq!(archived.stable_schema_key, 324478056);
-    assert_eq!(archived.id, 101);
-    assert_eq!(archived.age, 30);
+    let reader = zebin::decode::<VersionedUser>(&buf).expect("Failed to validate archive");
+    assert_eq!(reader.stable_schema_key(), 324478056);
+    assert_eq!(reader.id().unwrap(), &101);
+    assert_eq!(reader.age().unwrap(), &30);
     unsafe {
-        assert_eq!(archived.name.as_str(), "Bob");
+        assert_eq!(reader.name().unwrap().as_str(), "Bob");
     }
 }

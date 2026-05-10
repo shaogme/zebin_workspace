@@ -1,7 +1,7 @@
 use core::convert::TryFrom;
 use proc_macro2::{Span, TokenStream};
-use syn::{Error, Field, Ident, Result};
 use syn::spanned::Spanned;
+use syn::{Error, Field, Ident, Result};
 
 pub struct FieldAttrs {
     pub field_id: Option<u16>,
@@ -25,9 +25,10 @@ pub fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
         if attr.path().is_ident("zebin") {
             let tokens = attr.meta.require_list()?.tokens.clone();
             if let Some(value) = parse_name_value_u32(tokens.clone(), "id")? {
-                field_id = Some(u16::try_from(value).map_err(|_| {
-                    Error::new(field.span(), "field id exceeds u16 range")
-                })?);
+                field_id = Some(
+                    u16::try_from(value)
+                        .map_err(|_| Error::new(field.span(), "field id exceeds u16 range"))?,
+                );
             }
             if let Some(name) = parse_name_value_str(tokens.clone(), "rename")? {
                 rename = Some(Ident::new(&name, field.span()));
@@ -95,7 +96,10 @@ pub fn parse_name_value_u32(tokens: TokenStream, target: &str) -> Result<Option<
             continue;
         };
         let value = value.trim().replace('_', "");
-        if let Some(rest) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+        if let Some(rest) = value
+            .strip_prefix("0x")
+            .or_else(|| value.strip_prefix("0X"))
+        {
             return u32::from_str_radix(rest, 16)
                 .map(Some)
                 .map_err(|err| Error::new(Span::call_site(), err));
@@ -125,7 +129,10 @@ pub fn parse_uint_after_token(text: &str, token: &str) -> Option<u32> {
         return None;
     }
     let value = text[..end].replace('_', "");
-    if let Some(rest) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+    if let Some(rest) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
         u32::from_str_radix(rest, 16).ok()
     } else {
         value.parse::<u32>().ok()

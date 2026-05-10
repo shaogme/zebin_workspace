@@ -4,8 +4,7 @@ use core::task::Poll;
 use crate::{
     archive::slice::{ArchivedVec, SequenceSource, resolve_sequence_archive},
     error::ZebinError,
-    io::sink::{ByteSink, LayoutSink},
-    traits::{Archive, Layout, Serialize, SerializeState},
+    traits::{Archive, ByteSink, Layout, LayoutSink, Serialize, SerializeState},
 };
 
 impl<T> SequenceSource<T> for VecDeque<T> {

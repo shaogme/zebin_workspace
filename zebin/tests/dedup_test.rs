@@ -34,4 +34,12 @@ fn test_vtable_deduplication() {
         "Expected 1 layout (shared Child), found {}",
         num_layouts
     );
+
+    // Verify we can access fields via View
+    let reader = zebin::decode::<Parent>(&buf).unwrap();
+    let archived = reader.root();
+    for child_raw in unsafe { archived.children.as_slice() }.iter() {
+        let child = reader.view(child_raw).unwrap();
+        assert!(child.value().is_ok());
+    }
 }

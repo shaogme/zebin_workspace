@@ -1,17 +1,17 @@
 pub mod encoder;
 pub mod plan;
-pub mod state;
 
 use core::marker::PhantomData;
 
 use crate::{
     error::{ValidateError, ZebinError},
     format::ArchiveHeader,
-    traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Layout},
+    traits::{
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Layout, Serialize, SerializeState,
+    },
     write::{
         encoder::{LayoutRegistry, SliceEncoder},
         plan::{EncodePlan, measure_plan},
-        state::{Serialize, SerializeState},
     },
 };
 
@@ -99,7 +99,6 @@ where
             return Ok(0);
         }
 
-        use crate::io::sink::ByteSink;
         let mut encoder = SliceEncoder::new(out, self.archive_pos, &mut self.layouts);
         loop {
             match &mut self.phase {

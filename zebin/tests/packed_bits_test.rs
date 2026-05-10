@@ -170,7 +170,7 @@ fn test_packed_enum_variant_round_trip() {
     let archived = zebin::decode::<PackedVariantEnum>(&buf).unwrap();
 
     assert_eq!(archived.tag(), 1);
-    let packed = unsafe { archived.as_packed().unwrap() };
+    let packed = archived.as_packed().unwrap();
     assert_eq!(packed.2, 7);
     assert_eq!(packed.0.len(), 8);
     assert_eq!(packed.1.len(), 8);

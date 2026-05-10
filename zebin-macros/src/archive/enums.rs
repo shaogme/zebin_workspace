@@ -1,11 +1,10 @@
+use super::{helper_record, record_field_validations, record_layout_checks_logic};
+use crate::shared::{
+    RecordStyle, VariantSpec, archived_name, has_schema, packed_wrapper_type_expr, payload_name,
+    user_member, variant_archived_name, variant_field_name, variant_method_name,
+};
 use quote::{format_ident, quote};
 use syn::Ident;
-use crate::shared::{
-    RecordStyle, VariantSpec, archived_name, has_schema,
-    packed_wrapper_type_expr, payload_name, user_member, variant_archived_name,
-    variant_field_name, variant_method_name,
-};
-use super::{helper_record, record_layout_checks_logic, record_field_validations};
 
 pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::TokenStream {
     let archived_name = archived_name(name);
@@ -25,7 +24,9 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
         variant_defs.push(helper_record(&helper_name, &variant.record));
         let payload_field_ident = variant_field_name(variant_user_ident);
         let helper_stable_schema_key = if has_schema(&variant.record) {
-            let key = variant.record.stable_schema_key
+            let key = variant
+                .record
+                .stable_schema_key
                 .expect("schema-bearing records require an explicit stable schema key");
             Some(quote! { #key })
         } else {
@@ -84,13 +85,19 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             RecordStyle::Named => {
                 let fields = record.fields.iter().map(|field| {
                     let ident = field.ident.expect("named field has ident");
-                    if field.skip { quote! { #ident: _ } } else { quote! { #ident } }
+                    if field.skip {
+                        quote! { #ident: _ }
+                    } else {
+                        quote! { #ident }
+                    }
                 });
                 quote! { Self::#variant_ident { #(#fields),* } }
             }
             RecordStyle::Unnamed => {
                 let fields = record.fields.iter().enumerate().map(|(fi, field)| {
-                    if field.skip { quote! { _ } } else {
+                    if field.skip {
+                        quote! { _ }
+                    } else {
                         let ident = format_ident!("field{}", fi);
                         quote! { #ident }
                     }
@@ -116,7 +123,9 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             }
         }
         for (fi, field) in record.fields.iter().enumerate() {
-            if field.skip { continue; }
+            if field.skip {
+                continue;
+            }
             let archived_member = user_member(record, fi);
             match record.style {
                 RecordStyle::Named => {
@@ -187,69 +196,134 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
     };
 
     let (root_bytes, root_archive) = if variants.is_empty() {
-        (quote! {
-            impl zebin::Layout for #archived_name {
-                const ALIGNMENT: ::core::num::NonZeroUsize = unsafe { ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>()) };
-                fn write_archived_bytes(_archived: &Self, out: &mut [u8]) { zebin::utils::byteops::fill(out, 0); }
-            }
-            impl zebin::Validate for #archived_name {
-                unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), zebin::ValidateError>
-                where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
-                    let mut guard = context.guard()?;
-                    guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
-                    guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
-                    Ok(())
+        (
+            quote! {
+                impl zebin::Layout for #archived_name {
+                    const ALIGNMENT: ::core::num::NonZeroUsize = unsafe { ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>()) };
+                    fn write_archived_bytes(_archived: &Self, out: &mut [u8]) { zebin::utils::byteops::fill(out, 0); }
                 }
-            }
-        }, quote! {
-            impl zebin::Archive for #name {
-                type Archived = #archived_name; type Resolver = #resolver_name;
-                fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, zebin::ArchiveError> { match *self {} }
-            }
-        })
-    } else {
-        (quote! {
-            impl zebin::Layout for #archived_name {
-                const ALIGNMENT: ::core::num::NonZeroUsize = unsafe { ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>()) };
-                fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-                    zebin::utils::byteops::fill(out, 0);
-                    <u32 as zebin::Layout>::write_archived_bytes(&archived.tag, &mut out[0..::core::mem::size_of::<u32>()]);
-                    let payload_offset = zebin::memoffset::offset_of!(#archived_name, payload);
-                    match archived.tag { #(#variant_write_arms)* _ => {} }
-                }
-            }
-            impl zebin::Validate for #archived_name {
-                unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), zebin::ValidateError>
-                where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
-                    let mut guard = context.guard()?;
-                    guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
-                    guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
-                    let archived = unsafe { &*ptr };
-                    match archived.tag {
-                        #(#variant_validate_arms)*
-                        _ => return Err(zebin::ValidateError::ValidationError { message: "Invalid enum discriminant", pos: ptr as usize }),
+                impl zebin::Validate for #archived_name {
+                    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), zebin::ValidateError>
+                    where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
+                        let mut guard = context.guard()?;
+                        guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
+                        guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                        Ok(())
                     }
-                    Ok(())
                 }
-            }
-        }, quote! {
-            impl zebin::Archive for #name {
-                type Archived = #archived_name; type Resolver = #resolver_name;
-                fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, zebin::ArchiveError> {
-                    match (self, resolver) { #(#variant_resolve_arms),* _ => Err(zebin::ArchiveError::InvalidResolver { pos }), }
+            },
+            quote! {
+                impl zebin::Archive for #name {
+                    type Archived = #archived_name; type Resolver = #resolver_name;
+                    fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, zebin::ArchiveError> { match *self {} }
                 }
-            }
-        })
+            },
+        )
+    } else {
+        (
+            quote! {
+                impl zebin::Layout for #archived_name {
+                    const ALIGNMENT: ::core::num::NonZeroUsize = unsafe { ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>()) };
+                    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+                        zebin::utils::byteops::fill(out, 0);
+                        <u32 as zebin::Layout>::write_archived_bytes(&archived.tag, &mut out[0..::core::mem::size_of::<u32>()]);
+                        let payload_offset = zebin::memoffset::offset_of!(#archived_name, payload);
+                        match archived.tag { #(#variant_write_arms)* _ => {} }
+                    }
+                }
+                impl zebin::Validate for #archived_name {
+                    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), zebin::ValidateError>
+                    where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
+                        let mut guard = context.guard()?;
+                        guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
+                        guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                        let archived = unsafe { &*ptr };
+                        match archived.tag {
+                            #(#variant_validate_arms)*
+                            _ => return Err(zebin::ValidateError::ValidationError { message: "Invalid enum discriminant", pos: ptr as usize }),
+                        }
+                        Ok(())
+                    }
+                }
+            },
+            quote! {
+                impl zebin::Archive for #name {
+                    type Archived = #archived_name; type Resolver = #resolver_name;
+                    fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, zebin::ArchiveError> {
+                        match (self, resolver) { #(#variant_resolve_arms),* _ => Err(zebin::ArchiveError::InvalidResolver { pos }), }
+                    }
+                }
+            },
+        )
     };
+
+    let view_trait_name = format_ident!("{}ViewAccess", archived_name);
+    let mut view_trait_methods = Vec::new();
+    let mut view_impl_methods = Vec::new();
+
+    view_trait_methods.push(quote! { fn tag(&self) -> u32; });
+    view_impl_methods.push(quote! { fn tag(&self) -> u32 { self.data().tag() } });
+
+    for (idx, variant) in variants.iter().enumerate() {
+        let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
+        let helper_name = variant_archived_name(name, variant_user_ident);
+        let accessor_name = if variant.record.fields.is_empty() {
+            variant_method_name("is", variant_user_ident)
+        } else {
+            variant_method_name("as", variant_user_ident)
+        };
+        let idx_lit = idx as u32;
+
+        if variant.record.fields.is_empty() {
+            view_trait_methods.push(quote! { fn #accessor_name(&self) -> bool; });
+            view_impl_methods.push(
+                quote! { fn #accessor_name(&self) -> bool { self.data().tag() == #idx_lit } },
+            );
+        } else if has_schema(&variant.record) {
+            view_trait_methods.push(quote! {
+                fn #accessor_name(&self) -> Result<Option<zebin::View<'a, &'a #helper_name, H>>, zebin::ZebinError>;
+            });
+            view_impl_methods.push(quote! {
+                fn #accessor_name(&self) -> Result<Option<zebin::View<'a, &'a #helper_name, H>>, zebin::ZebinError> {
+                    let variant = unsafe { self.data().#accessor_name() };
+                    match variant {
+                        Some(v) => Ok(Some(self.view(v)?)),
+                        None => Ok(None),
+                    }
+                }
+            });
+        } else {
+            view_trait_methods.push(quote! {
+                fn #accessor_name(&self) -> Option<&'a #helper_name>;
+            });
+            view_impl_methods.push(quote! {
+                fn #accessor_name(&self) -> Option<&'a #helper_name> {
+                    unsafe { self.data().#accessor_name() }
+                }
+            });
+        }
+    }
 
     let root_accessors = quote! {
         impl #archived_name {
             pub fn tag(&self) -> u32 { self.tag }
             #(#variant_accessors)*
         }
+
+        pub trait #view_trait_name<'a, H: zebin::ArchiveHeaderTrait> {
+            #(#view_trait_methods)*
+        }
+
+        impl<'a, H: zebin::ArchiveHeaderTrait> #view_trait_name<'a, H> for zebin::View<'a, &'a #archived_name, H> {
+            #(#view_impl_methods)*
+        }
     };
     let has_schema_variants = variants.iter().any(|v| has_schema(&v.record));
-    let span_expr = if has_schema_variants { quote! { 4 } } else { quote! { ::core::mem::size_of::<Self>() } };
+    let span_expr = if has_schema_variants {
+        quote! { 4 }
+    } else {
+        quote! { ::core::mem::size_of::<Self>() }
+    };
 
     let root_decode = quote! {
         impl<'a> zebin::Access<'a> for #archived_name {
