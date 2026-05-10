@@ -114,7 +114,10 @@ fn layout_fields(
     }
 }
 
-fn poll_steps(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
+fn poll_steps(
+    record: &RecordSpec<'_>,
+    prefix: proc_macro2::TokenStream,
+) -> Vec<proc_macro2::TokenStream> {
     record
         .fields
         .iter()
@@ -123,11 +126,11 @@ fn poll_steps(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
             let state_ident = &field.state_ident;
             let resolver_ident = resolver_slot_ident(record, index);
             quote! {
-                if self.#resolver_ident.is_none() {
-                    match self.#state_ident.poll(encoder)? {
+                if #prefix.#resolver_ident.is_none() {
+                    match #prefix.#state_ident.poll(encoder)? {
                         ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
                         ::core::task::Poll::Ready(resolver) => {
-                            self.#resolver_ident = ::core::option::Option::Some(resolver);
+                            #prefix.#resolver_ident = ::core::option::Option::Some(resolver);
                         }
                     }
                 }
@@ -136,14 +139,19 @@ fn poll_steps(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
         .collect()
 }
 
-fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_macro2::TokenStream {
+fn resolver_expr(
+    record: &RecordSpec<'_>,
+    resolver_name: &syn::Ident,
+    prefix: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
     match record.style {
         RecordStyle::Named => {
             let mut fields = Vec::new();
             for (index, _field) in record.fields.iter().enumerate() {
-                let ident = state_slot_ident(record, index);
+                let state_ident = state_slot_ident(record, index);
+                let resolver_ident = resolver_slot_ident(record, index);
                 fields.push(quote! {
-                    #ident: self.#ident.take().expect("field resolver available after polling")
+                    #state_ident: #prefix.#resolver_ident.take().expect("field resolver available after polling")
                 });
             }
             quote! { #resolver_name { #(#fields),* } }
@@ -153,7 +161,7 @@ fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_ma
             for (index, _field) in record.fields.iter().enumerate() {
                 let resolver_ident = resolver_slot_ident(record, index);
                 fields.push(quote! {
-                    self.#resolver_ident
+                    #prefix.#resolver_ident
                         .take()
                         .expect("field resolver available after polling")
                 });
@@ -166,12 +174,11 @@ fn resolver_expr(record: &RecordSpec<'_>, resolver_name: &syn::Ident) -> proc_ma
 
 // --- Record State Implementation ---
 
-fn record_state_impl(
-    state_name: &syn::Ident,
-    resolver_name: &syn::Ident,
+fn record_state_poll_logic(
     record: &RecordSpec<'_>,
     archived_name: &syn::Ident,
     stable_schema_key: &proc_macro2::TokenStream,
+    prefix: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     let layout = layout_fields(
         record,
@@ -179,40 +186,36 @@ fn record_state_impl(
         stable_schema_key,
         record.schema_revision,
     );
-    let polls = poll_steps(record);
-    let resolver_expr = resolver_expr(record, resolver_name);
+    let polls = poll_steps(record, prefix);
 
-    if has_schema(record) {
-        quote! {
-            impl<'a> zebin::SerializeState for #state_name<'a> {
-                type Resolver = #resolver_name;
+    quote! {
+        #layout
+        #(#polls)*
+    }
+}
 
-                fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
-                    &mut self,
-                    encoder: &mut E,
-                ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
-                {
-                    #layout
-                    #(#polls)*
+fn record_state_impl(
+    state_name: &syn::Ident,
+    resolver_name: &syn::Ident,
+    record: &RecordSpec<'_>,
+    archived_name: &syn::Ident,
+    stable_schema_key: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let poll_logic =
+        record_state_poll_logic(record, archived_name, stable_schema_key, quote! { self });
+    let resolver_expr = resolver_expr(record, resolver_name, quote! { self });
 
-                    Ok(::core::task::Poll::Ready(#resolver_expr))
-                }
-            }
-        }
-    } else {
-        quote! {
-            impl<'a> zebin::SerializeState for #state_name<'a> {
-                type Resolver = #resolver_name;
+    quote! {
+        impl<'a> zebin::SerializeState<'a> for #state_name<'a> {
+            type Resolver = #resolver_name;
 
-                fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
-                    &mut self,
-                    encoder: &mut E,
-                ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
-                {
-                    #(#polls)*
-
-                    Ok(::core::task::Poll::Ready(#resolver_expr))
-                }
+            fn poll<E: zebin::ByteSink + zebin::LayoutSink<'a> + ?Sized>(
+                &mut self,
+                encoder: &mut E,
+            ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>
+            {
+                #poll_logic
+                Ok(::core::task::Poll::Ready(#resolver_expr))
             }
         }
     }
@@ -427,12 +430,29 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
 
     let poll_arms = variants.iter().map(|variant| {
         let variant_ident = variant.ident;
+        let variant_resolver_name = variant_resolver_name(name, variant.ident);
+        let variant_archived_name = crate::shared::variant_archived_name(name, variant.ident);
+        let stable_schema_key = if has_schema(&variant.record) {
+            let stable_schema_key = variant
+                .record
+                .stable_schema_key
+                .expect("schema-bearing records require an explicit stable schema key");
+            quote! { #stable_schema_key }
+        } else {
+            quote! { 0 }
+        };
+        let poll_logic = record_state_poll_logic(
+            &variant.record,
+            &variant_archived_name,
+            &stable_schema_key,
+            quote! { state },
+        );
+        let resolver_expr =
+            resolver_expr(&variant.record, &variant_resolver_name, quote! { state });
         quote! {
-            #state_name::#variant_ident(state) => match state.poll(encoder)? {
-                ::core::task::Poll::Pending => Ok(::core::task::Poll::Pending),
-                ::core::task::Poll::Ready(resolver) => {
-                    Ok(::core::task::Poll::Ready(#resolver_name::#variant_ident(resolver)))
-                }
+            #state_name::#variant_ident(state) => {
+                #poll_logic
+                Ok(::core::task::Poll::Ready(#resolver_name::#variant_ident(#resolver_expr)))
             }
         }
     });
@@ -450,10 +470,10 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             #(#resolver_enum_variants),*
         }
 
-        impl<'a> zebin::SerializeState for #state_name<'a> {
+        impl<'a> zebin::SerializeState<'a> for #state_name<'a> {
             type Resolver = #resolver_name;
 
-            fn poll<E: zebin::ByteSink + zebin::LayoutSink + ?Sized>(
+            fn poll<E: zebin::ByteSink + zebin::LayoutSink<'a> + ?Sized>(
                 &mut self,
                 encoder: &mut E,
             ) -> Result<::core::task::Poll<Self::Resolver>, zebin::ZebinError>

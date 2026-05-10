@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 
 use crate::{
@@ -7,70 +6,72 @@ use crate::{
         LayoutDescriptor, LayoutField, ObjectEncoding, SchemaRevision, StableSchemaKey,
     },
     io::sink::{ByteSink, LayoutSink},
-    utils::{byteops, num::usize_to_u32},
+    utils::byteops,
 };
 
-#[cfg(feature = "no_std")]
-pub type HashMap<K, V> = hashbrown::HashMap<K, V, core::hash::BuildHasherDefault<ahash::AHasher>>;
-
-#[cfg(feature = "std")]
-pub type HashMap<K, V> = std::collections::HashMap<K, V>;
-
 /// Shared layout registry used by both the measuring and emitting encoders.
-#[derive(Default)]
-pub(crate) struct LayoutRegistry {
-    layouts: Vec<LayoutDescriptor>,
-    layout_map: HashMap<(StableSchemaKey, SchemaRevision), u32>,
+pub(crate) struct LayoutRegistry<'a> {
+    layouts: [Option<LayoutDescriptor<'a>>; 32],
+    count: usize,
 }
 
-impl LayoutRegistry {
+impl<'a> Default for LayoutRegistry<'a> {
+    fn default() -> Self {
+        const NONE: Option<LayoutDescriptor<'static>> = None;
+        Self {
+            layouts: [NONE; 32],
+            count: 0,
+        }
+    }
+}
+
+impl<'a> LayoutRegistry<'a> {
     pub fn register(
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
         encoding: ObjectEncoding,
-        layout: &[LayoutField],
+        layout: &'a [LayoutField],
     ) -> Result<(), ZebinError> {
-        let descriptor = LayoutDescriptor::new(
-            stable_schema_key,
-            schema_revision,
-            encoding,
-            layout.to_vec(),
-        )?;
-        let key = (stable_schema_key, schema_revision);
-        if let Some(&id) = self.layout_map.get(&key) {
-            let existing = self
-                .layouts
-                .get(id as usize)
-                .ok_or(ZebinError::LayoutError)?;
-            if existing != &descriptor {
-                return Err(ZebinError::LayoutError);
+        for i in 0..self.count {
+            let existing = self.layouts[i].as_ref().unwrap();
+            if existing.stable_schema_key == stable_schema_key
+                && existing.schema_revision == schema_revision
+            {
+                if existing.encoding != encoding || existing.fields != layout {
+                    return Err(ZebinError::LayoutError);
+                }
+                return Ok(());
             }
-            return Ok(());
         }
 
-        let id = usize_to_u32(self.layouts.len(), || ZebinError::LayoutError)?;
-        self.layouts.push(descriptor);
-        self.layout_map.insert(key, id);
+        if self.count >= self.layouts.len() {
+            return Err(ZebinError::LayoutError);
+        }
+
+        let descriptor =
+            LayoutDescriptor::new(stable_schema_key, schema_revision, encoding, layout)?;
+        self.layouts[self.count] = Some(descriptor);
+        self.count += 1;
         Ok(())
     }
 
-    pub fn layouts(&self) -> &[LayoutDescriptor] {
-        &self.layouts
+    pub fn count(&self) -> usize {
+        self.count
     }
 
-    pub fn into_layouts(self) -> Vec<LayoutDescriptor> {
-        self.layouts
+    pub fn get_layout(&self, index: usize) -> Option<&LayoutDescriptor<'a>> {
+        self.layouts.get(index).and_then(|o| o.as_ref())
     }
 }
 
 /// Measuring encoder that simulates writes while collecting layouts.
-pub(crate) struct MeasureEncoder {
+pub(crate) struct MeasureEncoder<'a> {
     pos: usize,
-    layouts: LayoutRegistry,
+    layouts: LayoutRegistry<'a>,
 }
 
-impl MeasureEncoder {
+impl<'a> MeasureEncoder<'a> {
     pub fn new(pos: usize) -> Self {
         Self {
             pos,
@@ -78,12 +79,12 @@ impl MeasureEncoder {
         }
     }
 
-    pub fn into_layouts(self) -> Vec<LayoutDescriptor> {
-        self.layouts.into_layouts()
+    pub fn layouts_moved(self) -> LayoutRegistry<'a> {
+        self.layouts
     }
 }
 
-impl ByteSink for MeasureEncoder {
+impl ByteSink for MeasureEncoder<'_> {
     fn pos(&self) -> usize {
         self.pos
     }
@@ -106,15 +107,20 @@ impl ByteSink for MeasureEncoder {
             .ok_or(ZebinError::WriteError)?;
         Ok(padding)
     }
+
+    fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+        self.pos = self.pos.checked_add(len).ok_or(ZebinError::WriteError)?;
+        Ok(len)
+    }
 }
 
-impl LayoutSink for MeasureEncoder {
+impl<'a> LayoutSink<'a> for MeasureEncoder<'a> {
     fn register_layout(
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
         encoding: ObjectEncoding,
-        layout: &[LayoutField],
+        layout: &'a [LayoutField],
     ) -> Result<(), ZebinError> {
         self.layouts
             .register(stable_schema_key, schema_revision, encoding, layout)
@@ -122,15 +128,15 @@ impl LayoutSink for MeasureEncoder {
 }
 
 /// Chunked encoder that writes into a caller-provided buffer slice.
-pub(crate) struct SliceEncoder<'a> {
+pub(crate) struct SliceEncoder<'a, 'b> {
     buf: &'a mut [u8],
     written: usize,
     archive_pos: usize,
-    layouts: &'a mut LayoutRegistry,
+    layouts: &'a mut LayoutRegistry<'b>,
 }
 
-impl<'a> SliceEncoder<'a> {
-    pub fn new(buf: &'a mut [u8], archive_pos: usize, layouts: &'a mut LayoutRegistry) -> Self {
+impl<'a, 'b> SliceEncoder<'a, 'b> {
+    pub fn new(buf: &'a mut [u8], archive_pos: usize, layouts: &'a mut LayoutRegistry<'b>) -> Self {
         Self {
             buf,
             written: 0,
@@ -143,12 +149,12 @@ impl<'a> SliceEncoder<'a> {
         self.written
     }
 
-    pub fn layouts(&self) -> &[LayoutDescriptor] {
-        self.layouts.layouts()
+    pub fn layouts(&self) -> &LayoutRegistry<'b> {
+        self.layouts
     }
 }
 
-impl<'a> ByteSink for SliceEncoder<'a> {
+impl<'a, 'b> ByteSink for SliceEncoder<'a, 'b> {
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -172,31 +178,35 @@ impl<'a> ByteSink for SliceEncoder<'a> {
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
         let alignment = alignment.get();
         let padding = (alignment - (self.archive_pos % alignment)) % alignment;
-        if padding == 0 {
+        self.skip(padding)
+    }
+
+    fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+        if len == 0 {
             return Ok(0);
         }
 
         let remaining = self.buf.len().saturating_sub(self.written);
-        let written = remaining.min(padding);
+        let written = remaining.min(len);
         if written > 0 {
             byteops::fill(&mut self.buf[self.written..self.written + written], 0);
             self.written += written;
-            self.archive_pos = self
-                .archive_pos
-                .checked_add(written)
-                .ok_or(ZebinError::WriteError)?;
         }
+        self.archive_pos = self
+            .archive_pos
+            .checked_add(written)
+            .ok_or(ZebinError::WriteError)?;
         Ok(written)
     }
 }
 
-impl<'a> LayoutSink for SliceEncoder<'a> {
+impl<'a, 'b> LayoutSink<'b> for SliceEncoder<'a, 'b> {
     fn register_layout(
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
         encoding: ObjectEncoding,
-        layout: &[LayoutField],
+        layout: &'b [LayoutField],
     ) -> Result<(), ZebinError> {
         self.layouts
             .register(stable_schema_key, schema_revision, encoding, layout)

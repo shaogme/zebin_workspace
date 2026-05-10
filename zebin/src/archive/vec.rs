@@ -1,20 +1,80 @@
-use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
     core::rel_ptr::RelPtr,
+    error::ValidationPathSegment,
     error::ZebinError,
     io::sink::{ByteSink, LayoutSink},
-    traits::{
-        Access, Archive, Layout, SequenceResolverBuffer, SequenceSource, Serialize, SerializeState,
-        Validate, archived_bytes,
-    },
+    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
     },
-    validation::context::{ValidationContext, ValidationPathSegment},
+    validation::context::ValidationContext,
 };
+
+/// Source of indexed sequence items.
+pub trait SequenceSource<T> {
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn get(&self, index: usize) -> &T;
+}
+
+impl<T> SequenceSource<T> for [T] {
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+impl<T, const N: usize> SequenceSource<T> for [T; N] {
+    fn len(&self) -> usize {
+        N
+    }
+
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+/// Buffer for sequence element resolvers while a sequence is being serialized.
+pub trait SequenceResolverBuffer<T: Archive>: Sized {
+    type Resolver;
+
+    fn new(len: usize) -> Self;
+
+    fn store(&mut self, index: usize, resolver: T::Resolver);
+
+    fn take(&mut self, index: usize) -> T::Resolver;
+
+    fn finish(self, data_pos: usize) -> Self::Resolver;
+}
+
+impl<T> SequenceSource<T> for VecDeque<T> {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+pub fn archived_bytes<L: Layout>(archived: &L) -> Vec<u8> {
+    let size = archived.size_hint();
+    let mut out = Vec::new();
+    out.resize(size, 0);
+    L::write_archived_bytes(archived, &mut out);
+    out
+}
 
 /// An archived vector that uses a relative pointer.
 #[repr(C)]
@@ -33,8 +93,9 @@ impl<T> ArchivedVec<T> {
             return &[];
         }
         let len = u32_to_usize(self.len, || ZebinError::ValidationError {
-            message: "ArchivedVec length exceeds usize range".to_string(),
+            message: "ArchivedVec length exceeds usize range",
             pos: self as *const _ as usize,
+            path: Default::default(),
         })
         .expect("validated archived vector length should fit in usize");
         let ptr = self
@@ -47,8 +108,9 @@ impl<T> ArchivedVec<T> {
     /// Get the length of the vector.
     pub fn len(&self) -> usize {
         u32_to_usize(self.len, || ZebinError::ValidationError {
-            message: "ArchivedVec length exceeds usize range".to_string(),
+            message: "ArchivedVec length exceeds usize range",
             pos: self as *const _ as usize,
+            path: Default::default(),
         })
         .expect("archived vector length should fit in usize")
     }
@@ -89,22 +151,25 @@ where
         let archived = unsafe { &*ptr };
 
         let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "ArchivedVec length exceeds usize range".to_string(),
+            message: "ArchivedVec length exceeds usize range",
             pos: ptr as usize,
+            path: Default::default(),
         })?;
         if len > 0 {
             let data_ptr = archived
                 .ptr
                 .as_ref()
                 .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty ArchivedVec".to_string(),
+                    message: "Null pointer in non-empty ArchivedVec",
                     pos: ptr as usize,
+                    path: Default::default(),
                 })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
             let total_size = len.checked_mul(core::mem::size_of::<T>()).ok_or_else(|| {
                 ZebinError::ValidationError {
-                    message: "ArchivedVec size overflow".to_string(),
+                    message: "ArchivedVec size overflow",
                     pos: ptr as usize,
+                    path: Default::default(),
                 }
             })?;
             guard.check_range(data_ptr as *const u8, total_size)?;
@@ -113,9 +178,8 @@ where
             for i in 0..len {
                 let element_ptr = unsafe { data_ptr.add(i) };
                 unsafe {
-                    let mut path_guard =
-                        guard.push_path_segment(ValidationPathSegment::Index(i))?;
-                    T::validate::<H, _>(element_ptr, &mut *path_guard)?;
+                    T::validate::<H, _>(element_ptr, &mut *guard)
+                        .map_err(|e| e.at(ValidationPathSegment::Index(i)))?;
                 }
             }
         }
@@ -245,7 +309,7 @@ where
         }
     }
 
-    fn poll_children<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll_children<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
@@ -318,14 +382,14 @@ where
         }
     }
 
-    fn poll_serializing<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll_serializing<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
         self.children.poll_children(encoder)
     }
 
-    fn poll_aligning<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll_aligning<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
@@ -337,7 +401,7 @@ where
         Ok(Poll::Ready(()))
     }
 
-    fn poll_writing<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll_writing<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<usize>, ZebinError> {
@@ -376,14 +440,14 @@ where
     }
 }
 
-impl<'a, S, T> SerializeState for SequenceArchiveState<'a, S, T>
+impl<'a, S, T> SerializeState<'a> for SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Serialize + Archive + 'a,
 {
     type Resolver = usize;
 
-    fn poll<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -446,13 +510,13 @@ where
     }
 }
 
-impl<'a, T, const N: usize> SerializeState for ArrayArchiveState<'a, T, N>
+impl<'a, T, const N: usize> SerializeState<'a> for ArrayArchiveState<'a, T, N>
 where
     T: Serialize + Archive + 'a,
 {
     type Resolver = [T::Resolver; N];
 
-    fn poll<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {

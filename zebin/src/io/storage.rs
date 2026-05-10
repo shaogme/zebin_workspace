@@ -1,7 +1,8 @@
 #[cfg(feature = "mmap")]
 pub mod mmap;
 
-use alloc::{vec, vec::Vec};
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 
 use crate::ZebinError;
@@ -18,16 +19,23 @@ pub trait Storage {
         let pos = self.len();
         let padding = (alignment - (pos % alignment)) % alignment;
         if padding > 0 {
-            let padding_bytes = vec![0u8; padding];
-            self.extend(&padding_bytes)?;
+            const ZEROS: [u8; 64] = [0u8; 64];
+            let mut remaining = padding;
+            while remaining > 0 {
+                let chunk = remaining.min(ZEROS.len());
+                self.extend(&ZEROS[..chunk])?;
+                remaining -= chunk;
+            }
         }
         Ok(())
     }
+    #[cfg(feature = "alloc")]
     fn into_bytes(self) -> Result<Vec<u8>, ZebinError>
     where
         Self: Sized;
 }
 
+#[cfg(feature = "alloc")]
 impl Storage for Vec<u8> {
     fn len(&self) -> usize {
         self.len()

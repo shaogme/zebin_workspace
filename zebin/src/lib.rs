@@ -6,6 +6,7 @@ compile_error!(
 	Use --no-default-features flag to disable default features when you need no_std."
 );
 
+#[cfg(feature = "alloc")]
 pub extern crate alloc;
 
 mod archive;
@@ -20,15 +21,19 @@ mod validation;
 mod write;
 
 pub mod prelude {
-    pub use crate::archive::packed::{
-        ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
-        PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
+    #[cfg(feature = "alloc")]
+    pub use crate::archive::{
+        packed::{
+            ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
+            PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
+        },
+        varint::{PackedVarIntSlice, VarInt, VarIntVec, VarIntView},
     };
-    pub use crate::archive::varint::{PackedVarIntSlice, VarInt, VarIntVec, VarIntView};
     pub use crate::core::rel_ptr::RelPtr;
     pub use crate::core::schema::{
         FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
     };
+    pub use crate::error::ValidationPathSegment;
     pub use crate::error::ZebinError;
     pub use crate::format::ArchiveHeader;
     pub use crate::io::sink::{ByteSink, LayoutSink};
@@ -36,42 +41,43 @@ pub mod prelude {
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
         Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Serialize, SerializeState,
-        Validate, archived_bytes,
+        Validate,
     };
-    pub use crate::validation::context::{
-        ArchivedDepthGuard, ValidationContext, ValidationPathSegment,
-    };
+    pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::{
-        ZebinReader, ResolvedLayout, Storage, Validator, ZebinWriter, decode, encode,
-        encode_chunked, encode_into, validate,
+        ResolvedLayout, Storage, Validator, ZebinReader, ZebinWriter, decode, encode_chunked,
+        validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
 
-pub use crate::archive::packed::{
-    ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec, PackedSlice,
-    PackedU8Slice, PackedU8Vec, PackedVec,
+#[cfg(feature = "alloc")]
+pub use crate::archive::{
+    packed::{
+        ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
+        PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
+    },
+    varint::{PackedVarIntSlice, VarInt, VarIntView},
+    vec::archived_bytes,
 };
-pub use crate::archive::varint::{PackedVarIntSlice, VarInt, VarIntVec, VarIntView};
 pub use crate::core::rel_ptr::RelPtr;
 pub use crate::core::schema::{
     FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
     SchemaRevision, StableSchemaKey,
 };
+pub use crate::error::ValidationPathSegment;
 pub use crate::error::ZebinError;
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::sink::{ByteSink, LayoutSink};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::io::storage::mmap::Mmap;
-pub use crate::read::{ZebinReader, ResolvedLayout};
+pub use crate::read::{ResolvedLayout, ZebinReader};
 pub use crate::traits::{
     Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Serialize, SerializeState,
-    Validate, archived_bytes,
+    Validate,
 };
-pub use crate::validation::context::{
-    ArchivedDepthGuard, ValidationContext, ValidationPathSegment,
-};
+pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::validator::Validator;
 pub use crate::write::{ArchiveWriter, ZebinWriter};
 
@@ -79,7 +85,6 @@ pub use memoffset;
 pub use zebin_macros::*;
 
 use ::core::ops::Deref;
-use alloc::vec::Vec;
 
 /// Decode and validate the archived root object using the default header.
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ZebinReader<'a, T>, ZebinError>
@@ -109,8 +114,11 @@ where
 {
     ZebinWriter::encode_chunked(value)
 }
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 
 /// Archive a value into a newly allocated byte vector using the default header.
+#[cfg(feature = "alloc")]
 pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
 where
     T: Serialize + Archive,
@@ -119,6 +127,7 @@ where
 }
 
 /// Archive a value into an existing vector using the default header.
+#[cfg(feature = "alloc")]
 pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
 where
     T: Serialize + Archive,

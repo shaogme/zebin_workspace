@@ -562,10 +562,13 @@ pub fn layout_field_entries(
     record: &RecordSpec<'_>,
     archived_name: &Ident,
 ) -> Vec<proc_macro2::TokenStream> {
-    record
-        .fields
-        .iter()
-        .enumerate()
+    let mut fields: Vec<_> = record.fields.iter().enumerate().collect();
+
+    // Sort fields by field_id to ensure LayoutDescriptor::new doesn't fail with LayoutError
+    fields.sort_by_key(|(_, field)| field.field_id.expect("field ids are validated above"));
+
+    fields
+        .into_iter()
         .map(|(index, field)| {
             let field_id = field.field_id.expect("field ids are validated above");
             let member = user_member(record, index);

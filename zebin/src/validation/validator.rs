@@ -1,14 +1,12 @@
 use core::{marker::PhantomData, num::NonZeroUsize};
 
-use alloc::string::ToString;
-
 use crate::{
     ZebinError,
     core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
     format::ArchiveHeader,
     read::ResolvedLayout,
     traits::ArchiveHeader as ArchiveHeaderTrait,
-    validation::context::{ValidationContext, ValidationPathSegment},
+    validation::context::ValidationContext,
 };
 
 /// Validator for byte streams to ensure safety before access.
@@ -21,7 +19,6 @@ where
     cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a, H>)>,
     depth: usize,
     max_depth: usize,
-    path: alloc::vec::Vec<ValidationPathSegment>,
 }
 
 pub struct DepthGuard<'v, H = ArchiveHeader>
@@ -47,8 +44,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
             layouts: None,
             cached_layout: None,
             depth: 0,
-            max_depth: 256,
-            path: alloc::vec::Vec::new(),
+            max_depth: 128,
         }
     }
 
@@ -58,8 +54,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
             layouts: Some(layouts),
             cached_layout: None,
             depth: 0,
-            max_depth: 256,
-            path: alloc::vec::Vec::new(),
+            max_depth: 128,
         }
     }
 
@@ -82,20 +77,16 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         let buffer_start = self.data.as_ptr() as usize;
         let buffer_end = buffer_start
             .checked_add(self.data.len())
-            .ok_or_else(|| self.validation_error("Buffer length overflow".to_string(), 0))?;
+            .ok_or_else(|| self.validation_error("Buffer length overflow", 0))?;
 
         let end = start.checked_add(size).ok_or_else(|| {
-            self.validation_error(
-                "Pointer range overflow".to_string(),
-                start.saturating_sub(buffer_start),
-            )
+            self.validation_error("Pointer range overflow", start.saturating_sub(buffer_start))
         })?;
 
         if start < buffer_start || end > buffer_end {
-            return Err(self.validation_error(
-                "Pointer out of bounds".to_string(),
-                start.saturating_sub(buffer_start),
-            ));
+            return Err(
+                self.validation_error("Pointer out of bounds", start.saturating_sub(buffer_start))
+            );
         }
         Ok(())
     }
@@ -113,6 +104,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
                 expected: alignment,
                 actual: unsafe { NonZeroUsize::new_unchecked(addr % alignment_value) },
                 pos: addr.saturating_sub(self.data.as_ptr() as usize),
+                path: Default::default(),
             });
         }
         Ok(())
@@ -151,8 +143,9 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         }
 
         let layouts = self.layouts.ok_or_else(|| ZebinError::ValidationError {
-            message: "Missing layout directory".to_string(),
+            message: "Missing layout directory",
             pos: 0,
+            path: Default::default(),
         })?;
         let header = H::parse(self.data)?;
         let layout = layouts.lookup(stable_schema_key, schema_revision)?;
@@ -177,18 +170,6 @@ impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
 
     fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError> {
         Validator::check_alignment(self, ptr, alignment)
-    }
-
-    fn push_path_segment_raw(&mut self, segment: ValidationPathSegment) {
-        self.path.push(segment);
-    }
-
-    fn pop_path_segment(&mut self) {
-        self.path.pop();
-    }
-
-    fn path(&self) -> &[ValidationPathSegment] {
-        &self.path
     }
 
     fn resolved_layout(

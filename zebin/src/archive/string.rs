@@ -1,6 +1,6 @@
 use core::{num::NonZeroUsize, str, task::Poll};
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
 
 use crate::{
     core::rel_ptr::RelPtr,
@@ -31,8 +31,9 @@ impl ArchivedString {
             return "";
         }
         let len = u32_to_usize(self.len, || ZebinError::ValidationError {
-            message: "ArchivedString length exceeds usize range".to_string(),
+            message: "ArchivedString length exceeds usize range",
             pos: self as *const _ as usize,
+            path: Default::default(),
         })
         .expect("validated archived string length should fit in usize");
         let ptr = self
@@ -68,24 +69,27 @@ impl Validate for ArchivedString {
         let archived = unsafe { &*ptr };
 
         let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "ArchivedString length exceeds usize range".to_string(),
+            message: "ArchivedString length exceeds usize range",
             pos: ptr as usize,
+            path: Default::default(),
         })?;
         if len > 0 {
             let data_ptr = archived
                 .ptr
                 .as_ref()
                 .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty ArchivedString".to_string(),
+                    message: "Null pointer in non-empty ArchivedString",
                     pos: ptr as usize,
+                    path: Default::default(),
                 })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
             guard.check_range(data_ptr, len)?;
 
             let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
             str::from_utf8(bytes).map_err(|_| ZebinError::ValidationError {
-                message: "Invalid UTF-8 sequence".to_string(),
+                message: "Invalid UTF-8 sequence",
                 pos: data_ptr as usize,
+                path: Default::default(),
             })?;
         }
 
@@ -129,10 +133,10 @@ impl<'a> StringArchiveState<'a> {
     }
 }
 
-impl<'a> SerializeState for StringArchiveState<'a> {
+impl<'a> SerializeState<'a> for StringArchiveState<'a> {
     type Resolver = usize;
 
-    fn poll<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {

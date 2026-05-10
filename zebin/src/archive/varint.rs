@@ -1,4 +1,4 @@
-use alloc::{string::ToString, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 use core::{marker::PhantomData, num::NonZeroUsize, ops::Deref, task::Poll};
 
 use crate::{
@@ -144,8 +144,9 @@ macro_rules! impl_varint_number {
 
             fn try_from_u64(value: u64) -> Result<Self, ZebinError> {
                 <$t>::try_from(value).map_err(|_| ZebinError::ValidationError {
-                    message: "VarInt value out of range".to_string(),
+                    message: "VarInt value out of range",
                     pos: 0,
+                    path: Default::default(),
                 })
             }
 
@@ -210,8 +211,9 @@ where
     loop {
         if consumed >= T::MAX_BYTES {
             return Err(ZebinError::ValidationError {
-                message: "VarInt exceeds maximum length".to_string(),
+                message: "VarInt exceeds maximum length",
                 pos: bytes as usize,
+                path: Default::default(),
             });
         }
         let byte_ptr = unsafe { bytes.add(consumed) };
@@ -227,8 +229,9 @@ where
         shift += 7;
         if shift >= 64 {
             return Err(ZebinError::ValidationError {
-                message: "VarInt shift overflow".to_string(),
+                message: "VarInt shift overflow",
                 pos: bytes as usize,
+                path: Default::default(),
             });
         }
     }
@@ -332,10 +335,10 @@ where
     }
 }
 
-impl<T: VarIntNumber> SerializeState for VarIntArchiveState<T> {
+impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntArchiveState<T> {
     type Resolver = ();
 
-    fn poll<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -594,10 +597,10 @@ impl<T: VarIntNumber> VarIntVecBuilderState<T> {
     }
 }
 
-impl<T: VarIntNumber> SerializeState for VarIntVecBuilderState<T> {
+impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<T> {
     type Resolver = VarIntVecResolver;
 
-    fn poll<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {

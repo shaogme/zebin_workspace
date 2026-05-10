@@ -1,4 +1,3 @@
-use alloc::{collections::VecDeque, vec::Vec};
 use core::num::NonZeroUsize;
 
 use crate::core::schema::ObjectEncoding;
@@ -21,13 +20,6 @@ pub trait Layout: Sized {
 
     /// Write a deterministic byte representation of an archived value.
     fn write_archived_bytes(archived: &Self, out: &mut [u8]);
-
-    /// Convert an archived value to a freshly allocated byte vector.
-    fn archived_bytes(archived: &Self) -> Vec<u8> {
-        let mut out = alloc::vec![0u8; archived.size_hint()];
-        Self::write_archived_bytes(archived, &mut out);
-        out
-    }
 }
 
 /// Archive format header contract.
@@ -107,62 +99,6 @@ pub trait Archive {
 /// Re-export Serialize and SerializeState from write module.
 pub use crate::write::state::{Serialize, SerializeState};
 
-/// Convert an archived value to a freshly allocated byte vector.
-pub fn archived_bytes<T: Layout>(archived: &T) -> Vec<u8> {
-    T::archived_bytes(archived)
-}
-
-/// Source of indexed sequence items.
-pub trait SequenceSource<T> {
-    fn len(&self) -> usize;
-
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    fn get(&self, index: usize) -> &T;
-}
-
-impl<T> SequenceSource<T> for [T] {
-    fn len(&self) -> usize {
-        <[T]>::len(self)
-    }
-
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
-
-impl<T, const N: usize> SequenceSource<T> for [T; N] {
-    fn len(&self) -> usize {
-        N
-    }
-
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
-
-impl<T> SequenceSource<T> for Vec<T> {
-    fn len(&self) -> usize {
-        Vec::len(self)
-    }
-
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
-
-impl<T> SequenceSource<T> for VecDeque<T> {
-    fn len(&self) -> usize {
-        VecDeque::len(self)
-    }
-
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
-
 impl<T: Layout, const N: usize> Layout for [T; N] {
     const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
 
@@ -192,7 +128,7 @@ impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
         let data_ptr = ptr as *const T;
         let elem_size = core::mem::size_of::<T>();
 
-        use crate::validation::context::ValidationPathSegment;
+        use crate::error::ValidationPathSegment;
         for index in 0..N {
             let element_ptr = if elem_size == 0 {
                 data_ptr
@@ -200,9 +136,8 @@ impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
                 unsafe { data_ptr.add(index) }
             };
             unsafe {
-                let mut path_guard =
-                    guard.push_path_segment(ValidationPathSegment::Index(index))?;
-                T::validate::<H, _>(element_ptr, &mut *path_guard)?;
+                T::validate::<H, _>(element_ptr, &mut *guard)
+                    .map_err(|e| e.at(ValidationPathSegment::Index(index)))?;
             }
         }
 
@@ -230,17 +165,4 @@ where
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
-}
-
-/// Buffer for sequence element resolvers while a sequence is being serialized.
-pub trait SequenceResolverBuffer<T: Archive>: Sized {
-    type Resolver;
-
-    fn new(len: usize) -> Self;
-
-    fn store(&mut self, index: usize, resolver: T::Resolver);
-
-    fn take(&mut self, index: usize) -> T::Resolver;
-
-    fn finish(self, data_pos: usize) -> Self::Resolver;
 }

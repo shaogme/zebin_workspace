@@ -1,7 +1,5 @@
 use core::num::NonZeroU32;
 
-use alloc::{format, string::ToString};
-
 use crate::{
     ZebinError,
     traits::{ArchiveHeader as ArchiveHeaderTrait, Layout},
@@ -60,23 +58,26 @@ impl ArchiveHeaderTrait for ArchiveHeader {
     fn parse(bytes: &[u8]) -> Result<Self, ZebinError> {
         if bytes.len() < Self::SIZE {
             return Err(ZebinError::ValidationError {
-                message: "Header too short".to_string(),
+                message: "Header too short",
                 pos: 0,
+                path: Default::default(),
             });
         }
         if bytes[0..2] != Self::MAGIC {
             return Err(ZebinError::ValidationError {
-                message: "Invalid magic".to_string(),
+                message: "Invalid magic",
                 pos: 0,
+                path: Default::default(),
             });
         }
 
         let version = bytes[2];
         let flags = bytes[3];
         if version != Self::VERSION {
-            return Err(ZebinError::ValidationError {
-                message: format!("Unsupported archive version {}", version),
+            return Err(ZebinError::UnsupportedArchiveVersion {
+                version,
                 pos: 2,
+                path: Default::default(),
             });
         }
 
@@ -86,8 +87,9 @@ impl ArchiveHeaderTrait for ArchiveHeader {
             "Layout offset",
         )?))
         .ok_or_else(|| ZebinError::ValidationError {
-            message: "Layout offset cannot be zero".to_string(),
+            message: "Layout offset cannot be zero",
             pos: 4,
+            path: Default::default(),
         })?;
         let root_offset = NonZeroU32::new(u32::from_le_bytes(read_fixed::<4>(
             bytes,
@@ -95,8 +97,9 @@ impl ArchiveHeaderTrait for ArchiveHeader {
             "Root offset",
         )?))
         .ok_or_else(|| ZebinError::ValidationError {
-            message: "Root offset cannot be zero".to_string(),
+            message: "Root offset cannot be zero",
             pos: 8,
+            path: Default::default(),
         })?;
 
         Ok(Self::new(version, flags, layout_offset, root_offset))

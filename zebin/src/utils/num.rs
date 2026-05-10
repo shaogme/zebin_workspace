@@ -1,8 +1,6 @@
 use core::convert::TryFrom;
 use core::num::{NonZeroU32, NonZeroUsize};
 
-use alloc::format;
-
 use crate::error::ZebinError;
 
 pub(crate) fn read_fixed<const N: usize>(
@@ -12,15 +10,17 @@ pub(crate) fn read_fixed<const N: usize>(
 ) -> Result<[u8; N], ZebinError> {
     let end = pos
         .checked_add(N)
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: format!("{field} overflow"),
+        .ok_or_else(|| ZebinError::FieldOverflow {
+            field,
             pos,
+            path: Default::default(),
         })?;
     let slice = bytes
         .get(pos..end)
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: format!("{field} out of bounds"),
+        .ok_or_else(|| ZebinError::FieldOutOfBounds {
+            field,
             pos,
+            path: Default::default(),
         })?;
     let mut out = [0u8; N];
     out.copy_from_slice(slice);

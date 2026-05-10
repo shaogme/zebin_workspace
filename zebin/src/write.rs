@@ -14,18 +14,9 @@ use crate::{
         state::{Serialize, SerializeState},
     },
 };
-use alloc::{string::ToString, vec, vec::Vec};
 
-struct RootWriteState {
-    bytes: Vec<u8>,
-    cursor: usize,
-}
-
-impl RootWriteState {
-    fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes, cursor: 0 }
-    }
-}
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 
 enum EncodePhase<'a, T, H = ArchiveHeader>
 where
@@ -43,7 +34,8 @@ where
         resolver: Option<<T as Archive>::Resolver>,
     },
     Root {
-        state: RootWriteState,
+        archived: T::Archived,
+        cursor: usize,
     },
     Layout {
         cursor: usize,
@@ -62,11 +54,11 @@ where
     H: ArchiveHeaderTrait,
 {
     value: &'a T,
-    plan: EncodePlan<H>,
+    plan: EncodePlan<'a, H>,
     body_state: Option<<T as Serialize>::State<'a>>,
     phase: EncodePhase<'a, T, H>,
     archive_pos: usize,
-    layouts: LayoutRegistry,
+    layouts: LayoutRegistry<'a>,
 }
 
 impl<'a, T, H> ArchiveWriter<'a, T, H>
@@ -138,8 +130,9 @@ where
                     }
                     if encoder.pos() != self.plan.root_pos {
                         return Err(ZebinError::ValidationError {
-                            message: "Root offset mismatch during emission".to_string(),
+                            message: "Root offset mismatch during emission",
                             pos: encoder.pos(),
+                            path: Default::default(),
                         });
                     }
 
@@ -147,51 +140,81 @@ where
                         .take()
                         .expect("resolver available while entering root alignment");
                     let archived = self.value.resolve(encoder.pos(), resolver)?;
-                    let bytes = crate::traits::archived_bytes(&archived);
                     self.phase = EncodePhase::Root {
-                        state: RootWriteState::new(bytes),
+                        archived,
+                        cursor: 0,
                     };
                 }
-                EncodePhase::Root { state } => {
-                    if encoder.pos() != self.plan.root_pos && state.cursor == 0 {
+                EncodePhase::Root { archived, cursor } => {
+                    if encoder.pos() != self.plan.root_pos && *cursor == 0 {
                         return Err(ZebinError::ValidationError {
-                            message: "Root offset mismatch during root write".to_string(),
+                            message: "Root offset mismatch during root write",
                             pos: encoder.pos(),
+                            path: Default::default(),
                         });
                     }
 
-                    let written = encoder.write(&state.bytes[state.cursor..])?;
-                    state.cursor += written;
-                    if state.cursor < state.bytes.len() {
+                    let size = archived.size_hint();
+                    let mut temp_buf = [0u8; 1024];
+                    if size > temp_buf.len() {
+                        return Err(ZebinError::WriteError);
+                    }
+                    T::Archived::write_archived_bytes(archived, &mut temp_buf[..size]);
+
+                    let written = encoder.write(&temp_buf[*cursor..size])?;
+                    *cursor += written;
+                    if *cursor < size {
                         break;
                     }
 
                     if encoder.pos() != self.plan.layout_pos {
                         return Err(ZebinError::ValidationError {
-                            message: "Layout offset mismatch during emission".to_string(),
+                            message: "Layout offset mismatch during emission",
                             pos: encoder.pos(),
+                            path: Default::default(),
                         });
                     }
 
-                    if encoder.layouts() != self.plan.layouts.as_slice() {
+                    if encoder.layouts().count() != self.plan.layouts.count() {
                         return Err(ZebinError::ValidationError {
-                            message: "Layout registry diverged during emission".to_string(),
+                            message: "Layout registry diverged during emission",
                             pos: encoder.pos(),
+                            path: Default::default(),
                         });
                     }
 
                     self.phase = EncodePhase::Layout { cursor: 0 };
                 }
                 EncodePhase::Layout { cursor } => {
-                    let written = encoder.write(&self.plan.layout_bytes[*cursor..])?;
-                    *cursor += written;
-                    if *cursor < self.plan.layout_bytes.len() {
+                    let total_layout_len =
+                        crate::write::plan::layout_section_len_registry(&self.plan.layouts)?;
+                    let mut temp_buf = [0u8; 256];
+                    let remaining = total_layout_len.saturating_sub(*cursor);
+                    if remaining == 0 {
+                        self.phase = EncodePhase::Done {
+                            _phantom: PhantomData,
+                        };
                         break;
                     }
-                    self.phase = EncodePhase::Done {
-                        _phantom: PhantomData,
-                    };
-                    break;
+
+                    let chunk_size = temp_buf.len().min(remaining);
+                    crate::write::plan::fill_layout_section_chunk(
+                        &self.plan.layouts,
+                        *cursor,
+                        &mut temp_buf[..chunk_size],
+                    )?;
+
+                    let written = encoder.write(&temp_buf[..chunk_size])?;
+                    *cursor += written;
+                    if written == 0 && chunk_size > 0 {
+                        break;
+                    }
+                    if *cursor >= total_layout_len {
+                        self.phase = EncodePhase::Done {
+                            _phantom: PhantomData,
+                        };
+                        break;
+                    }
                 }
                 EncodePhase::Done { .. } => break,
             }
@@ -222,6 +245,7 @@ where
     }
 
     /// Archive a value into a newly allocated byte vector.
+    #[cfg(feature = "alloc")]
     pub fn encode(value: &'a T) -> Result<Vec<u8>, ZebinError> {
         let mut writer = Self::encode_chunked(value)?;
         let mut buf = vec![0u8; writer.total_len()];
@@ -229,6 +253,7 @@ where
         Ok(buf)
     }
 
+    #[cfg(feature = "alloc")]
     pub fn encode_into(value: &'a T, buf: &mut Vec<u8>) -> Result<(), ZebinError> {
         let mut writer = Self::encode_chunked(value)?;
         buf.clear();

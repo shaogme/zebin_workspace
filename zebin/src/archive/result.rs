@@ -1,12 +1,12 @@
-use alloc::string::ToString;
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
+    error::ValidationPathSegment,
     error::ZebinError,
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::byteops,
-    validation::context::{ValidationContext, ValidationPathSegment},
+    validation::context::ValidationContext,
 };
 
 /// Archived representation for `Result<T, E>`.
@@ -99,30 +99,29 @@ where
         let archived = unsafe { &*ptr };
         match archived.tag {
             0 => {
-                let mut path_guard =
-                    guard.push_path_segment(ValidationPathSegment::Variant("Ok"))?;
                 let value_ptr = archived.ok.as_ptr();
-                path_guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                path_guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
+                guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
+                guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
                 unsafe {
-                    T::validate::<H, _>(value_ptr, &mut *path_guard)?;
+                    T::validate::<H, _>(value_ptr, &mut *guard)
+                        .map_err(|e| e.at(ValidationPathSegment::Variant("Ok")))?;
                 }
                 Ok(())
             }
             1 => {
-                let mut path_guard =
-                    guard.push_path_segment(ValidationPathSegment::Variant("Err"))?;
                 let value_ptr = archived.err.as_ptr();
-                path_guard.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
-                path_guard.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
+                guard.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
+                guard.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
                 unsafe {
-                    E::validate::<H, _>(value_ptr, &mut *path_guard)?;
+                    E::validate::<H, _>(value_ptr, &mut *guard)
+                        .map_err(|e| e.at(ValidationPathSegment::Variant("Err")))?;
                 }
                 Ok(())
             }
             _ => Err(ZebinError::ValidationError {
-                message: "Invalid Result discriminant".to_string(),
+                message: "Invalid Result discriminant",
                 pos: ptr as usize,
+                path: Default::default(),
             }),
         }
     }
@@ -174,14 +173,14 @@ where
     }
 }
 
-impl<'a, T, E> SerializeState for ResultArchiveState<'a, T, E>
+impl<'a, T, E> SerializeState<'a> for ResultArchiveState<'a, T, E>
 where
     T: Serialize + Archive + 'a,
     E: Serialize + Archive + 'a,
 {
     type Resolver = Result<T::Resolver, E::Resolver>;
 
-    fn poll<R: ByteSink + LayoutSink + ?Sized>(
+    fn poll<R: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut R,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {

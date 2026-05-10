@@ -117,6 +117,84 @@ fn record_schema_write(record: &RecordSpec<'_>) -> Option<proc_macro2::TokenStre
     })
 }
 
+fn record_layout_checks_logic(
+    record: &RecordSpec<'_>,
+    archived_name: &syn::Ident,
+) -> proc_macro2::TokenStream {
+    if !has_schema(record) {
+        return quote! {};
+    }
+
+    let stable_schema_key = record
+        .stable_schema_key
+        .expect("schema-bearing records require an explicit stable schema key");
+    let schema_revision = record.schema_revision;
+    let checks: Vec<_> = record
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let field_id = field.field_id.expect("field ids are validated above");
+            let member = record_field_member(record, index);
+            quote! {
+                {
+                    let expected = zebin::memoffset::offset_of!(#archived_name, #member) as u32;
+                    let actual = match layout.field_offset(#field_id) {
+                        Some(actual) => actual,
+                        None => {
+                            return Err(zebin::ZebinError::ValidationError {
+                                message: "Missing layout field",
+                                pos: ptr as usize,
+                                path: Default::default(),
+                            });
+                        }
+                    };
+                    if actual != expected {
+                        return Err(zebin::ZebinError::ValidationError {
+                            message: "Layout offset mismatch",
+                            pos: ptr as usize,
+                            path: Default::default(),
+                        });
+                    }
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        let layout = guard.resolved_layout(#stable_schema_key, #schema_revision)?;
+        let layout = layout.layout();
+        #(#checks)*
+    }
+}
+
+fn record_field_validations(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
+    record
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let ty = if let Some(archived) = packed_archived_type(field) {
+                archived
+            } else {
+                let ty = field.ty;
+                quote! { <#ty as zebin::Archive>::Archived }
+            };
+            let member = record_field_member(record, index);
+            let path_name = record_field_method_name(record, index);
+            quote! {
+                {
+                    let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
+                    unsafe {
+                        <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *guard)
+                            .map_err(|e| e.at(zebin::ValidationPathSegment::Field(stringify!(#path_name))))?;
+                    }
+                }
+            }
+        })
+        .collect()
+}
+
 fn helper_accessors(
     archived_name: &syn::Ident,
     record: &RecordSpec<'_>,
@@ -140,9 +218,10 @@ fn helper_accessors(
                 &'a self,
                 layout: &'a zebin::ResolvedLayout<'a>,
             ) -> Result<&'a #ty, zebin::ZebinError> {
-                let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ZebinError::ValidationError {
-                    message: format!("Field ID {} not found in layout", #field_id),
+                let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ZebinError::MissingLayoutField {
+                    field_id: #field_id,
                     pos: self as *const _ as usize,
+                    path: Default::default(),
                 })?;
                 let base = self as *const _ as *const u8;
                 Ok(&*(((base.add(offset as usize)) as *const #ty)))
@@ -176,69 +255,8 @@ fn helper_bytes_impl(
     }
     writes.extend(record_field_inits(record, archived_name));
 
-    let layout_checks =
-        if has_schema(record) {
-            let stable_schema_key = record
-                .stable_schema_key
-                .expect("schema-bearing records require an explicit stable schema key");
-            let schema_revision = record.schema_revision;
-            let checks: Vec<_> = record.fields.iter().enumerate().map(|(index, field)| {
-            let field_id = field.field_id.expect("field ids are validated above");
-            let member = record_field_member(record, index);
-            quote! {
-                {
-                    let expected = zebin::memoffset::offset_of!(#archived_name, #member) as u32;
-                    let actual = match layout.field_offset(#field_id) {
-                        Some(actual) => actual,
-                        None => {
-                            return Err(guard.validation_error(
-                                format!("Missing layout entry for field {}", #field_id),
-                                ptr as usize,
-                            ));
-                        }
-                    };
-                    if actual != expected {
-                        return Err(guard.validation_error(
-                            format!(
-                                "Layout offset mismatch for field {}: expected {}, found {}",
-                                #field_id,
-                                expected,
-                                actual
-                            ),
-                            ptr as usize,
-                        ));
-                    }
-                }
-            }
-        }).collect();
-
-            quote! {
-                let archived = unsafe { &*ptr };
-                let layout = guard.resolved_layout(#stable_schema_key, #schema_revision)?;
-                let layout = layout.layout();
-                #(#checks)*
-            }
-        } else {
-            quote! {}
-        };
-
-    let field_validations = record.fields.iter().enumerate().map(|(index, field)| {
-        let ty = if let Some(archived) = packed_archived_type(field) {
-            archived
-        } else {
-            let ty = field.ty;
-            quote! { <#ty as zebin::Archive>::Archived }
-        };
-        let member = record_field_member(record, index);
-        let path_name = record_field_method_name(record, index);
-        quote! {
-            {
-                let mut path_guard = guard.push_path_segment(zebin::ValidationPathSegment::Field(stringify!(#path_name)))?;
-                let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
-                unsafe { <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *path_guard)?; }
-            }
-        }
-    });
+    let layout_checks = record_layout_checks_logic(record, archived_name);
+    let field_validations = record_field_validations(record);
 
     quote! {
         impl zebin::Layout for #archived_name {
@@ -266,6 +284,7 @@ fn helper_bytes_impl(
                 let mut guard = context.guard()?;
                 guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
                 guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                let archived = unsafe { &*ptr };
                 #layout_checks
                 #(#field_validations)*
                 Ok(())
@@ -477,11 +496,17 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 });
         }
 
+        let layout_checks = record_layout_checks_logic(&variant.record, &helper_name);
+        let field_validations = record_field_validations(&variant.record);
         variant_validate_arms.push(quote! {
             #idx_lit => {
-                let mut path_guard = guard.push_path_segment(zebin::ValidationPathSegment::Variant(stringify!(#variant_ident)))?;
                 let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                unsafe { <#helper_name as zebin::Validate>::validate::<H, _>(ptr, &mut *path_guard)?; }
+                let result: Result<(), zebin::ZebinError> = (|| -> Result<(), zebin::ZebinError> {
+                    #layout_checks
+                    #(#field_validations)*
+                    Ok(())
+                })();
+                result.map_err(|e| e.at(zebin::ValidationPathSegment::Variant(stringify!(#variant_ident))))?;
             }
         });
 
@@ -664,8 +689,9 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                         #(#variant_validate_arms)*
                         _ => {
                             return Err(zebin::ZebinError::ValidationError {
-                                message: "Invalid enum discriminant".to_string(),
+                                message: "Invalid enum discriminant",
                                 pos: ptr as usize,
+                                path: Default::default(),
                             });
                         }
                     }

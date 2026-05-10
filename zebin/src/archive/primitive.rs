@@ -4,7 +4,6 @@ use crate::{
     traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Serialize, Validate},
     validation::context::ValidationContext,
 };
-use alloc::string::ToString;
 use core::num::NonZeroUsize;
 use core::task::Poll;
 
@@ -29,10 +28,10 @@ impl<const N: usize> ByteState<N> {
 
 use crate::write::state::SerializeState;
 
-impl<const N: usize> SerializeState for ByteState<N> {
+impl<'a, const N: usize> SerializeState<'a> for ByteState<N> {
     type Resolver = ();
 
-    fn poll<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
@@ -139,8 +138,9 @@ impl Validate for bool {
         let val = unsafe { *(ptr as *const u8) };
         if val > 1 {
             return Err(ZebinError::ValidationError {
-                message: "Invalid bool value".to_string(),
+                message: "Invalid bool value",
                 pos: ptr as usize,
+                path: Default::default(),
             });
         }
         Ok(())

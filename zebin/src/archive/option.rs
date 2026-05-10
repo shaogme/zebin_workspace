@@ -1,12 +1,12 @@
-use alloc::string::ToString;
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
+    error::ValidationPathSegment,
     error::ZebinError,
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::byteops,
-    validation::context::{ValidationContext, ValidationPathSegment},
+    validation::context::ValidationContext,
 };
 
 /// Archived representation for `Option<T>`.
@@ -74,19 +74,19 @@ where
         match archived.tag {
             0 => Ok(()),
             1 => {
-                let mut path_guard =
-                    guard.push_path_segment(ValidationPathSegment::Variant("Some"))?;
                 let value_ptr = archived.value.as_ptr();
-                path_guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                path_guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
+                guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
+                guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
                 unsafe {
-                    T::validate::<H, _>(value_ptr, &mut *path_guard)?;
+                    T::validate::<H, _>(value_ptr, &mut *guard)
+                        .map_err(|e| e.at(ValidationPathSegment::Variant("Some")))?;
                 }
                 Ok(())
             }
             _ => Err(ZebinError::ValidationError {
-                message: "Invalid Option discriminant".to_string(),
+                message: "Invalid Option discriminant",
                 pos: ptr as usize,
+                path: Default::default(),
             }),
         }
     }
@@ -136,13 +136,13 @@ where
     }
 }
 
-impl<'a, T> SerializeState for OptionArchiveState<'a, T>
+impl<'a, T> SerializeState<'a> for OptionArchiveState<'a, T>
 where
     T: Serialize + Archive + 'a,
 {
     type Resolver = Option<T::Resolver>;
 
-    fn poll<E: ByteSink + LayoutSink + ?Sized>(
+    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {

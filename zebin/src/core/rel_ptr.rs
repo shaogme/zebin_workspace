@@ -1,8 +1,6 @@
 use core::marker::PhantomData;
 use core::num::NonZeroI64;
 
-use alloc::string::ToString;
-
 use crate::error::ZebinError;
 
 /// Zebin core: relative pointer.
@@ -18,12 +16,14 @@ impl<T> RelPtr<T> {
     pub fn new(from: usize, to: usize) -> Result<Self, ZebinError> {
         let offset = to as i128 - from as i128;
         let offset = i64::try_from(offset).map_err(|_| ZebinError::ValidationError {
-            message: "relative pointer offset out of range".to_string(),
+            message: "relative pointer offset out of range",
             pos: from,
+            path: Default::default(),
         })?;
         let offset = NonZeroI64::new(offset).ok_or_else(|| ZebinError::ValidationError {
-            message: "relative pointer offset cannot be zero".to_string(),
+            message: "relative pointer offset cannot be zero",
             pos: from,
+            path: Default::default(),
         })?;
 
         Ok(Self {

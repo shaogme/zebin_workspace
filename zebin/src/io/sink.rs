@@ -11,16 +11,19 @@ pub trait ByteSink {
 
     /// Write as many alignment bytes as possible and return the amount consumed.
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError>;
+
+    /// Advance the position without writing actual data.
+    fn skip(&mut self, len: usize) -> Result<usize, ZebinError>;
 }
 
 /// Layout registration sink used by archive state machines.
-pub trait LayoutSink {
+pub trait LayoutSink<'a> {
     /// Register a layout descriptor for the current object.
     fn register_layout(
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
         encoding: ObjectEncoding,
-        layout: &[LayoutField],
+        layout: &'a [LayoutField],
     ) -> Result<(), ZebinError>;
 }
