@@ -27,10 +27,7 @@ pub(crate) fn read_fixed<const N: usize>(
     Ok(out)
 }
 
-pub(crate) fn usize_to_u32<E>(
-    value: usize,
-    on_err: impl FnOnce() -> E,
-) -> Result<u32, E> {
+pub(crate) fn usize_to_u32<E>(value: usize, on_err: impl FnOnce() -> E) -> Result<u32, E> {
     u32::try_from(value).map_err(|_| on_err())
 }
 
@@ -42,10 +39,7 @@ pub(crate) fn usize_to_nonzero_u32<E>(
     NonZeroU32::new(usize_to_u32(value, on_range_err)?).ok_or_else(on_zero_err)
 }
 
-pub(crate) fn u32_to_usize<E>(
-    value: u32,
-    on_err: impl FnOnce() -> E,
-) -> Result<usize, E> {
+pub(crate) fn u32_to_usize<E>(value: u32, on_err: impl FnOnce() -> E) -> Result<usize, E> {
     usize::try_from(value).map_err(|_| on_err())
 }
 

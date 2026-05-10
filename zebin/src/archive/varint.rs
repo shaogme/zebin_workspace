@@ -472,11 +472,18 @@ impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
 
         let archived = unsafe { &*ptr };
         if archived.len > 0 {
-            let data_ptr = archived.data_ptr.as_ref().ok_or_else(|| guard.validation_error("Null data pointer in non-empty ArchivedVarIntVec", ptr as usize))?;
-            let offsets_ptr = archived
-                .offsets_ptr
-                .as_ref()
-                .ok_or_else(|| guard.validation_error("Null offsets pointer in non-empty ArchivedVarIntVec", ptr as usize))?;
+            let data_ptr = archived.data_ptr.as_ref().ok_or_else(|| {
+                guard.validation_error(
+                    "Null data pointer in non-empty ArchivedVarIntVec",
+                    ptr as usize,
+                )
+            })?;
+            let offsets_ptr = archived.offsets_ptr.as_ref().ok_or_else(|| {
+                guard.validation_error(
+                    "Null offsets pointer in non-empty ArchivedVarIntVec",
+                    ptr as usize,
+                )
+            })?;
 
             unsafe {
                 guard.check_range(

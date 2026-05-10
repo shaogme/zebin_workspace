@@ -68,17 +68,19 @@ impl Validate for ArchivedString {
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
 
-        let len = u32_to_usize(archived.len, || guard.validation_error("ArchivedString length exceeds usize range", ptr as usize))?;
+        let len = u32_to_usize(archived.len, || {
+            guard.validation_error("ArchivedString length exceeds usize range", ptr as usize)
+        })?;
         if len > 0 {
-            let data_ptr = archived
-                .ptr
-                .as_ref()
-                .ok_or_else(|| guard.validation_error("Null pointer in non-empty ArchivedString", ptr as usize))?;
+            let data_ptr = archived.ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null pointer in non-empty ArchivedString", ptr as usize)
+            })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
             guard.check_range(data_ptr, len)?;
 
             let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
-            str::from_utf8(bytes).map_err(|_| guard.validation_error("Invalid UTF-8 sequence", data_ptr as usize))?;
+            str::from_utf8(bytes)
+                .map_err(|_| guard.validation_error("Invalid UTF-8 sequence", data_ptr as usize))?;
         }
 
         Ok(())

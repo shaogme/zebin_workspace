@@ -87,9 +87,7 @@ fn test_invalid_enum_discriminant() {
 
     let err = zebin::validate::<UnitMode>(&buf).unwrap_err();
     match err {
-        ZebinError::Access(zebin::ValidateError::ValidationError {
-            ..
-        }) => {}
+        ZebinError::Access(zebin::ValidateError::ValidationError { .. }) => {}
         other => panic!("expected validation error, got {other:?}"),
     }
 }

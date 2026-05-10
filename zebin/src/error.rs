@@ -1,6 +1,6 @@
+use crate::core::schema::{SchemaRevision, StableSchemaKey};
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
-use crate::core::schema::{StableSchemaKey, SchemaRevision};
 
 #[cfg(feature = "alloc")]
 use crate::alloc::{boxed::Box, vec::Vec};
@@ -325,7 +325,9 @@ impl core::fmt::Display for ValidateError {
                     expected, actual
                 )
             }
-            ValidateError::InvalidLayout { pos, .. } => write!(f, "invalid layout structure at {pos}"),
+            ValidateError::InvalidLayout { pos, .. } => {
+                write!(f, "invalid layout structure at {pos}")
+            }
             ValidateError::ValidationError { message, pos, .. } => {
                 write!(f, "validation error at {pos}: {message}")
             }

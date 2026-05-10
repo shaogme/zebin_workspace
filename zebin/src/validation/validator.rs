@@ -1,8 +1,8 @@
 use core::{marker::PhantomData, num::NonZeroUsize};
 
 use crate::{
-    error::ValidateError,
     core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
+    error::ValidateError,
     format::ArchiveHeader,
     read::ResolvedLayout,
     traits::ArchiveHeader as ArchiveHeaderTrait,
@@ -178,7 +178,11 @@ impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
         Validator::check_range(self, ptr, size)
     }
 
-    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ValidateError> {
+    fn check_alignment(
+        &self,
+        ptr: *const u8,
+        alignment: NonZeroUsize,
+    ) -> Result<(), ValidateError> {
         Validator::check_alignment(self, ptr, alignment)
     }
 

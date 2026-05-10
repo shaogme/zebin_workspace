@@ -1,6 +1,6 @@
 use crate::{
-    error::ValidateError,
     core::schema::{SchemaRevision, StableSchemaKey},
+    error::ValidateError,
     format::ArchiveHeader,
     read::ResolvedLayout,
     traits::ArchiveHeader as ArchiveHeaderTrait,
@@ -22,7 +22,8 @@ where
 
     fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ValidateError>;
 
-    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ValidateError>;
+    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize)
+    -> Result<(), ValidateError>;
 
     fn validation_error(&self, message: &'static str, pos: usize) -> ValidateError {
         ValidateError::ValidationError {

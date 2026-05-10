@@ -112,9 +112,10 @@ impl ByteSink for MeasureEncoder<'_> {
     }
 
     fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
-        self.pos = self.pos.checked_add(len).ok_or(ZebinError::ArithmeticOverflow {
-            pos: self.pos,
-        })?;
+        self.pos = self
+            .pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
         Ok(len)
     }
 }
@@ -173,12 +174,12 @@ impl<'a, 'b> ByteSink for SliceEncoder<'a, 'b> {
         let written = remaining.min(bytes.len());
         self.buf[self.written..self.written + written].copy_from_slice(&bytes[..written]);
         self.written += written;
-        self.archive_pos = self
-            .archive_pos
-            .checked_add(written)
-            .ok_or(ZebinError::ArithmeticOverflow {
-                pos: self.archive_pos,
-            })?;
+        self.archive_pos =
+            self.archive_pos
+                .checked_add(written)
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
         Ok(written)
     }
 
@@ -199,12 +200,12 @@ impl<'a, 'b> ByteSink for SliceEncoder<'a, 'b> {
             byteops::fill(&mut self.buf[self.written..self.written + written], 0);
             self.written += written;
         }
-        self.archive_pos = self
-            .archive_pos
-            .checked_add(written)
-            .ok_or(ZebinError::ArithmeticOverflow {
-                pos: self.archive_pos,
-            })?;
+        self.archive_pos =
+            self.archive_pos
+                .checked_add(written)
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
         Ok(written)
     }
 }

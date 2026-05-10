@@ -96,76 +96,110 @@ where
 
 pub(crate) fn fill_layout_section_chunk(
     registry: &LayoutRegistry<'_>,
-    mut offset: usize,
+    start_offset: usize,
     out: &mut [u8],
 ) -> Result<(), ZebinError> {
+    let out_len = out.len();
+    if out_len == 0 {
+        return Ok(());
+    }
+
     let total_len = layout_section_len_registry(registry)?;
-    let mut written = 0;
+    if start_offset >= total_len {
+        return Ok(());
+    }
 
-    while written < out.len() && offset < total_len {
-        let byte = if offset < 4 {
-            // Layout count
-            let count = registry.count() as u32;
-            count.to_le_bytes()[offset]
-        } else if offset < 4 + registry.count() * 4 {
-            // Offset table
-            let table_offset = offset - 4;
-            let layout_idx = table_offset / 4;
-            let byte_idx = table_offset % 4;
+    let end_offset = start_offset + out_len;
+    let count = registry.count();
+    let table_start = 4;
+    let descriptors_start = table_start + count * 4;
 
-            let mut current_pos = 4 + registry.count() * 4;
-            for i in 0..layout_idx {
-                let layout = registry.get_layout(i).unwrap();
-                current_pos += 16 + layout.fields.len() * 8;
+    // 1. Layout count (4 bytes)
+    if start_offset < 4 {
+        let count_bytes = (count as u32).to_le_bytes();
+        let overlap_start = start_offset;
+        let overlap_end = end_offset.min(4);
+        let len = overlap_end - overlap_start;
+        out[0..len].copy_from_slice(&count_bytes[overlap_start..overlap_end]);
+    }
+
+    // 2. Offset table (count * 4 bytes)
+    if end_offset > table_start && start_offset < descriptors_start {
+        let mut current_descriptor_pos = descriptors_start;
+        for i in 0..count {
+            let entry_start = table_start + i * 4;
+            let entry_end = entry_start + 4;
+
+            if start_offset < entry_end && end_offset > entry_start {
+                let overlap_start = start_offset.max(entry_start);
+                let overlap_end = end_offset.min(entry_end);
+
+                let out_pos = overlap_start - start_offset;
+                let data_pos = overlap_start - entry_start;
+                let len = overlap_end - overlap_start;
+
+                let bytes = (current_descriptor_pos as u32).to_le_bytes();
+                out[out_pos..out_pos + len].copy_from_slice(&bytes[data_pos..data_pos + len]);
             }
-            (current_pos as u32).to_le_bytes()[byte_idx]
-        } else {
-            // Descriptors
-            let mut current_offset = 4 + registry.count() * 4;
-            let mut found_byte = None;
 
-            for i in 0..registry.count() {
-                let layout = registry.get_layout(i).unwrap();
-                let layout_len = 16 + layout.fields.len() * 8;
+            let layout = registry.get_layout(i).unwrap();
+            current_descriptor_pos += 16 + layout.fields.len() * 8;
+        }
+    }
 
-                if offset >= current_offset && offset < current_offset + layout_len {
-                    let rel_offset = offset - current_offset;
-                    if rel_offset < 4 {
-                        found_byte = Some(layout.stable_schema_key.to_le_bytes()[rel_offset]);
-                    } else if rel_offset < 8 {
-                        found_byte = Some(layout.schema_revision.to_le_bytes()[rel_offset - 4]);
-                    } else if rel_offset < 10 {
-                        let field_count = layout.fields.len() as u16;
-                        found_byte = Some(field_count.to_le_bytes()[rel_offset - 8]);
-                    } else if rel_offset == 10 {
-                        found_byte = Some(layout.encoding as u8);
-                    } else if rel_offset < 16 {
-                        found_byte = Some(0);
-                    } else {
-                        let field_rel = rel_offset - 16;
-                        let field_idx = field_rel / 8;
-                        let field_byte = field_rel % 8;
-                        let field = &layout.fields[field_idx];
-                        if field_byte < 2 {
-                            found_byte = Some(field.field_id.to_le_bytes()[field_byte]);
-                        } else if field_byte < 6 {
-                            found_byte = Some(field.offset.to_le_bytes()[field_byte - 2]);
-                        } else if field_byte == 6 {
-                            found_byte = Some(field.encoding as u8);
-                        } else {
-                            found_byte = Some(0);
+    // 3. Descriptors (variable length)
+    if end_offset > descriptors_start {
+        let mut current_pos = descriptors_start;
+        for i in 0..count {
+            let layout = registry.get_layout(i).unwrap();
+            let layout_len = 16 + layout.fields.len() * 8;
+            let layout_end = current_pos + layout_len;
+
+            if start_offset < layout_end && end_offset > current_pos {
+                // Header (16 bytes)
+                let header_end = current_pos + 16;
+                if start_offset < header_end && end_offset > current_pos {
+                    let mut header = [0u8; 16];
+                    header[0..4].copy_from_slice(&layout.stable_schema_key.to_le_bytes());
+                    header[4..8].copy_from_slice(&layout.schema_revision.to_le_bytes());
+                    header[8..10].copy_from_slice(&(layout.fields.len() as u16).to_le_bytes());
+                    header[10] = layout.encoding as u8;
+
+                    let overlap_start = start_offset.max(current_pos);
+                    let overlap_end = end_offset.min(header_end);
+                    let out_pos = overlap_start - start_offset;
+                    let data_pos = overlap_start - current_pos;
+                    let len = overlap_end - overlap_start;
+                    out[out_pos..out_pos + len].copy_from_slice(&header[data_pos..data_pos + len]);
+                }
+
+                // Fields (8 bytes per field)
+                let fields_start = current_pos + 16;
+                if end_offset > fields_start && start_offset < layout_end {
+                    for (f_idx, field) in layout.fields.iter().enumerate() {
+                        let field_start = fields_start + f_idx * 8;
+                        let field_end = field_start + 8;
+
+                        if start_offset < field_end && end_offset > field_start {
+                            let mut field_bytes = [0u8; 8];
+                            field_bytes[0..2].copy_from_slice(&field.field_id.to_le_bytes());
+                            field_bytes[2..6].copy_from_slice(&field.offset.to_le_bytes());
+                            field_bytes[6] = field.encoding as u8;
+
+                            let overlap_start = start_offset.max(field_start);
+                            let overlap_end = end_offset.min(field_end);
+                            let out_pos = overlap_start - start_offset;
+                            let data_pos = overlap_start - field_start;
+                            let len = overlap_end - overlap_start;
+                            out[out_pos..out_pos + len]
+                                .copy_from_slice(&field_bytes[data_pos..data_pos + len]);
                         }
                     }
-                    break;
                 }
-                current_offset += layout_len;
             }
-            found_byte.unwrap_or(0)
-        };
 
-        out[written] = byte;
-        written += 1;
-        offset += 1;
+            current_pos = layout_end;
+        }
     }
     Ok(())
 }

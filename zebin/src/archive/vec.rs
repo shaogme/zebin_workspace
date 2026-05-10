@@ -149,16 +149,17 @@ where
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
 
-        let len = u32_to_usize(archived.len, || guard.validation_error("ArchivedVec length exceeds usize range", ptr as usize))?;
+        let len = u32_to_usize(archived.len, || {
+            guard.validation_error("ArchivedVec length exceeds usize range", ptr as usize)
+        })?;
         if len > 0 {
-            let data_ptr = archived
-                .ptr
-                .as_ref()
-                .ok_or_else(|| guard.validation_error("Null pointer in non-empty ArchivedVec", ptr as usize))?;
-            let data_ptr = unsafe { data_ptr.as_ptr() };
-            let total_size = len.checked_mul(core::mem::size_of::<T>()).ok_or_else(|| {
-                guard.validation_error("ArchivedVec size overflow", ptr as usize)
+            let data_ptr = archived.ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null pointer in non-empty ArchivedVec", ptr as usize)
             })?;
+            let data_ptr = unsafe { data_ptr.as_ptr() };
+            let total_size = len
+                .checked_mul(core::mem::size_of::<T>())
+                .ok_or_else(|| guard.validation_error("ArchivedVec size overflow", ptr as usize))?;
             guard.check_range(data_ptr as *const u8, total_size)?;
             guard.check_alignment(data_ptr as *const u8, T::ALIGNMENT)?;
 

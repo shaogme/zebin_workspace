@@ -16,13 +16,14 @@ use crate::{
 };
 
 fn packed_byte_len(value_count: usize, bits_per_value: usize) -> Result<usize, ValidateError> {
-    let total_bits = value_count
-        .checked_mul(bits_per_value)
-        .ok_or(ValidateError::ValidationError {
-            message: "Packed length calculation overflow",
-            pos: 0,
-            path: Default::default(),
-        })?;
+    let total_bits =
+        value_count
+            .checked_mul(bits_per_value)
+            .ok_or(ValidateError::ValidationError {
+                message: "Packed length calculation overflow",
+                pos: 0,
+                path: Default::default(),
+            })?;
     Ok(total_bits.div_ceil(8))
 }
 
@@ -182,15 +183,21 @@ impl Validate for ArchivedPackedBoolSlice {
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
-        let len = u32_to_usize(archived.len, || guard.validation_error("Archived packed bool length exceeds usize range", ptr as usize))?;
+        let len = u32_to_usize(archived.len, || {
+            guard.validation_error(
+                "Archived packed bool length exceeds usize range",
+                ptr as usize,
+            )
+        })?;
 
         if len > 0 {
-            let data_ptr = archived
-                .ptr
-                .as_ref()
-                .ok_or_else(|| guard.validation_error("Null pointer in non-empty packed bool slice", ptr as usize))?;
+            let data_ptr = archived.ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null pointer in non-empty packed bool slice", ptr as usize)
+            })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
-            let packed_len = packed_byte_len(len, 1).map_err(|_| guard.validation_error("Packed bool byte length overflow", ptr as usize))?;
+            let packed_len = packed_byte_len(len, 1).map_err(|_| {
+                guard.validation_error("Packed bool byte length overflow", ptr as usize)
+            })?;
             guard.check_range(data_ptr, packed_len)?;
         }
 
@@ -284,13 +291,20 @@ impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
-        let len = u32_to_usize(archived.len, || guard.validation_error("Archived packed integer length exceeds usize range", ptr as usize))?;
+        let len = u32_to_usize(archived.len, || {
+            guard.validation_error(
+                "Archived packed integer length exceeds usize range",
+                ptr as usize,
+            )
+        })?;
 
         if len > 0 {
-            let data_ptr = archived
-                .ptr
-                .as_ref()
-                .ok_or_else(|| guard.validation_error("Null pointer in non-empty packed integer slice", ptr as usize))?;
+            let data_ptr = archived.ptr.as_ref().ok_or_else(|| {
+                guard.validation_error(
+                    "Null pointer in non-empty packed integer slice",
+                    ptr as usize,
+                )
+            })?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
             let packed_len = packed_byte_len(len, usize::from(BITS)).map_err(|_| {
                 guard.validation_error("Packed integer byte length overflow", ptr as usize)
@@ -307,7 +321,9 @@ impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
                 let bit_offset = index * usize::from(BITS);
                 let value = read_packed_bits(bytes, bit_offset, usize::from(BITS));
                 if value > max {
-                    return Err(guard.validation_error("Packed integer value out of range", ptr as usize));
+                    return Err(
+                        guard.validation_error("Packed integer value out of range", ptr as usize)
+                    );
                 }
             }
         }

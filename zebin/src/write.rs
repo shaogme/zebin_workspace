@@ -133,7 +133,8 @@ where
                             message: "Root offset mismatch during emission",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        }.into());
+                        }
+                        .into());
                     }
 
                     let resolver = resolver
@@ -151,7 +152,8 @@ where
                             message: "Root offset mismatch during root write",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        }.into());
+                        }
+                        .into());
                     }
 
                     let size = archived.size_hint();
@@ -175,7 +177,8 @@ where
                             message: "Layout offset mismatch during emission",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        }.into());
+                        }
+                        .into());
                     }
 
                     if encoder.layouts().count() != self.plan.layouts.count() {
@@ -183,7 +186,8 @@ where
                             message: "Layout registry diverged during emission",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        }.into());
+                        }
+                        .into());
                     }
 
                     self.phase = EncodePhase::Layout { cursor: 0 };
@@ -232,11 +236,12 @@ where
         let mut total_written = 0usize;
         while !self.is_finished() {
             let chunk = self.write(&mut out[total_written..])?;
-            total_written = total_written
-                .checked_add(chunk)
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
+            total_written =
+                total_written
+                    .checked_add(chunk)
+                    .ok_or(ZebinError::ArithmeticOverflow {
+                        pos: self.archive_pos,
+                    })?;
             if chunk == 0 && !self.is_finished() {
                 return Err(ZebinError::SerializationError {
                     pos: self.archive_pos,

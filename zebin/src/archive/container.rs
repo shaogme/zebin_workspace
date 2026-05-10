@@ -1,6 +1,6 @@
 use crate::{
-    error::ArchiveError,
     ZebinError,
+    error::ArchiveError,
     traits::{Archive, Serialize},
 };
 use alloc::{borrow::Cow, borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc};

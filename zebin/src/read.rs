@@ -51,10 +51,12 @@ where
         T::Archived: Layout + Validate,
     {
         let header = H::parse(bytes)?;
-        let root_pos = u32_to_usize(header.root_offset().get(), || ValidateError::ValidationError {
-            message: "Root offset exceeds usize range",
-            pos: 8,
-            path: Default::default(),
+        let root_pos = u32_to_usize(header.root_offset().get(), || {
+            ValidateError::ValidationError {
+                message: "Root offset exceeds usize range",
+                pos: 8,
+                path: Default::default(),
+            }
         })?;
         if root_pos < H::SIZE {
             return Err(ValidateError::ValidationError {

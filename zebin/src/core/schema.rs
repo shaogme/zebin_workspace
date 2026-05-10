@@ -143,22 +143,42 @@ impl<'a> LayoutView<'a> {
     }
 
     pub fn field_offset(&self, field_id: u16) -> Option<u32> {
-        for field in self.fields() {
-            if field.field_id == field_id {
-                return Some(field.offset);
+        let mut low = 0;
+        let mut high = self.field_count;
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let field_pos = self.entry_pos + 16 + mid * 8;
+
+            let mid_id = u16::from_le_bytes(
+                self.bytes[field_pos..field_pos + 2]
+                    .try_into()
+                    .expect("Layout field id out of bounds"),
+            );
+
+            if mid_id < field_id {
+                low = mid + 1;
+            } else if mid_id > field_id {
+                high = mid;
+            } else {
+                return Some(u32::from_le_bytes(
+                    self.bytes[field_pos + 2..field_pos + 6]
+                        .try_into()
+                        .expect("Layout field offset out of bounds"),
+                ));
             }
         }
         None
     }
 
     pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), ValidateError> {
-        let actual = self
-            .field_offset(field_id)
-            .ok_or_else(|| ValidateError::MissingLayoutField {
-                field_id,
-                pos: self.entry_pos,
-                path: Default::default(),
-            })?;
+        let actual =
+            self.field_offset(field_id)
+                .ok_or_else(|| ValidateError::MissingLayoutField {
+                    field_id,
+                    pos: self.entry_pos,
+                    path: Default::default(),
+                })?;
         if actual != expected {
             return Err(ValidateError::LayoutOffsetMismatch {
                 field_id,
@@ -360,13 +380,14 @@ fn parse_layout_section<'a>(
 ) -> Result<ParsedLayoutSection<'a>, ValidateError> {
     let section_offset = section_offset.get();
 
-    let header_end = section_offset
-        .checked_add(4)
-        .ok_or_else(|| ValidateError::ValidationError {
-            message: "Layout section header overflow",
-            pos: section_offset,
-            path: Default::default(),
-        })?;
+    let header_end =
+        section_offset
+            .checked_add(4)
+            .ok_or_else(|| ValidateError::ValidationError {
+                message: "Layout section header overflow",
+                pos: section_offset,
+                path: Default::default(),
+            })?;
     if header_end > bytes.len() {
         return Err(ValidateError::ValidationError {
             message: "Layout section header out of bounds",
@@ -389,97 +410,26 @@ fn parse_layout_section<'a>(
     )?;
 
     let offsets_pos = header_end;
-    let offsets_end = offsets_pos
-        .checked_add(
-            num_layouts
-                .checked_mul(4)
-                .ok_or_else(|| ValidateError::ValidationError {
+    let offsets_end =
+        offsets_pos
+            .checked_add(num_layouts.checked_mul(4).ok_or_else(|| {
+                ValidateError::ValidationError {
                     message: "Layout offset table overflow",
                     pos: section_offset,
                     path: Default::default(),
-                })?,
-        )
-        .ok_or_else(|| ValidateError::ValidationError {
-            message: "Layout offset table overflow",
-            pos: section_offset,
-            path: Default::default(),
-        })?;
+                }
+            })?)
+            .ok_or_else(|| ValidateError::ValidationError {
+                message: "Layout offset table overflow",
+                pos: section_offset,
+                path: Default::default(),
+            })?;
     if offsets_end > bytes.len() {
         return Err(ValidateError::ValidationError {
             message: "Layout offset table out of bounds",
             pos: offsets_pos,
             path: Default::default(),
         });
-    }
-
-    for layout_idx in 0..num_layouts {
-        let offset_pos = offsets_pos + layout_idx * 4;
-        let layout_rel_offset = u32_to_usize(
-            u32::from_le_bytes(read_fixed::<4>(bytes, offset_pos, "Layout offset entry")?),
-            || ValidateError::ValidationError {
-                message: "Layout offset entry exceeds usize range",
-                pos: offset_pos,
-                path: Default::default(),
-            },
-        )?;
-        let layout_pos = section_offset
-            .checked_add(layout_rel_offset)
-            .ok_or_else(|| ValidateError::ValidationError {
-                message: "Layout position overflow",
-                pos: offset_pos,
-                path: Default::default(),
-            })?;
-
-        let entry_header_len = 16;
-        let entry_header_end = layout_pos.checked_add(entry_header_len).ok_or_else(|| {
-            ValidateError::ValidationError {
-                message: "Layout entry overflow",
-                pos: layout_pos,
-                path: Default::default(),
-            }
-        })?;
-        if entry_header_end > bytes.len() {
-            return Err(ValidateError::ValidationError {
-                message: "Layout entry out of bounds",
-                pos: layout_pos,
-                path: Default::default(),
-            });
-        }
-
-        let field_count = usize::from(u16::from_le_bytes(read_fixed::<2>(
-            bytes,
-            layout_pos + 8,
-            "Layout field count",
-        )?));
-        let entry_size =
-            entry_header_len
-                .checked_add(field_count.checked_mul(8).ok_or_else(|| {
-                    ValidateError::ValidationError {
-                        message: "Layout field table overflow",
-                        pos: layout_pos,
-                        path: Default::default(),
-                    }
-                })?)
-                .ok_or_else(|| ValidateError::ValidationError {
-                    message: "Layout field table overflow",
-                    pos: layout_pos,
-                    path: Default::default(),
-                })?;
-        let entry_end =
-            layout_pos
-                .checked_add(entry_size)
-                .ok_or_else(|| ValidateError::ValidationError {
-                    message: "Layout entry overflow",
-                    pos: layout_pos,
-                    path: Default::default(),
-                })?;
-        if entry_end > bytes.len() {
-            return Err(ValidateError::ValidationError {
-                message: "Layout entry payload out of bounds",
-                pos: layout_pos,
-                path: Default::default(),
-            });
-        }
     }
 
     Ok(ParsedLayoutSection {
