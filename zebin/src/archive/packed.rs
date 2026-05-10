@@ -157,10 +157,11 @@ impl Layout for ArchivedPackedBoolSlice {
 }
 
 impl Validate for ArchivedPackedBoolSlice {
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        ptr: *const Self,
-        context: &mut C,
-    ) -> Result<(), ZebinError> {
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let mut guard = context.guard()?;
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
@@ -193,13 +194,17 @@ impl Validate for ArchivedPackedBoolSlice {
 impl<'a> Access<'a> for ArchivedPackedBoolSlice {
     type View = &'a Self;
 
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError> {
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as Validate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
@@ -262,10 +267,11 @@ impl<const BITS: u8> Layout for ArchivedPackedU8Slice<BITS> {
 }
 
 impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        ptr: *const Self,
-        context: &mut C,
-    ) -> Result<(), ZebinError> {
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let mut guard = context.guard()?;
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
@@ -317,13 +323,17 @@ impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
 impl<'a, const BITS: u8> Access<'a> for ArchivedPackedU8Slice<BITS> {
     type View = &'a Self;
 
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError> {
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as Validate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }

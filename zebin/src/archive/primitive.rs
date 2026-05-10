@@ -1,7 +1,7 @@
 use crate::{
     ZebinError,
     io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, Layout, Serialize, Validate},
+    traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Serialize, Validate},
     validation::context::ValidationContext,
 };
 use alloc::string::ToString;
@@ -67,18 +67,30 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl Validate for $t {}
+            impl Validate for $t {
+                unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ZebinError>
+                where
+                    H: ArchiveHeaderTrait,
+                    C: ValidationContext<H> + ?Sized,
+                {
+                    Ok(())
+                }
+            }
 
             impl<'a> Access<'a> for $t {
                 type View = &'a Self;
 
-                unsafe fn access<C: ValidationContext + ?Sized>(
+                unsafe fn access<H, C>(
                     ptr: *const u8,
                     context: &mut C,
-                ) -> Result<(Self::View, usize), ZebinError> {
+                ) -> Result<(Self::View, usize), ZebinError>
+                where
+                    H: crate::traits::ArchiveHeader,
+                    C: ValidationContext<H> + ?Sized,
+                {
                     context.check_range(ptr, core::mem::size_of::<Self>())?;
                     let typed_ptr = ptr as *const Self;
-                    unsafe { <$t as Validate>::validate(typed_ptr, context)?; }
+                    unsafe { <$t as Validate>::validate::<H, C>(typed_ptr, context)?; }
                     Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
                 }
             }
@@ -119,10 +131,11 @@ impl Layout for bool {
 }
 
 impl Validate for bool {
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        ptr: *const Self,
-        _context: &mut C,
-    ) -> Result<(), ZebinError> {
+    unsafe fn validate<H, C>(ptr: *const Self, _context: &mut C) -> Result<(), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let val = unsafe { *(ptr as *const u8) };
         if val > 1 {
             return Err(ZebinError::ValidationError {
@@ -137,14 +150,18 @@ impl Validate for bool {
 impl<'a> Access<'a> for bool {
     type View = &'a Self;
 
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError> {
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         context.check_range(ptr, core::mem::size_of::<Self>())?;
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as Validate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }

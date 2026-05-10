@@ -40,7 +40,7 @@ fn test_chunked_writer_resume() {
     };
 
     let expected = zebin::encode(&user).unwrap();
-    let mut writer = zebin::ArchiveWriter::new(&user).unwrap();
+    let mut writer = zebin::ZebinWriter::new(&user).unwrap();
     let mut actual = Vec::new();
     let mut chunk = [0u8; 5];
 

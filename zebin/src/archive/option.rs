@@ -62,10 +62,11 @@ impl<T> Validate for ArchivedOption<T>
 where
     T: Layout + Validate,
 {
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        ptr: *const Self,
-        context: &mut C,
-    ) -> Result<(), ZebinError> {
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let mut guard = context.guard()?;
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
@@ -79,7 +80,7 @@ where
                 path_guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
                 path_guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
                 unsafe {
-                    T::validate(value_ptr, &mut *path_guard)?;
+                    T::validate::<H, _>(value_ptr, &mut *path_guard)?;
                 }
                 Ok(())
             }
@@ -97,13 +98,17 @@ where
 {
     type View = &'a Self;
 
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError> {
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as Validate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }

@@ -2,9 +2,12 @@ pub mod encoder;
 pub mod plan;
 pub mod state;
 
+use core::marker::PhantomData;
+
 use crate::{
     error::ZebinError,
-    traits::{Archive, Layout},
+    format::ArchiveHeader,
+    traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Layout},
     write::{
         encoder::{LayoutRegistry, SliceEncoder},
         plan::{EncodePlan, measure_plan},
@@ -24,11 +27,13 @@ impl RootWriteState {
     }
 }
 
-enum EncodePhase<'a, T>
+enum EncodePhase<'a, T, H = ArchiveHeader>
 where
     T: Serialize + Archive + 'a,
+    H: ArchiveHeaderTrait,
 {
     Header {
+        bytes: H::Bytes,
         cursor: usize,
     },
     Body {
@@ -43,32 +48,42 @@ where
     Layout {
         cursor: usize,
     },
-    Done,
+    Done {
+        _phantom: PhantomData<H>,
+    },
 }
 
+pub type ZebinWriter<'a, T> = ArchiveWriter<'a, T, ArchiveHeader>;
+
 /// Stateful archive writer that can stream into caller-provided buffers.
-pub struct ArchiveWriter<'a, T>
+pub struct ArchiveWriter<'a, T, H = ArchiveHeader>
 where
     T: Serialize + Archive + 'a,
+    H: ArchiveHeaderTrait,
 {
     value: &'a T,
-    plan: EncodePlan,
+    plan: EncodePlan<H>,
     body_state: Option<<T as Serialize>::State<'a>>,
-    phase: EncodePhase<'a, T>,
+    phase: EncodePhase<'a, T, H>,
     archive_pos: usize,
     layouts: LayoutRegistry,
 }
 
-impl<'a, T> ArchiveWriter<'a, T>
+impl<'a, T, H> ArchiveWriter<'a, T, H>
 where
     T: Serialize + Archive + 'a,
+    H: ArchiveHeaderTrait,
 {
     pub fn new(value: &'a T) -> Result<Self, ZebinError> {
-        let plan = measure_plan(value)?;
+        let plan = measure_plan::<T, H>(value)?;
+        let header_bytes = plan.header.encode();
         Ok(Self {
             value,
             body_state: Some(value.begin_serialize()?),
-            phase: EncodePhase::Header { cursor: 0 },
+            phase: EncodePhase::Header {
+                bytes: header_bytes,
+                cursor: 0,
+            },
             archive_pos: 0,
             layouts: LayoutRegistry::default(),
             plan,
@@ -84,7 +99,7 @@ where
     }
 
     pub fn is_finished(&self) -> bool {
-        matches!(self.phase, EncodePhase::Done)
+        matches!(self.phase, EncodePhase::Done { .. })
     }
 
     pub fn write(&mut self, out: &mut [u8]) -> Result<usize, ZebinError> {
@@ -96,10 +111,10 @@ where
         let mut encoder = SliceEncoder::new(out, self.archive_pos, &mut self.layouts);
         loop {
             match &mut self.phase {
-                EncodePhase::Header { cursor } => {
-                    let written = encoder.write(&self.plan.header_bytes[*cursor..])?;
+                EncodePhase::Header { bytes, cursor } => {
+                    let written = encoder.write(&bytes.as_ref()[*cursor..])?;
                     *cursor += written;
-                    if *cursor < self.plan.header_bytes.len() {
+                    if *cursor < bytes.as_ref().len() {
                         break;
                     }
                     let state = self
@@ -173,10 +188,12 @@ where
                     if *cursor < self.plan.layout_bytes.len() {
                         break;
                     }
-                    self.phase = EncodePhase::Done;
+                    self.phase = EncodePhase::Done {
+                        _phantom: PhantomData,
+                    };
                     break;
                 }
-                EncodePhase::Done => break,
+                EncodePhase::Done { .. } => break,
             }
         }
 
@@ -198,35 +215,25 @@ where
         }
         Ok(total_written)
     }
-}
 
-/// Create a chunked archive writer that can be resumed with caller-provided buffers.
-pub fn encode_chunked<T>(value: &T) -> Result<ArchiveWriter<'_, T>, ZebinError>
-where
-    T: Serialize + Archive,
-{
-    ArchiveWriter::new(value)
-}
+    /// Create a chunked archive writer.
+    pub fn encode_chunked(value: &'a T) -> Result<Self, ZebinError> {
+        Self::new(value)
+    }
 
-/// Archive a value into a newly allocated byte vector.
-pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
-where
-    T: Serialize + Archive,
-{
-    let mut writer = encode_chunked(value)?;
-    let mut buf = vec![0u8; writer.total_len()];
-    writer.write_all(&mut buf)?;
-    Ok(buf)
-}
+    /// Archive a value into a newly allocated byte vector.
+    pub fn encode(value: &'a T) -> Result<Vec<u8>, ZebinError> {
+        let mut writer = Self::encode_chunked(value)?;
+        let mut buf = vec![0u8; writer.total_len()];
+        writer.write_all(&mut buf)?;
+        Ok(buf)
+    }
 
-/// Archive a value into an existing vector, replacing its contents.
-pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
-where
-    T: Serialize + Archive,
-{
-    let mut writer = encode_chunked(value)?;
-    buf.clear();
-    buf.resize(writer.total_len(), 0);
-    writer.write_all(buf)?;
-    Ok(())
+    pub fn encode_into(value: &'a T, buf: &mut Vec<u8>) -> Result<(), ZebinError> {
+        let mut writer = Self::encode_chunked(value)?;
+        buf.clear();
+        buf.resize(writer.total_len(), 0);
+        writer.write_all(buf)?;
+        Ok(())
+    }
 }

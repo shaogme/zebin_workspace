@@ -5,26 +5,34 @@ use alloc::string::ToString;
 use crate::{
     ZebinError,
     core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
-    read::view::ResolvedLayout,
+    format::ArchiveHeader,
+    read::ResolvedLayout,
+    traits::ArchiveHeader as ArchiveHeaderTrait,
     validation::context::{ValidationContext, ValidationPathSegment},
 };
 
 /// Validator for byte streams to ensure safety before access.
-pub struct Validator<'a> {
+pub struct Validator<'a, H = ArchiveHeader>
+where
+    H: ArchiveHeaderTrait,
+{
     data: &'a [u8],
     layouts: Option<LayoutDirectory<'a>>,
-    cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a>)>,
+    cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a, H>)>,
     depth: usize,
     max_depth: usize,
     path: alloc::vec::Vec<ValidationPathSegment>,
 }
 
-pub struct DepthGuard<'v> {
-    context: *mut Validator<'v>,
-    _phantom: PhantomData<&'v mut Validator<'v>>,
+pub struct DepthGuard<'v, H = ArchiveHeader>
+where
+    H: ArchiveHeaderTrait,
+{
+    context: *mut Validator<'v, H>,
+    _phantom: PhantomData<&'v mut Validator<'v, H>>,
 }
 
-impl<'v> Drop for DepthGuard<'v> {
+impl<'v, H: ArchiveHeaderTrait> Drop for DepthGuard<'v, H> {
     fn drop(&mut self) {
         unsafe {
             (*self.context).pop_depth();
@@ -32,7 +40,7 @@ impl<'v> Drop for DepthGuard<'v> {
     }
 }
 
-impl<'a> Validator<'a> {
+impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
     pub fn new(data: &'a [u8]) -> Self {
         Self {
             data,
@@ -56,7 +64,7 @@ impl<'a> Validator<'a> {
     }
 
     /// Enter a nested validation scope and automatically unwind on drop.
-    pub fn enter(&mut self) -> Result<DepthGuard<'a>, ZebinError> {
+    pub fn enter(&mut self) -> Result<DepthGuard<'a, H>, ZebinError> {
         self.push_depth()?;
         Ok(DepthGuard {
             context: self as *mut _,
@@ -134,19 +142,19 @@ impl<'a> Validator<'a> {
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'a>, ZebinError> {
-        if let Some((cached_key, cached_revision, resolved)) = self.cached_layout
-            && cached_key == stable_schema_key
-            && cached_revision == schema_revision
+    ) -> Result<ResolvedLayout<'a, H>, ZebinError> {
+        if let Some((cached_key, cached_revision, resolved)) = &self.cached_layout
+            && *cached_key == stable_schema_key
+            && *cached_revision == schema_revision
         {
-            return Ok(resolved);
+            return Ok(*resolved);
         }
 
         let layouts = self.layouts.ok_or_else(|| ZebinError::ValidationError {
             message: "Missing layout directory".to_string(),
             pos: 0,
         })?;
-        let header = crate::format::ArchiveHeader::parse(self.data)?;
+        let header = H::parse(self.data)?;
         let layout = layouts.lookup(stable_schema_key, schema_revision)?;
         let resolved = ResolvedLayout::from_parts(self.data, header, layout);
         self.cached_layout = Some((stable_schema_key, schema_revision, resolved));
@@ -154,7 +162,7 @@ impl<'a> Validator<'a> {
     }
 }
 
-impl<'a> ValidationContext for Validator<'a> {
+impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
     fn push_depth(&mut self) -> Result<(), ZebinError> {
         Validator::push_depth(self)
     }
@@ -187,7 +195,7 @@ impl<'a> ValidationContext for Validator<'a> {
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'a>, ZebinError> {
+    ) -> Result<ResolvedLayout<'a, H>, ZebinError> {
         Validator::resolved_layout(self, stable_schema_key, schema_revision)
     }
 }

@@ -235,7 +235,7 @@ fn helper_bytes_impl(
             {
                 let mut path_guard = guard.push_path_segment(zebin::ValidationPathSegment::Field(stringify!(#path_name)))?;
                 let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
-                unsafe { <#ty as zebin::Validate>::validate(field_ptr, &mut *path_guard)?; }
+                unsafe { <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *path_guard)?; }
             }
         }
     });
@@ -255,10 +255,14 @@ fn helper_bytes_impl(
         }
 
         impl zebin::Validate for #archived_name {
-            unsafe fn validate<C: zebin::ValidationContext + ?Sized>(
+            unsafe fn validate<H, C>(
                 ptr: *const Self,
                 context: &mut C,
-            ) -> Result<(), zebin::ZebinError> {
+            ) -> Result<(), zebin::ZebinError>
+            where
+                H: zebin::ArchiveHeaderTrait,
+                C: zebin::ValidationContext<H> + ?Sized,
+            {
                 let mut guard = context.guard()?;
                 guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
                 guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
@@ -271,12 +275,16 @@ fn helper_bytes_impl(
         impl<'a> zebin::Access<'a> for #archived_name {
             type View = &'a Self;
 
-            unsafe fn access<C: zebin::ValidationContext + ?Sized>(
+            unsafe fn access<H, C>(
                 ptr: *const u8,
                 context: &mut C,
-            ) -> Result<(Self::View, usize), zebin::ZebinError> {
+            ) -> Result<(Self::View, usize), zebin::ZebinError>
+            where
+                H: zebin::ArchiveHeaderTrait,
+                C: zebin::ValidationContext<H> + ?Sized,
+            {
                 let typed_ptr = ptr as *const Self;
-                unsafe { <Self as zebin::Validate>::validate(typed_ptr, context)?; }
+                unsafe { <Self as zebin::Validate>::validate::<H, C>(typed_ptr, context)?; }
                 Ok((unsafe { &*typed_ptr }, ::core::mem::size_of::<Self>()))
             }
         }
@@ -473,7 +481,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             #idx_lit => {
                 let mut path_guard = guard.push_path_segment(zebin::ValidationPathSegment::Variant(stringify!(#variant_ident)))?;
                 let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                unsafe { #helper_name::validate(ptr, &mut *path_guard)?; }
+                unsafe { <#helper_name as zebin::Validate>::validate::<H, _>(ptr, &mut *path_guard)?; }
             }
         });
 
@@ -603,10 +611,14 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             }
 
             impl zebin::Validate for #archived_name {
-                unsafe fn validate<C: zebin::ValidationContext + ?Sized>(
+                unsafe fn validate<H, C>(
                     ptr: *const Self,
                     context: &mut C,
-                ) -> Result<(), zebin::ZebinError> {
+                ) -> Result<(), zebin::ZebinError>
+                where
+                    H: zebin::ArchiveHeaderTrait,
+                    C: zebin::ValidationContext<H> + ?Sized,
+                {
                     let mut guard = context.guard()?;
                     guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
                     guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
@@ -636,10 +648,14 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             }
 
             impl zebin::Validate for #archived_name {
-                unsafe fn validate<C: zebin::ValidationContext + ?Sized>(
+                unsafe fn validate<H, C>(
                     ptr: *const Self,
                     context: &mut C,
-                ) -> Result<(), zebin::ZebinError> {
+                ) -> Result<(), zebin::ZebinError>
+                where
+                    H: zebin::ArchiveHeaderTrait,
+                    C: zebin::ValidationContext<H> + ?Sized,
+                {
                     let mut guard = context.guard()?;
                     guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
                     guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
@@ -674,12 +690,16 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         impl<'a> zebin::Access<'a> for #archived_name {
             type View = &'a Self;
 
-            unsafe fn access<C: zebin::ValidationContext + ?Sized>(
+            unsafe fn access<H, C>(
                 ptr: *const u8,
                 context: &mut C,
-            ) -> Result<(Self::View, usize), zebin::ZebinError> {
+            ) -> Result<(Self::View, usize), zebin::ZebinError>
+            where
+                H: zebin::ArchiveHeaderTrait,
+                C: zebin::ValidationContext<H> + ?Sized,
+            {
                 let typed_ptr = ptr as *const Self;
-                unsafe { <Self as zebin::Validate>::validate(typed_ptr, context)?; }
+                unsafe { <Self as zebin::Validate>::validate::<H, C>(typed_ptr, context)?; }
                 Ok((unsafe { &*typed_ptr }, ::core::mem::size_of::<Self>()))
             }
         }

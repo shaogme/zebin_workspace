@@ -4,6 +4,7 @@ use core::num::NonZeroUsize;
 use crate::core::schema::ObjectEncoding;
 use crate::error::ZebinError;
 use crate::validation::context::ValidationContext;
+use core::num::NonZeroU32;
 
 /// Archived-side binary layout contract.
 pub trait Layout: Sized {
@@ -29,18 +30,44 @@ pub trait Layout: Sized {
     }
 }
 
+/// Archive format header contract.
+pub trait ArchiveHeader: Layout + Clone + Copy {
+    /// Fixed-size byte array type for the header.
+    type Bytes: AsRef<[u8]> + Copy + Send + Sync;
+
+    /// Magic bytes for the archive format.
+    const MAGIC: [u8; 2];
+    /// Format version.
+    const VERSION: u8;
+    /// Fixed size of the header in bytes.
+    const SIZE: usize;
+
+    /// Parse header from bytes.
+    fn parse(bytes: &[u8]) -> Result<Self, ZebinError>;
+
+    /// Encode header into its fixed-size byte representation.
+    fn encode(&self) -> Self::Bytes;
+
+    /// Create header instance from metadata.
+    fn create(flags: u8, layout_offset: NonZeroU32, root_offset: NonZeroU32) -> Self;
+
+    /// Get the layout section offset.
+    fn layout_offset(&self) -> NonZeroU32;
+
+    /// Get the root object offset.
+    fn root_offset(&self) -> NonZeroU32;
+}
+
 /// Archived-side validation contract.
 pub trait Validate {
     /// Validate an archived value in-place.
     ///
     /// # Safety
     /// The pointer must point to a valid memory location that can be read.
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        _ptr: *const Self,
-        _context: &mut C,
-    ) -> Result<(), ZebinError> {
-        Ok(())
-    }
+    unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ZebinError>
+    where
+        H: ArchiveHeader,
+        C: ValidationContext<H> + ?Sized;
 }
 
 /// Archived-side decode contract for borrowing a validated view from bytes.
@@ -53,10 +80,13 @@ pub trait Access<'a>: Sized {
     ///
     /// # Safety
     /// `ptr` must point to the first byte of a readable archived value at `context`'s current archive.
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>;
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: ArchiveHeader,
+        C: ValidationContext<H> + ?Sized;
 }
 
 /// Object model layer: type-level archive/serialize/validate contracts.
@@ -151,10 +181,11 @@ impl<T: Layout, const N: usize> Layout for [T; N] {
 }
 
 impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        ptr: *const Self,
-        context: &mut C,
-    ) -> Result<(), ZebinError> {
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    where
+        H: ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let mut guard = context.guard()?;
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
@@ -171,7 +202,7 @@ impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
             unsafe {
                 let mut path_guard =
                     guard.push_path_segment(ValidationPathSegment::Index(index))?;
-                T::validate(element_ptr, &mut *path_guard)?;
+                T::validate::<H, _>(element_ptr, &mut *path_guard)?;
             }
         }
 
@@ -185,13 +216,17 @@ where
 {
     type View = &'a Self;
 
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError> {
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as Validate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }

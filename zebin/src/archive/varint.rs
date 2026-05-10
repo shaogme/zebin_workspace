@@ -104,10 +104,11 @@ macro_rules! impl_varint_number {
         }
 
         impl Validate for $archived {
-            unsafe fn validate<C: ValidationContext + ?Sized>(
-                ptr: *const Self,
-                context: &mut C,
-            ) -> Result<(), ZebinError> {
+            unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+            where
+                H: crate::traits::ArchiveHeader,
+                C: ValidationContext<H> + ?Sized,
+            {
                 let mut guard = context.guard()?;
                 guard.check_range(ptr as *const u8, $max_bytes)?;
                 Ok(())
@@ -117,13 +118,17 @@ macro_rules! impl_varint_number {
         impl<'a> Access<'a> for $archived {
             type View = &'a Self;
 
-            unsafe fn access<C: ValidationContext + ?Sized>(
+            unsafe fn access<H, C>(
                 ptr: *const u8,
                 context: &mut C,
-            ) -> Result<(Self::View, usize), ZebinError> {
+            ) -> Result<(Self::View, usize), ZebinError>
+            where
+                H: crate::traits::ArchiveHeader,
+                C: ValidationContext<H> + ?Sized,
+            {
                 let typed_ptr = ptr as *const Self;
                 unsafe {
-                    <Self as Validate>::validate(typed_ptr, context)?;
+                    <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
                 }
                 Ok((unsafe { &*typed_ptr }, $max_bytes))
             }
@@ -192,10 +197,12 @@ fn encode_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-fn decode_u64<T: VarIntNumber, C: ValidationContext + ?Sized>(
-    bytes: *const u8,
-    context: &mut C,
-) -> Result<(T, usize), ZebinError> {
+fn decode_u64<T, H, C>(bytes: *const u8, context: &mut C) -> Result<(T, usize), ZebinError>
+where
+    T: VarIntNumber,
+    H: crate::traits::ArchiveHeader,
+    C: ValidationContext<H> + ?Sized,
+{
     let mut guard = context.guard()?;
     let mut value = 0u64;
     let mut shift = 0u32;
@@ -247,11 +254,12 @@ impl<T> Validate for VarInt<T>
 where
     T: VarIntNumber,
 {
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        ptr: *const Self,
-        context: &mut C,
-    ) -> Result<(), ZebinError> {
-        let (view, _) = unsafe { <Self as Access>::access(ptr as *const u8, context)? };
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
+        let (view, _) = unsafe { <Self as Access>::access::<H, C>(ptr as *const u8, context)? };
         let _ = view.get();
         Ok(())
     }
@@ -263,11 +271,15 @@ where
 {
     type View = VarIntView<T>;
 
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError> {
-        let (value, consumed) = decode_u64::<T, C>(ptr, context)?;
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
+        let (value, consumed) = decode_u64::<T, H, C>(ptr, context)?;
         Ok((VarIntView { value }, consumed))
     }
 }
@@ -453,10 +465,11 @@ impl<T: VarIntNumber> Layout for ArchivedVarIntVec<T> {
 }
 
 impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
-    unsafe fn validate<C: ValidationContext + ?Sized>(
-        ptr: *const Self,
-        context: &mut C,
-    ) -> Result<(), ZebinError> {
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let mut guard = context.guard()?;
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
@@ -489,13 +502,17 @@ impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
 impl<'a, T: VarIntNumber + 'a> Access<'a> for ArchivedVarIntVec<T> {
     type View = &'a Self;
 
-    unsafe fn access<C: ValidationContext + ?Sized>(
+    unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError> {
+    ) -> Result<(Self::View, usize), ZebinError>
+    where
+        H: crate::traits::ArchiveHeader,
+        C: ValidationContext<H> + ?Sized,
+    {
         let typed_ptr = ptr as *const Self;
         unsafe {
-            <Self as Validate>::validate(typed_ptr, context)?;
+            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }

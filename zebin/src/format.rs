@@ -2,12 +2,16 @@ use core::num::NonZeroU32;
 
 use alloc::{format, string::ToString};
 
-use crate::{ZebinError, utils::num::read_fixed};
+use crate::{
+    ZebinError,
+    traits::{ArchiveHeader as ArchiveHeaderTrait, Layout},
+    utils::num::read_fixed,
+};
+use core::num::NonZeroUsize;
 
 /// Archive format constants and header utilities.
 pub const ARCHIVE_MAGIC: [u8; 2] = *b"ZB";
 pub const ARCHIVE_VERSION: u8 = 1;
-pub const ARCHIVE_HEADER_SIZE: usize = 12;
 
 /// Parsed archive header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,15 +36,35 @@ impl ArchiveHeader {
             root_offset,
         }
     }
+}
 
-    pub fn parse(bytes: &[u8]) -> Result<Self, ZebinError> {
-        if bytes.len() < ARCHIVE_HEADER_SIZE {
+impl Layout for ArchiveHeader {
+    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(4) };
+
+    fn size_hint(&self) -> usize {
+        Self::SIZE
+    }
+
+    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+        let bytes = Self::to_bytes(archived.flags, archived.layout_offset, archived.root_offset);
+        out[..Self::SIZE].copy_from_slice(&bytes);
+    }
+}
+
+impl ArchiveHeaderTrait for ArchiveHeader {
+    type Bytes = [u8; 12];
+    const MAGIC: [u8; 2] = ARCHIVE_MAGIC;
+    const VERSION: u8 = ARCHIVE_VERSION;
+    const SIZE: usize = 12;
+
+    fn parse(bytes: &[u8]) -> Result<Self, ZebinError> {
+        if bytes.len() < Self::SIZE {
             return Err(ZebinError::ValidationError {
                 message: "Header too short".to_string(),
                 pos: 0,
             });
         }
-        if bytes[0..2] != ARCHIVE_MAGIC {
+        if bytes[0..2] != Self::MAGIC {
             return Err(ZebinError::ValidationError {
                 message: "Invalid magic".to_string(),
                 pos: 0,
@@ -49,7 +73,7 @@ impl ArchiveHeader {
 
         let version = bytes[2];
         let flags = bytes[3];
-        if version != ARCHIVE_VERSION {
+        if version != Self::VERSION {
             return Err(ZebinError::ValidationError {
                 message: format!("Unsupported archive version {}", version),
                 pos: 2,
@@ -78,12 +102,26 @@ impl ArchiveHeader {
         Ok(Self::new(version, flags, layout_offset, root_offset))
     }
 
-    pub fn to_bytes(
-        flags: u8,
-        layout_offset: NonZeroU32,
-        root_offset: NonZeroU32,
-    ) -> [u8; ARCHIVE_HEADER_SIZE] {
-        let mut bytes = [0u8; ARCHIVE_HEADER_SIZE];
+    fn encode(&self) -> Self::Bytes {
+        Self::to_bytes(self.flags, self.layout_offset, self.root_offset)
+    }
+
+    fn create(flags: u8, layout_offset: NonZeroU32, root_offset: NonZeroU32) -> Self {
+        Self::new(Self::VERSION, flags, layout_offset, root_offset)
+    }
+
+    fn layout_offset(&self) -> NonZeroU32 {
+        self.layout_offset
+    }
+
+    fn root_offset(&self) -> NonZeroU32 {
+        self.root_offset
+    }
+}
+
+impl ArchiveHeader {
+    pub fn to_bytes(flags: u8, layout_offset: NonZeroU32, root_offset: NonZeroU32) -> [u8; 12] {
+        let mut bytes = [0u8; 12];
         bytes[0..2].copy_from_slice(&ARCHIVE_MAGIC);
         bytes[2] = ARCHIVE_VERSION;
         bytes[3] = flags;

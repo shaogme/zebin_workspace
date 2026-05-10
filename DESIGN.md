@@ -18,7 +18,7 @@
 - `LayoutField`：单个字段的布局条目，包含 `field_id` 和 `offset`。
 - `LayoutDescriptor`：构建期的布局集合，用于去重。
 - `LayoutDirectory`：读取期的布局目录，用 `schema_id` 查找布局。
-- `ArchiveView<T>`：decode 后返回的安全视图，持有原始字节、头部和根对象借用。
+- `ZebinReader<T>`：decode 后返回的安全视图，持有原始字节、头部和根对象借用。
 
 ### 3. 当前二进制格式
 

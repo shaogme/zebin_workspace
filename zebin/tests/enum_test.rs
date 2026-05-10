@@ -1,4 +1,4 @@
-use zebin::{ArchiveHeader, ZebinArchive, ZebinError, ZebinSerialize};
+use zebin::{ArchiveHeader, ArchiveHeaderTrait, ZebinArchive, ZebinError, ZebinSerialize};
 
 #[derive(ZebinArchive, ZebinSerialize)]
 enum UnitMode {

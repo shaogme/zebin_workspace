@@ -4,28 +4,29 @@ use core::convert::TryFrom;
 use crate::{
     core::schema::LayoutDescriptor,
     error::ZebinError,
-    format::{ARCHIVE_HEADER_SIZE, ArchiveHeader},
-    traits::{Archive, Layout},
+    format::ArchiveHeader,
+    traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Layout},
     utils::num::{u32_to_usize, usize_to_nonzero_u32, usize_to_u32},
     write::{encoder::MeasureEncoder, state::Serialize, state::SerializeState},
 };
 
-pub(crate) struct EncodePlan {
+pub(crate) struct EncodePlan<H: ArchiveHeaderTrait = ArchiveHeader> {
     pub root_pos: usize,
     pub layout_pos: usize,
     pub total_len: usize,
-    pub header_bytes: [u8; ARCHIVE_HEADER_SIZE],
+    pub header: H,
     pub layout_bytes: Vec<u8>,
     pub layouts: Vec<LayoutDescriptor>,
 }
 
-pub(crate) fn measure_plan<T>(value: &T) -> Result<EncodePlan, ZebinError>
+pub(crate) fn measure_plan<T, H>(value: &T) -> Result<EncodePlan<H>, ZebinError>
 where
     T: Serialize + Archive,
+    H: ArchiveHeaderTrait,
 {
     use crate::io::sink::ByteSink;
 
-    let mut encoder = MeasureEncoder::new(ARCHIVE_HEADER_SIZE);
+    let mut encoder = MeasureEncoder::new(H::SIZE);
     let mut state = value.begin_serialize()?;
     let resolver = loop {
         match state.poll(&mut encoder)? {
@@ -77,7 +78,7 @@ where
         root_pos,
         layout_pos,
         total_len,
-        header_bytes: ArchiveHeader::to_bytes(
+        header: H::create(
             <T::Archived as Layout>::ENCODING as u8,
             layout_offset,
             root_offset,
