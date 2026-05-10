@@ -3,7 +3,7 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
+    traits::{Access, Archive, ArchivedDefault, Layout, Serialize, SerializeState, Validate},
     utils::byteops,
     validation::context::ValidationContext,
 };
@@ -108,6 +108,16 @@ where
             <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+    }
+}
+
+impl<T: 'static> ArchivedDefault for ArchivedOption<T> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedOption<()> = ArchivedOption {
+            tag: 0,
+            value: MaybeUninit::uninit(),
+        };
+        unsafe { &*(&DEFAULT as *const ArchivedOption<()> as *const ArchivedOption<T>) }
     }
 }
 

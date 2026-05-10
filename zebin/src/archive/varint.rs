@@ -3,7 +3,7 @@ use core::{num::NonZeroUsize, ops::Deref};
 use crate::{
     core::schema::ObjectEncoding,
     error::{AccessError, ArchiveError, ValidateError},
-    traits::{Access, Archive, Layout, Validate},
+    traits::{Access, Archive, ArchivedDefault, Layout, Validate},
     validation::context::ValidationContext,
 };
 
@@ -84,6 +84,15 @@ macro_rules! impl_varint_number {
                     shift += 7;
                 }
                 value as $t
+            }
+        }
+
+        impl ArchivedDefault for $archived {
+            fn archived_default() -> &'static Self {
+                static DEFAULT: $archived = $archived {
+                    bytes: [0u8; $max_bytes],
+                };
+                &DEFAULT
             }
         }
 

@@ -3,7 +3,7 @@ use core::num::NonZeroUsize;
 use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError},
-    traits::{Access, Archive, Layout, Validate},
+    traits::{Access, Archive, ArchivedDefault, Layout, Validate},
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
@@ -79,6 +79,13 @@ impl ArchivedPackedBoolSlice {
             .as_ref()
             .expect("non-empty packed bool slice must have a pointer");
         unsafe { core::slice::from_raw_parts(ptr.as_ptr(), byte_len) }
+    }
+}
+
+impl ArchivedDefault for ArchivedPackedBoolSlice {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedPackedBoolSlice = ArchivedPackedBoolSlice { ptr: None, len: 0 };
+        &DEFAULT
     }
 }
 
@@ -186,6 +193,15 @@ impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
             .as_ref()
             .expect("non-empty packed integer slice must have a pointer");
         unsafe { core::slice::from_raw_parts(ptr.as_ptr(), byte_len) }
+    }
+}
+
+impl<const BITS: u8> ArchivedDefault for ArchivedPackedU8Slice<BITS> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedPackedU8Slice<8> = ArchivedPackedU8Slice { ptr: None, len: 0 };
+        unsafe {
+            &*(&DEFAULT as *const ArchivedPackedU8Slice<8> as *const ArchivedPackedU8Slice<BITS>)
+        }
     }
 }
 

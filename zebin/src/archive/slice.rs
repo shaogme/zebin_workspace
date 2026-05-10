@@ -3,7 +3,7 @@ use core::num::NonZeroUsize;
 use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError},
-    traits::{Access, Archive, Layout, Validate},
+    traits::{Access, Archive, ArchivedDefault, Layout, Validate},
     utils::num::{u32_to_usize, usize_to_u32},
     validation::context::ValidationContext,
 };
@@ -79,6 +79,13 @@ impl<T> ArchivedVec<T> {
     /// Check if the vector is empty.
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+impl<T: 'static> ArchivedDefault for ArchivedVec<T> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedVec<()> = ArchivedVec { ptr: None, len: 0 };
+        unsafe { &*(&DEFAULT as *const ArchivedVec<()> as *const ArchivedVec<T>) }
     }
 }
 

@@ -6,7 +6,7 @@ use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
+    traits::{Access, Archive, ArchivedDefault, Layout, Serialize, SerializeState, Validate},
     validation::context::ValidationContext,
 };
 
@@ -90,6 +90,18 @@ impl<T: VarIntNumber> ArchivedVarIntVec<T> {
             vec: self,
             index: 0,
         }
+    }
+}
+
+impl<T: 'static> ArchivedDefault for ArchivedVarIntVec<T> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedVarIntVec<()> = ArchivedVarIntVec {
+            data_ptr: None,
+            offsets_ptr: None,
+            len: 0,
+            _marker: core::marker::PhantomData,
+        };
+        unsafe { &*(&DEFAULT as *const ArchivedVarIntVec<()> as *const ArchivedVarIntVec<T>) }
     }
 }
 

@@ -142,25 +142,27 @@ fn record_layout_checks_logic(
         .map(|(index, field)| {
             let field_id = field.field_id.expect("field ids are validated above");
             let member = record_field_member(record, index);
+
+            let on_missing = if field.optional || field.default || field.default_value.is_some() {
+                quote! {}
+            } else {
+                quote! {
+                    return Err(zebin::ValidateError::MissingLayoutField {
+                        field_id: #field_id,
+                        pos: ptr as usize,
+                    });
+                }
+            };
+
             quote! {
                 {
-                    let expected = zebin::memoffset::offset_of!(#archived_name, #member) as u32;
-                    let actual = match layout.field_offset(#field_id) {
-                        Some(actual) => actual,
-                        None => {
-                            return Err(zebin::ValidateError::MissingLayoutField {
-                                field_id: #field_id,
-                                pos: ptr as usize,
-                            });
+                    let layout = guard.resolved_layout(#stable_schema_key, #schema_revision)?;
+                    if let Some(actual_offset) = layout.field_offset(#field_id) {
+                        if layout.schema_revision() == #schema_revision {
+                            layout.layout().check_field(#field_id, zebin::memoffset::offset_of!(#archived_name, #member) as u32)?;
                         }
-                    };
-                    if actual != expected {
-                        return Err(zebin::ValidateError::LayoutOffsetMismatch {
-                            field_id: #field_id,
-                            expected,
-                            actual,
-                            pos: ptr as usize,
-                        });
+                    } else {
+                        #on_missing
                     }
                 }
             }
@@ -168,13 +170,14 @@ fn record_layout_checks_logic(
         .collect();
 
     quote! {
-        let layout = guard.resolved_layout(#stable_schema_key, #schema_revision)?;
-        let layout = layout.layout();
         #(#checks)*
     }
 }
 
 fn record_field_validations(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
+    let stable_schema_key = record.stable_schema_key;
+    let schema_revision = record.schema_revision;
+
     record
         .fields
         .iter()
@@ -189,13 +192,31 @@ fn record_field_validations(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenSt
             };
             let member = record_field_member(record, index);
             let path_name = record_field_method_name(record, index);
-            quote! {
-                {
-                    let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
+            let field_id = field.field_id;
+
+            if let Some(field_id) = field_id {
+                let stable_schema_key = stable_schema_key.expect("schema-aware fields require stable_schema_key");
+                quote! {
                     {
-                        let mut guard = guard.push_field(stringify!(#path_name));
-                        unsafe {
-                            <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *guard)?;
+                        let offset = guard.resolved_layout(#stable_schema_key, #schema_revision)?.field_offset(#field_id);
+                        if let Some(offset) = offset {
+                            let field_ptr = unsafe { (ptr as *const u8).add(offset as usize) as *const #ty };
+                            let mut guard = guard.push_field(stringify!(#path_name));
+                            unsafe {
+                                <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *guard)?;
+                            }
+                        }
+                    }
+                }
+            } else {
+                quote! {
+                    {
+                        let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
+                        {
+                            let mut guard = guard.push_field(stringify!(#path_name));
+                            unsafe {
+                                <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *guard)?;
+                            }
                         }
                     }
                 }
@@ -227,19 +248,54 @@ fn helper_accessors(
                 let ty = field.ty;
                 quote! { <#ty as zebin::Archive>::Archived }
             };
-            quote! {
-            pub unsafe fn #method<'a>(
-                &'a self,
-                layout: &'a zebin::ResolvedLayout<'a>,
-            ) -> Result<&'a #ty, zebin::ValidateError> {
-                let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ValidateError::MissingLayoutField {
-                    field_id: #field_id,
-                    pos: self as *const _ as usize,
-                })?;
-                let base = self as *const _ as *const u8;
-                Ok(&*(((base.add(offset as usize)) as *const #ty)))
+            if field.optional {
+                quote! {
+                pub unsafe fn #method<'a>(
+                    &'a self,
+                    layout: &'a zebin::ResolvedLayout<'a>,
+                ) -> Result<Option<&'a #ty>, zebin::ValidateError> {
+                    let offset = match layout.field_offset(#field_id) {
+                        Some(offset) => offset,
+                        None => return Ok(None),
+                    };
+                    let base = self as *const _ as *const u8;
+                    Ok(Some(&*(((base.add(offset as usize)) as *const #ty))))
+                }
+                }
+            } else if field.default || field.default_value.is_some() {
+                let default_expr = if let Some(expr) = &field.default_value {
+                    quote! { #expr }
+                } else {
+                    quote! { <#ty as zebin::ArchivedDefault>::archived_default() }
+                };
+                quote! {
+                pub unsafe fn #method<'a>(
+                    &'a self,
+                    layout: &'a zebin::ResolvedLayout<'a>,
+                ) -> Result<&'a #ty, zebin::ValidateError> {
+                    let offset = match layout.field_offset(#field_id) {
+                        Some(offset) => offset,
+                        None => return Ok(#default_expr),
+                    };
+                    let base = self as *const _ as *const u8;
+                    Ok(&*(((base.add(offset as usize)) as *const #ty)))
+                }
+                }
+            } else {
+                quote! {
+                pub unsafe fn #method<'a>(
+                    &'a self,
+                    layout: &'a zebin::ResolvedLayout<'a>,
+                ) -> Result<&'a #ty, zebin::ValidateError> {
+                    let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ValidateError::MissingLayoutField {
+                        field_id: #field_id,
+                        pos: self as *const _ as usize,
+                    })?;
+                    let base = self as *const _ as *const u8;
+                    Ok(&*(((base.add(offset as usize)) as *const #ty)))
+                }
+                }
             }
-        }
         });
 
     quote! {
@@ -271,6 +327,18 @@ fn helper_bytes_impl(
     let layout_checks = record_layout_checks_logic(record, archived_name);
     let field_validations = record_field_validations(record);
 
+    let fixed_range_check = if has_schema(record) {
+        quote! {}
+    } else {
+        quote! { guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?; }
+    };
+
+    let span_expr = if has_schema(record) {
+        quote! { 4 }
+    } else {
+        quote! { ::core::mem::size_of::<Self>() }
+    };
+
     quote! {
         impl zebin::Layout for #archived_name {
             const ALIGNMENT: ::core::num::NonZeroUsize = unsafe {
@@ -296,8 +364,7 @@ fn helper_bytes_impl(
             {
                 let mut guard = context.guard()?;
                 guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
-                guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
-                let archived = unsafe { &*ptr };
+                #fixed_range_check
                 #layout_checks
                 #(#field_validations)*
                 Ok(())
@@ -317,7 +384,7 @@ fn helper_bytes_impl(
             {
                 let typed_ptr = ptr as *const Self;
                 unsafe { <Self as zebin::Validate>::validate::<H, C>(typed_ptr, context)?; }
-                Ok((unsafe { &*typed_ptr }, ::core::mem::size_of::<Self>()))
+                Ok((unsafe { &*typed_ptr }, #span_expr))
             }
         }
     }
@@ -754,6 +821,13 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
 
     let root_validate = quote! {};
 
+    let has_schema_variants = variants.iter().any(|v| has_schema(&v.record));
+    let span_expr = if has_schema_variants {
+        quote! { 4 }
+    } else {
+        quote! { ::core::mem::size_of::<Self>() }
+    };
+
     let root_decode = quote! {
         impl<'a> zebin::Access<'a> for #archived_name {
             type View = &'a Self;
@@ -768,7 +842,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             {
                 let typed_ptr = ptr as *const Self;
                 unsafe { <Self as zebin::Validate>::validate::<H, C>(typed_ptr, context)?; }
-                Ok((unsafe { &*typed_ptr }, ::core::mem::size_of::<Self>()))
+                Ok((unsafe { &*typed_ptr }, #span_expr))
             }
         }
     };

@@ -23,6 +23,9 @@ pub struct FieldSpec<'a> {
     pub packed_bits: Option<u8>,
     pub skip: bool,
     pub rename: Option<Ident>,
+    pub optional: bool,
+    pub default: bool,
+    pub default_value: Option<syn::Expr>,
 }
 
 /// Specification of a struct or enum variant.
@@ -161,12 +164,18 @@ struct FieldAttrs {
     packed_bits: Option<u8>,
     skip: bool,
     rename: Option<Ident>,
+    optional: bool,
+    default: bool,
+    default_value: Option<syn::Expr>,
 }
 
 fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
     let mut field_id = None;
     let mut skip = false;
     let mut rename = None;
+    let mut optional = false;
+    let mut default = false;
+    let mut default_value = None;
 
     for attr in &field.attrs {
         if attr.path().is_ident("zebin") {
@@ -180,11 +189,20 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
             if let Some(name) = parse_name_value_str(tokens.clone(), "rename")? {
                 rename = Some(Ident::new(&name, field.span()));
             }
+            if let Some(expr_str) = parse_name_value_str(tokens.clone(), "default_value")? {
+                default_value = Some(syn::parse_str(&expr_str)?);
+            }
             let text = tokens.to_string();
             for part in text.split(',') {
                 let part = part.trim();
                 if part == "skip" || part == "skip_serializing" {
                     skip = true;
+                }
+                if part == "optional" {
+                    optional = true;
+                }
+                if part == "default" {
+                    default = true;
                 }
             }
         }
@@ -196,6 +214,9 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
         packed_bits,
         skip,
         rename,
+        optional,
+        default,
+        default_value,
     })
 }
 
@@ -470,6 +491,9 @@ fn parse_fields_named(fields: &FieldsNamed) -> Result<RecordSpec<'_>> {
             packed_bits: attrs.packed_bits,
             skip: attrs.skip,
             rename: attrs.rename,
+            optional: attrs.optional,
+            default: attrs.default,
+            default_value: attrs.default_value,
         });
     }
     Ok(RecordSpec {
@@ -492,6 +516,9 @@ fn parse_fields_unnamed(fields: &FieldsUnnamed) -> Result<RecordSpec<'_>> {
             packed_bits: attrs.packed_bits,
             skip: attrs.skip,
             rename: attrs.rename,
+            optional: attrs.optional,
+            default: attrs.default,
+            default_value: attrs.default_value,
         });
     }
     Ok(RecordSpec {

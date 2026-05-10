@@ -229,7 +229,6 @@ impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
     }
 }
 
-
 /// A single segment in a validation path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValidationPathSegment {

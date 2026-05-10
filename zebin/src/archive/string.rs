@@ -6,7 +6,7 @@ use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
+    traits::{Access, Archive, ArchivedDefault, Layout, Serialize, SerializeState, Validate},
     utils::{
         byteops,
         num::{u32_to_usize, usize_to_u32},
@@ -102,6 +102,13 @@ impl<'a> Access<'a> for ArchivedString {
             <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+    }
+}
+
+impl ArchivedDefault for ArchivedString {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedString = ArchivedString { ptr: None, len: 0 };
+        &DEFAULT
     }
 }
 

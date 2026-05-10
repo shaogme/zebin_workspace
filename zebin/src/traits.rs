@@ -96,6 +96,12 @@ pub trait Archive {
     ) -> Result<Self::Archived, ArchiveError>;
 }
 
+/// Contract for providing a static default archived value.
+pub trait ArchivedDefault {
+    /// Returns a reference to a static archived default value.
+    fn archived_default() -> &'static Self;
+}
+
 /// Re-export Serialize and SerializeState from write module.
 pub use crate::write::state::{Serialize, SerializeState};
 

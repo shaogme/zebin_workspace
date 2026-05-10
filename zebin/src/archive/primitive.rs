@@ -2,7 +2,10 @@ use crate::{
     ZebinError,
     error::{AccessError, ArchiveError, ValidateError},
     io::sink::{ByteSink, LayoutSink},
-    traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Serialize, Validate},
+    traits::{
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, Layout, Serialize,
+        Validate,
+    },
     validation::context::ValidationContext,
 };
 use core::num::NonZeroUsize;
@@ -116,6 +119,12 @@ macro_rules! impl_archive_for_primitive {
                     ))
                 }
             }
+            impl ArchivedDefault for $t {
+                fn archived_default() -> &'static Self {
+                    static DEFAULT: $t = 0 as $t;
+                    &DEFAULT
+                }
+            }
         )*
     };
 }
@@ -141,6 +150,12 @@ impl Validate for bool {
             return Err(context.validation_error("Invalid bool value", ptr as usize));
         }
         Ok(())
+    }
+}
+
+impl ArchivedDefault for bool {
+    fn archived_default() -> &'static Self {
+        &false
     }
 }
 
