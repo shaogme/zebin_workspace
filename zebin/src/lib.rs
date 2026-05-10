@@ -1,11 +1,3 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-
-#[cfg(not(any(feature = "no_std", feature = "std")))]
-compile_error!(
-    "Please enable at least one of the features: no_std or std. 
-	Use --no-default-features flag to disable default features when you need no_std."
-);
-
 #[cfg(feature = "alloc")]
 pub extern crate alloc;
 
