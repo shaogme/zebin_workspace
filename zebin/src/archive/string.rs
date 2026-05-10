@@ -4,7 +4,7 @@ use alloc::string::String;
 
 use crate::{
     core::rel_ptr::RelPtr,
-    error::ZebinError,
+    error::{AccessError, ArchiveError, ValidateError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::{
@@ -30,7 +30,7 @@ impl ArchivedString {
         if self.len == 0 {
             return "";
         }
-        let len = u32_to_usize(self.len, || ZebinError::ValidationError {
+        let len = u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "ArchivedString length exceeds usize range",
             pos: self as *const _ as usize,
             path: Default::default(),
@@ -58,7 +58,7 @@ impl Layout for ArchivedString {
 }
 
 impl Validate for ArchivedString {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -68,29 +68,17 @@ impl Validate for ArchivedString {
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
 
-        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "ArchivedString length exceeds usize range",
-            pos: ptr as usize,
-            path: Default::default(),
-        })?;
+        let len = u32_to_usize(archived.len, || guard.validation_error("ArchivedString length exceeds usize range", ptr as usize))?;
         if len > 0 {
             let data_ptr = archived
                 .ptr
                 .as_ref()
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty ArchivedString",
-                    pos: ptr as usize,
-                    path: Default::default(),
-                })?;
+                .ok_or_else(|| guard.validation_error("Null pointer in non-empty ArchivedString", ptr as usize))?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
             guard.check_range(data_ptr, len)?;
 
             let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
-            str::from_utf8(bytes).map_err(|_| ZebinError::ValidationError {
-                message: "Invalid UTF-8 sequence",
-                pos: data_ptr as usize,
-                path: Default::default(),
-            })?;
+            str::from_utf8(bytes).map_err(|_| guard.validation_error("Invalid UTF-8 sequence", data_ptr as usize))?;
         }
 
         Ok(())
@@ -103,7 +91,7 @@ impl<'a> Access<'a> for ArchivedString {
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -162,7 +150,7 @@ impl Archive for String {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         let ptr = if self.is_empty() {
             None
         } else {
@@ -170,7 +158,9 @@ impl Archive for String {
         };
         Ok(ArchivedString {
             ptr,
-            len: usize_to_u32(self.len(), || ZebinError::WriteError)?,
+            len: usize_to_u32(self.len(), || ArchiveError::LengthOverflow {
+                pos: archive_pos,
+            })?,
         })
     }
 }
@@ -194,7 +184,7 @@ impl Archive for str {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         let ptr = if self.is_empty() {
             None
         } else {
@@ -202,7 +192,9 @@ impl Archive for str {
         };
         Ok(ArchivedString {
             ptr,
-            len: usize_to_u32(self.len(), || ZebinError::WriteError)?,
+            len: usize_to_u32(self.len(), || ArchiveError::LengthOverflow {
+                pos: archive_pos,
+            })?,
         })
     }
 }

@@ -5,7 +5,7 @@ use wide::u8x16;
 
 use crate::{
     core::rel_ptr::RelPtr,
-    error::ZebinError,
+    error::{AccessError, ArchiveError, ValidateError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::{
@@ -15,10 +15,14 @@ use crate::{
     validation::context::ValidationContext,
 };
 
-fn packed_byte_len(value_count: usize, bits_per_value: usize) -> Result<usize, ZebinError> {
+fn packed_byte_len(value_count: usize, bits_per_value: usize) -> Result<usize, ValidateError> {
     let total_bits = value_count
         .checked_mul(bits_per_value)
-        .ok_or(ZebinError::WriteError)?;
+        .ok_or(ValidateError::ValidationError {
+            message: "Packed length calculation overflow",
+            pos: 0,
+            path: Default::default(),
+        })?;
     Ok(total_bits.div_ceil(8))
 }
 
@@ -35,10 +39,18 @@ fn read_packed_bits(bytes: &[u8], bit_offset: usize, bits_per_value: usize) -> u
 
 fn pack_small_values(values: &[u8], bits_per_value: usize) -> Result<Vec<u8>, ZebinError> {
     if bits_per_value == 0 || bits_per_value > 8 {
-        return Err(ZebinError::WriteError);
+        return Err(ZebinError::SerializationError {
+            pos: 0,
+            message: "Packed bits must be between 1 and 8",
+        });
     }
 
-    let out_len = packed_byte_len(values.len(), bits_per_value)?;
+    let out_len = packed_byte_len(values.len(), bits_per_value).map_err(|_| {
+        ZebinError::SerializationError {
+            pos: 0,
+            message: "Packed length calculation overflow",
+        }
+    })?;
     let mut out = vec![0u8; out_len];
     let mask = if bits_per_value == 8 {
         u8::MAX
@@ -48,12 +60,15 @@ fn pack_small_values(values: &[u8], bits_per_value: usize) -> Result<Vec<u8>, Ze
 
     for (index, &value) in values.iter().enumerate() {
         if value > mask {
-            return Err(ZebinError::WriteError);
+            return Err(ZebinError::SerializationError {
+                pos: index,
+                message: "Value exceeds packed bit capacity",
+            });
         }
 
         let bit_offset = index
             .checked_mul(bits_per_value)
-            .ok_or(ZebinError::WriteError)?;
+            .ok_or(ZebinError::ArithmeticOverflow { pos: index })?;
         let byte_index = bit_offset / 8;
         let bit_shift = bit_offset % 8;
         out[byte_index] |= value << bit_shift;
@@ -107,7 +122,7 @@ pub struct ArchivedPackedBoolSlice {
 
 impl ArchivedPackedBoolSlice {
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || ZebinError::ValidationError {
+        u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "Archived packed bool length exceeds usize range",
             pos: self as *const _ as usize,
             path: Default::default(),
@@ -158,7 +173,7 @@ impl Layout for ArchivedPackedBoolSlice {
 }
 
 impl Validate for ArchivedPackedBoolSlice {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -167,27 +182,15 @@ impl Validate for ArchivedPackedBoolSlice {
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
-        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "Archived packed bool length exceeds usize range",
-            pos: ptr as usize,
-            path: Default::default(),
-        })?;
+        let len = u32_to_usize(archived.len, || guard.validation_error("Archived packed bool length exceeds usize range", ptr as usize))?;
 
         if len > 0 {
             let data_ptr = archived
                 .ptr
                 .as_ref()
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty packed bool slice",
-                    pos: ptr as usize,
-                    path: Default::default(),
-                })?;
+                .ok_or_else(|| guard.validation_error("Null pointer in non-empty packed bool slice", ptr as usize))?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
-            let packed_len = packed_byte_len(len, 1).map_err(|_| ZebinError::ValidationError {
-                message: "Packed bool byte length overflow",
-                pos: ptr as usize,
-                path: Default::default(),
-            })?;
+            let packed_len = packed_byte_len(len, 1).map_err(|_| guard.validation_error("Packed bool byte length overflow", ptr as usize))?;
             guard.check_range(data_ptr, packed_len)?;
         }
 
@@ -201,7 +204,7 @@ impl<'a> Access<'a> for ArchivedPackedBoolSlice {
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -223,7 +226,7 @@ pub struct ArchivedPackedU8Slice<const BITS: u8> {
 
 impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || ZebinError::ValidationError {
+        u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "Archived packed integer length exceeds usize range",
             pos: self as *const _ as usize,
             path: Default::default(),
@@ -272,7 +275,7 @@ impl<const BITS: u8> Layout for ArchivedPackedU8Slice<BITS> {
 }
 
 impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -281,28 +284,16 @@ impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
         guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
-        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "Archived packed integer length exceeds usize range",
-            pos: ptr as usize,
-            path: Default::default(),
-        })?;
+        let len = u32_to_usize(archived.len, || guard.validation_error("Archived packed integer length exceeds usize range", ptr as usize))?;
 
         if len > 0 {
             let data_ptr = archived
                 .ptr
                 .as_ref()
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty packed integer slice",
-                    pos: ptr as usize,
-                    path: Default::default(),
-                })?;
+                .ok_or_else(|| guard.validation_error("Null pointer in non-empty packed integer slice", ptr as usize))?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
             let packed_len = packed_byte_len(len, usize::from(BITS)).map_err(|_| {
-                ZebinError::ValidationError {
-                    message: "Packed integer byte length overflow",
-                    pos: ptr as usize,
-                    path: Default::default(),
-                }
+                guard.validation_error("Packed integer byte length overflow", ptr as usize)
             })?;
             guard.check_range(data_ptr, packed_len)?;
 
@@ -316,11 +307,7 @@ impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
                 let bit_offset = index * usize::from(BITS);
                 let value = read_packed_bits(bytes, bit_offset, usize::from(BITS));
                 if value > max {
-                    return Err(ZebinError::ValidationError {
-                        message: "Packed integer value out of range",
-                        pos: ptr as usize,
-                        path: Default::default(),
-                    });
+                    return Err(guard.validation_error("Packed integer value out of range", ptr as usize));
                 }
             }
         }
@@ -335,7 +322,7 @@ impl<'a, const BITS: u8> Access<'a> for ArchivedPackedU8Slice<BITS> {
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -492,7 +479,7 @@ impl Archive for PackedSlice<'_, bool, 1> {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         let ptr = if self.values.is_empty() {
             None
         } else {
@@ -500,7 +487,9 @@ impl Archive for PackedSlice<'_, bool, 1> {
         };
         Ok(ArchivedPackedBoolSlice {
             ptr,
-            len: usize_to_u32(self.values.len(), || ZebinError::WriteError)?,
+            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
+                pos: archive_pos,
+            })?,
         })
     }
 }
@@ -524,7 +513,7 @@ impl Archive for PackedVec<bool, 1> {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         let ptr = if self.values.is_empty() {
             None
         } else {
@@ -532,7 +521,9 @@ impl Archive for PackedVec<bool, 1> {
         };
         Ok(ArchivedPackedBoolSlice {
             ptr,
-            len: usize_to_u32(self.values.len(), || ZebinError::WriteError)?,
+            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
+                pos: archive_pos,
+            })?,
         })
     }
 }
@@ -556,7 +547,7 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         let ptr = if self.values.is_empty() {
             None
         } else {
@@ -564,7 +555,9 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
         };
         Ok(ArchivedPackedU8Slice {
             ptr,
-            len: usize_to_u32(self.values.len(), || ZebinError::WriteError)?,
+            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
+                pos: archive_pos,
+            })?,
         })
     }
 }
@@ -591,7 +584,7 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         let ptr = if self.values.is_empty() {
             None
         } else {
@@ -599,7 +592,9 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
         };
         Ok(ArchivedPackedU8Slice {
             ptr,
-            len: usize_to_u32(self.values.len(), || ZebinError::WriteError)?,
+            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
+                pos: archive_pos,
+            })?,
         })
     }
 }

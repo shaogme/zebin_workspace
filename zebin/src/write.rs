@@ -5,7 +5,7 @@ pub mod state;
 use core::marker::PhantomData;
 
 use crate::{
-    error::ZebinError,
+    error::{ValidateError, ZebinError},
     format::ArchiveHeader,
     traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Layout},
     write::{
@@ -129,11 +129,11 @@ where
                         break;
                     }
                     if encoder.pos() != self.plan.root_pos {
-                        return Err(ZebinError::ValidationError {
+                        return Err(ValidateError::ValidationError {
                             message: "Root offset mismatch during emission",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        });
+                        }.into());
                     }
 
                     let resolver = resolver
@@ -147,17 +147,20 @@ where
                 }
                 EncodePhase::Root { archived, cursor } => {
                     if encoder.pos() != self.plan.root_pos && *cursor == 0 {
-                        return Err(ZebinError::ValidationError {
+                        return Err(ValidateError::ValidationError {
                             message: "Root offset mismatch during root write",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        });
+                        }.into());
                     }
 
                     let size = archived.size_hint();
                     let mut temp_buf = [0u8; 1024];
                     if size > temp_buf.len() {
-                        return Err(ZebinError::WriteError);
+                        return Err(ZebinError::BufferTooSmall {
+                            pos: encoder.pos(),
+                            required: size,
+                        });
                     }
                     T::Archived::write_archived_bytes(archived, &mut temp_buf[..size]);
 
@@ -168,19 +171,19 @@ where
                     }
 
                     if encoder.pos() != self.plan.layout_pos {
-                        return Err(ZebinError::ValidationError {
+                        return Err(ValidateError::ValidationError {
                             message: "Layout offset mismatch during emission",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        });
+                        }.into());
                     }
 
                     if encoder.layouts().count() != self.plan.layouts.count() {
-                        return Err(ZebinError::ValidationError {
+                        return Err(ValidateError::ValidationError {
                             message: "Layout registry diverged during emission",
                             pos: encoder.pos(),
                             path: Default::default(),
-                        });
+                        }.into());
                     }
 
                     self.phase = EncodePhase::Layout { cursor: 0 };
@@ -231,9 +234,14 @@ where
             let chunk = self.write(&mut out[total_written..])?;
             total_written = total_written
                 .checked_add(chunk)
-                .ok_or(ZebinError::WriteError)?;
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
             if chunk == 0 && !self.is_finished() {
-                return Err(ZebinError::WriteError);
+                return Err(ZebinError::SerializationError {
+                    pos: self.archive_pos,
+                    message: "writer stuck or output buffer too small",
+                });
             }
         }
         Ok(total_written)

@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use core::num::NonZeroI64;
 
-use crate::error::ZebinError;
+use crate::error::ArchiveError;
 
 /// Zebin core: relative pointer.
 /// Stores a 64-bit signed offset from the pointer's own location.
@@ -13,17 +13,13 @@ pub struct RelPtr<T> {
 
 impl<T> RelPtr<T> {
     /// Create a new relative pointer from a source address to a target address.
-    pub fn new(from: usize, to: usize) -> Result<Self, ZebinError> {
+    pub fn new(from: usize, to: usize) -> Result<Self, ArchiveError> {
         let offset = to as i128 - from as i128;
-        let offset = i64::try_from(offset).map_err(|_| ZebinError::ValidationError {
-            message: "relative pointer offset out of range",
+        let offset = i64::try_from(offset).map_err(|_| ArchiveError::OffsetOutOfRange {
             pos: from,
-            path: Default::default(),
         })?;
-        let offset = NonZeroI64::new(offset).ok_or_else(|| ZebinError::ValidationError {
-            message: "relative pointer offset cannot be zero",
+        let offset = NonZeroI64::new(offset).ok_or_else(|| ArchiveError::ZeroOffset {
             pos: from,
-            path: Default::default(),
         })?;
 
         Ok(Self {

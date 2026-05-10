@@ -1,7 +1,7 @@
 use core::num::NonZeroUsize;
 
 use crate::core::schema::ObjectEncoding;
-use crate::error::ZebinError;
+use crate::error::{AccessError, ArchiveError, ParseHeaderError, ValidateError};
 use crate::validation::context::ValidationContext;
 use core::num::NonZeroU32;
 
@@ -35,7 +35,7 @@ pub trait ArchiveHeader: Layout + Clone + Copy {
     const SIZE: usize;
 
     /// Parse header from bytes.
-    fn parse(bytes: &[u8]) -> Result<Self, ZebinError>;
+    fn parse(bytes: &[u8]) -> Result<Self, ParseHeaderError>;
 
     /// Encode header into its fixed-size byte representation.
     fn encode(&self) -> Self::Bytes;
@@ -56,7 +56,7 @@ pub trait Validate {
     ///
     /// # Safety
     /// The pointer must point to a valid memory location that can be read.
-    unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ValidateError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized;
@@ -75,7 +75,7 @@ pub trait Access<'a>: Sized {
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized;
@@ -93,7 +93,7 @@ pub trait Archive {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError>;
+    ) -> Result<Self::Archived, ArchiveError>;
 }
 
 /// Re-export Serialize and SerializeState from write module.
@@ -117,7 +117,7 @@ impl<T: Layout, const N: usize> Layout for [T; N] {
 }
 
 impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -154,7 +154,7 @@ where
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,

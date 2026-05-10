@@ -39,14 +39,17 @@ impl<'a> LayoutRegistry<'a> {
                 && existing.schema_revision == schema_revision
             {
                 if existing.encoding != encoding || existing.fields != layout {
-                    return Err(ZebinError::LayoutError);
+                    return Err(ZebinError::LayoutCollision {
+                        key: stable_schema_key,
+                        revision: schema_revision,
+                    });
                 }
                 return Ok(());
             }
         }
 
         if self.count >= self.layouts.len() {
-            return Err(ZebinError::LayoutError);
+            return Err(ZebinError::LayoutRegistryFull);
         }
 
         let descriptor =
@@ -93,7 +96,7 @@ impl ByteSink for MeasureEncoder<'_> {
         self.pos = self
             .pos
             .checked_add(bytes.len())
-            .ok_or(ZebinError::WriteError)?;
+            .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
         Ok(bytes.len())
     }
 
@@ -104,12 +107,14 @@ impl ByteSink for MeasureEncoder<'_> {
         self.pos = self
             .pos
             .checked_add(padding)
-            .ok_or(ZebinError::WriteError)?;
+            .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
         Ok(padding)
     }
 
     fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
-        self.pos = self.pos.checked_add(len).ok_or(ZebinError::WriteError)?;
+        self.pos = self.pos.checked_add(len).ok_or(ZebinError::ArithmeticOverflow {
+            pos: self.pos,
+        })?;
         Ok(len)
     }
 }
@@ -171,7 +176,9 @@ impl<'a, 'b> ByteSink for SliceEncoder<'a, 'b> {
         self.archive_pos = self
             .archive_pos
             .checked_add(written)
-            .ok_or(ZebinError::WriteError)?;
+            .ok_or(ZebinError::ArithmeticOverflow {
+                pos: self.archive_pos,
+            })?;
         Ok(written)
     }
 
@@ -195,7 +202,9 @@ impl<'a, 'b> ByteSink for SliceEncoder<'a, 'b> {
         self.archive_pos = self
             .archive_pos
             .checked_add(written)
-            .ok_or(ZebinError::WriteError)?;
+            .ok_or(ZebinError::ArithmeticOverflow {
+                pos: self.archive_pos,
+            })?;
         Ok(written)
     }
 }

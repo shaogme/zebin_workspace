@@ -1,5 +1,6 @@
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
+use crate::core::schema::{StableSchemaKey, SchemaRevision};
 
 #[cfg(feature = "alloc")]
 use crate::alloc::{boxed::Box, vec::Vec};
@@ -138,17 +139,98 @@ impl core::fmt::Debug for ValidationPathStack {
     }
 }
 
-#[derive(Debug)]
-pub enum ZebinError {
+/// Errors that can occur during the archiving/resolution process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveError {
+    /// Relative pointer offset out of range.
+    OffsetOutOfRange { pos: usize },
+    /// Relative pointer offset is zero.
+    ZeroOffset { pos: usize },
+    /// A length or offset exceeded the capacity of its representation (e.g., u32).
+    LengthOverflow { pos: usize },
+    /// Arithmetic overflow during position calculation.
+    ArithmeticOverflow { pos: usize },
+    /// The resolver was in an invalid state for the type being resolved.
+    InvalidResolver { pos: usize },
+}
+
+impl core::fmt::Display for ArchiveError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ArchiveError::OffsetOutOfRange { pos } => {
+                write!(f, "relative pointer offset out of range at {pos}")
+            }
+            ArchiveError::ZeroOffset { pos } => {
+                write!(f, "relative pointer offset cannot be zero at {pos}")
+            }
+            ArchiveError::LengthOverflow { pos } => {
+                write!(f, "length overflow at {pos}")
+            }
+            ArchiveError::ArithmeticOverflow { pos } => {
+                write!(f, "arithmetic overflow at {pos}")
+            }
+            ArchiveError::InvalidResolver { pos } => {
+                write!(f, "invalid resolver state at {pos}")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ArchiveError {}
+
+/// Errors that can occur during archive header parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseHeaderError {
+    /// Input buffer is smaller than the required header size.
+    TooShort { pos: usize },
+    /// Magic bytes do not match the expected value.
+    InvalidMagic { pos: usize },
+    /// Archive version is not supported.
+    UnsupportedVersion { version: u8, pos: usize },
+    /// Layout offset is zero.
+    InvalidLayoutOffset { pos: usize },
+    /// Root offset is zero.
+    InvalidRootOffset { pos: usize },
+}
+
+impl core::fmt::Display for ParseHeaderError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseHeaderError::TooShort { pos } => {
+                write!(f, "header too short at {pos}")
+            }
+            ParseHeaderError::InvalidMagic { pos } => {
+                write!(f, "invalid magic at {pos}")
+            }
+            ParseHeaderError::UnsupportedVersion { version, pos } => {
+                write!(f, "unsupported archive version {version} at {pos}")
+            }
+            ParseHeaderError::InvalidLayoutOffset { pos } => {
+                write!(f, "invalid layout offset at {pos}")
+            }
+            ParseHeaderError::InvalidRootOffset { pos } => {
+                write!(f, "invalid root offset at {pos}")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ParseHeaderError {}
+
+/// Errors that can occur during validation of archived data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidateError {
     Infallible,
-    WriteError,
     AlignmentError {
         expected: NonZeroUsize,
         actual: NonZeroUsize,
         pos: usize,
         path: ValidationPathStack,
     },
-    LayoutError,
+    InvalidLayout {
+        pos: usize,
+        path: ValidationPathStack,
+    },
     ValidationError {
         message: &'static str,
         pos: usize,
@@ -172,11 +254,6 @@ pub enum ZebinError {
         pos: usize,
         path: ValidationPathStack,
     },
-    UnsupportedArchiveVersion {
-        version: u8,
-        pos: usize,
-        path: ValidationPathStack,
-    },
     FieldOverflow {
         field: &'static str,
         pos: usize,
@@ -188,22 +265,19 @@ pub enum ZebinError {
         path: ValidationPathStack,
     },
     RecursionLimitExceeded,
-    #[cfg(feature = "mmap")]
-    ReadOnlyStorage,
 }
 
-impl ZebinError {
+impl ValidateError {
     /// Attach a path segment to the error.
     pub fn at(mut self, segment: ValidationPathSegment) -> Self {
         match &mut self {
-            ZebinError::AlignmentError { path, .. }
-            | ZebinError::ValidationError { path, .. }
-            | ZebinError::MissingLayoutField { path, .. }
-            | ZebinError::LayoutOffsetMismatch { path, .. }
-            | ZebinError::MissingLayoutRevision { path, .. }
-            | ZebinError::UnsupportedArchiveVersion { path, .. }
-            | ZebinError::FieldOverflow { path, .. }
-            | ZebinError::FieldOutOfBounds { path, .. } => {
+            ValidateError::AlignmentError { path, .. }
+            | ValidateError::ValidationError { path, .. }
+            | ValidateError::MissingLayoutField { path, .. }
+            | ValidateError::LayoutOffsetMismatch { path, .. }
+            | ValidateError::MissingLayoutRevision { path, .. }
+            | ValidateError::FieldOutOfBounds { path, .. }
+            | ValidateError::InvalidLayout { path, .. } => {
                 path.push(segment);
             }
             _ => {}
@@ -214,20 +288,20 @@ impl ZebinError {
     /// Get the validation path if present.
     pub fn path(&self) -> Option<&ValidationPathStack> {
         match self {
-            ZebinError::AlignmentError { path, .. }
-            | ZebinError::ValidationError { path, .. }
-            | ZebinError::MissingLayoutField { path, .. }
-            | ZebinError::LayoutOffsetMismatch { path, .. }
-            | ZebinError::MissingLayoutRevision { path, .. }
-            | ZebinError::UnsupportedArchiveVersion { path, .. }
-            | ZebinError::FieldOverflow { path, .. }
-            | ZebinError::FieldOutOfBounds { path, .. } => Some(path),
+            ValidateError::AlignmentError { path, .. }
+            | ValidateError::ValidationError { path, .. }
+            | ValidateError::MissingLayoutField { path, .. }
+            | ValidateError::LayoutOffsetMismatch { path, .. }
+            | ValidateError::MissingLayoutRevision { path, .. }
+            | ValidateError::FieldOverflow { path, .. }
+            | ValidateError::FieldOutOfBounds { path, .. }
+            | ValidateError::InvalidLayout { path, .. } => Some(path),
             _ => None,
         }
     }
 }
 
-impl core::fmt::Display for ZebinError {
+impl core::fmt::Display for ValidateError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if let Some(path) = self.path() {
             if path.len > 0 {
@@ -238,9 +312,8 @@ impl core::fmt::Display for ZebinError {
         }
 
         match self {
-            ZebinError::Infallible => write!(f, "infallible error"),
-            ZebinError::WriteError => write!(f, "failed to write archive bytes"),
-            ZebinError::AlignmentError {
+            ValidateError::Infallible => write!(f, "infallible error"),
+            ValidateError::AlignmentError {
                 expected,
                 actual,
                 pos,
@@ -252,14 +325,14 @@ impl core::fmt::Display for ZebinError {
                     expected, actual
                 )
             }
-            ZebinError::LayoutError => write!(f, "layout error"),
-            ZebinError::ValidationError { message, pos, .. } => {
+            ValidateError::InvalidLayout { pos, .. } => write!(f, "invalid layout structure at {pos}"),
+            ValidateError::ValidationError { message, pos, .. } => {
                 write!(f, "validation error at {pos}: {message}")
             }
-            ZebinError::MissingLayoutField { field_id, pos, .. } => {
+            ValidateError::MissingLayoutField { field_id, pos, .. } => {
                 write!(f, "missing layout entry for field {field_id} at {pos}")
             }
-            ZebinError::LayoutOffsetMismatch {
+            ValidateError::LayoutOffsetMismatch {
                 field_id,
                 expected,
                 actual,
@@ -271,7 +344,7 @@ impl core::fmt::Display for ZebinError {
                     "layout offset mismatch for field {field_id} at {pos}: expected {expected}, found {actual}"
                 )
             }
-            ZebinError::MissingLayoutRevision {
+            ValidateError::MissingLayoutRevision {
                 key, revision, pos, ..
             } => {
                 write!(
@@ -279,16 +352,111 @@ impl core::fmt::Display for ZebinError {
                     "missing layout entry for stable schema key {key} revision {revision} at {pos}"
                 )
             }
-            ZebinError::UnsupportedArchiveVersion { version, pos, .. } => {
-                write!(f, "unsupported archive version {version} at {pos}")
-            }
-            ZebinError::FieldOverflow { field, pos, .. } => {
+            ValidateError::FieldOverflow { field, pos, .. } => {
                 write!(f, "{field} overflow at {pos}")
             }
-            ZebinError::FieldOutOfBounds { field, pos, .. } => {
+            ValidateError::FieldOutOfBounds { field, pos, .. } => {
                 write!(f, "{field} out of bounds at {pos}")
             }
-            ZebinError::RecursionLimitExceeded => write!(f, "recursion limit exceeded"),
+            ValidateError::RecursionLimitExceeded => write!(f, "recursion limit exceeded"),
+        }
+    }
+}
+
+impl From<core::convert::Infallible> for ValidateError {
+    fn from(error: core::convert::Infallible) -> Self {
+        match error {}
+    }
+}
+
+impl core::error::Error for ValidateError {}
+
+pub type AccessError = ValidateError;
+
+/// Unified error type for the Zebin library.
+#[derive(Debug)]
+pub enum ZebinError {
+    /// Arithmetic overflow during serialization or position calculation.
+    ArithmeticOverflow { pos: usize },
+    /// Output buffer is too small for the data being written.
+    BufferTooSmall { pos: usize, required: usize },
+    /// General error during serialization.
+    SerializationError { pos: usize, message: &'static str },
+    /// Error during layout registration.
+    /// A different layout is already registered for the same stable schema key and revision.
+    LayoutCollision {
+        key: StableSchemaKey,
+        revision: SchemaRevision,
+    },
+    /// The layout registry has reached its capacity.
+    LayoutRegistryFull,
+    /// Error during validation or access of archived data.
+    Access(AccessError),
+    /// Error during archive resolution.
+    ArchiveError(ArchiveError),
+    /// Error during header parsing.
+    HeaderParseError(ParseHeaderError),
+    #[cfg(feature = "mmap")]
+    ReadOnlyStorage,
+}
+
+impl ZebinError {
+    /// Attach a path segment to the error.
+    pub fn at(self, segment: ValidationPathSegment) -> Self {
+        if let ZebinError::Access(err) = self {
+            ZebinError::Access(err.at(segment))
+        } else {
+            self
+        }
+    }
+
+    /// Get the validation path if present.
+    pub fn path(&self) -> Option<&ValidationPathStack> {
+        if let ZebinError::Access(err) = self {
+            err.path()
+        } else {
+            None
+        }
+    }
+}
+
+impl From<AccessError> for ZebinError {
+    fn from(error: AccessError) -> Self {
+        ZebinError::Access(error)
+    }
+}
+
+impl From<ArchiveError> for ZebinError {
+    fn from(error: ArchiveError) -> Self {
+        ZebinError::ArchiveError(error)
+    }
+}
+
+impl From<ParseHeaderError> for ZebinError {
+    fn from(error: ParseHeaderError) -> Self {
+        ZebinError::HeaderParseError(error)
+    }
+}
+
+impl core::fmt::Display for ZebinError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ZebinError::ArithmeticOverflow { pos } => {
+                write!(f, "arithmetic overflow at {pos}")
+            }
+            ZebinError::BufferTooSmall { pos, required } => {
+                write!(f, "buffer too small at {pos}: required {required} bytes")
+            }
+            ZebinError::SerializationError { pos, message } => {
+                write!(f, "serialization error at {pos}: {message}")
+            }
+            ZebinError::LayoutCollision { key, revision } => {
+                write!(f, "layout collision for key {key} revision {revision}")
+            }
+            ZebinError::LayoutRegistryFull => write!(f, "layout registry capacity exceeded"),
+            ZebinError::Access(err) => write!(f, "{}", err),
+            ZebinError::ArchiveError(err) => write!(f, "{}", err),
+            ZebinError::HeaderParseError(err) => write!(f, "header parse error: {}", err),
             #[cfg(feature = "mmap")]
             ZebinError::ReadOnlyStorage => write!(f, "read-only storage"),
         }

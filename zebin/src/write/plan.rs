@@ -1,5 +1,5 @@
 use crate::{
-    error::ZebinError,
+    error::{ValidateError, ZebinError},
     format::ArchiveHeader,
     traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Layout},
     utils::num::{u32_to_usize, usize_to_nonzero_u32},
@@ -38,19 +38,21 @@ where
     let root_offset = encoder.pos();
     let root_offset = usize_to_nonzero_u32(
         root_offset,
-        || ZebinError::ValidationError {
+        || ValidateError::ValidationError {
             message: "Root offset exceeds u32 range",
             pos: root_offset,
             path: Default::default(),
         },
-        || ZebinError::ValidationError {
+        || ValidateError::ValidationError {
             message: "Root offset cannot be zero",
             pos: root_offset,
             path: Default::default(),
         },
     )?;
 
-    let root_pos = u32_to_usize(root_offset.get(), || ZebinError::WriteError)?;
+    let root_pos = u32_to_usize(root_offset.get(), || ZebinError::ArithmeticOverflow {
+        pos: root_offset.get() as usize,
+    })?;
     let archived = value.resolve(root_pos, resolver)?;
     let size = archived.size_hint();
     encoder.skip(size)?;
@@ -58,12 +60,12 @@ where
     let layout_offset = encoder.pos();
     let layout_offset = usize_to_nonzero_u32(
         layout_offset,
-        || ZebinError::ValidationError {
+        || ValidateError::ValidationError {
             message: "Layout section offset exceeds u32 range",
             pos: layout_offset,
             path: Default::default(),
         },
-        || ZebinError::ValidationError {
+        || ValidateError::ValidationError {
             message: "Layout section offset cannot be zero",
             pos: layout_offset,
             path: Default::default(),
@@ -72,10 +74,12 @@ where
 
     let layouts = encoder.layouts_moved();
     let section_len = layout_section_len_registry(&layouts)?;
-    let layout_pos = u32_to_usize(layout_offset.get(), || ZebinError::WriteError)?;
+    let layout_pos = u32_to_usize(layout_offset.get(), || ZebinError::ArithmeticOverflow {
+        pos: layout_offset.get() as usize,
+    })?;
     let total_len = layout_pos
         .checked_add(section_len)
-        .ok_or(ZebinError::WriteError)?;
+        .ok_or(ZebinError::ArithmeticOverflow { pos: layout_pos })?;
 
     Ok(EncodePlan {
         root_pos,
@@ -174,15 +178,15 @@ pub(crate) fn layout_section_len_registry(
             registry
                 .count()
                 .checked_mul(4)
-                .ok_or(ZebinError::WriteError)?,
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?,
         )
-        .ok_or(ZebinError::WriteError)?;
+        .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
     for i in 0..registry.count() {
         let layout = registry.get_layout(i).unwrap();
         len = len
             .checked_add(16)
             .and_then(|v| v.checked_add(layout.fields.len().checked_mul(8)?))
-            .ok_or(ZebinError::WriteError)?;
+            .ok_or(ZebinError::ArithmeticOverflow { pos: len })?;
     }
     Ok(len)
 }

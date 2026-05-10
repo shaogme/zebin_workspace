@@ -33,8 +33,7 @@ pub mod prelude {
     pub use crate::core::schema::{
         FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
     };
-    pub use crate::error::ValidationPathSegment;
-    pub use crate::error::ZebinError;
+    pub use crate::error::{AccessError, ArchiveError, ValidateError, ZebinError};
     pub use crate::format::ArchiveHeader;
     pub use crate::io::sink::{ByteSink, LayoutSink};
     #[cfg(feature = "mmap")]
@@ -65,8 +64,9 @@ pub use crate::core::schema::{
     FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
     SchemaRevision, StableSchemaKey,
 };
-pub use crate::error::ValidationPathSegment;
-pub use crate::error::ZebinError;
+pub use crate::error::{
+    AccessError, ArchiveError, ValidateError, ValidationPathSegment, ZebinError,
+};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::sink::{ByteSink, LayoutSink};
 pub use crate::io::storage::Storage;

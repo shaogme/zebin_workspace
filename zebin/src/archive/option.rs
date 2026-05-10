@@ -1,8 +1,7 @@
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    error::ValidationPathSegment,
-    error::ZebinError,
+    error::{AccessError, ArchiveError, ValidateError, ValidationPathSegment, ZebinError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::byteops,
@@ -62,7 +61,7 @@ impl<T> Validate for ArchivedOption<T>
 where
     T: Layout + Validate,
 {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -83,11 +82,7 @@ where
                 }
                 Ok(())
             }
-            _ => Err(ZebinError::ValidationError {
-                message: "Invalid Option discriminant",
-                pos: ptr as usize,
-                path: Default::default(),
-            }),
+            _ => Err(guard.validation_error("Invalid Option discriminant", ptr as usize)),
         }
     }
 }
@@ -101,7 +96,7 @@ where
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -176,7 +171,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         match (self, resolver) {
             (Some(value), Some(resolver)) => {
                 let value_offset = crate::memoffset::offset_of!(ArchivedOption<T::Archived>, value);
@@ -190,7 +185,7 @@ where
                 tag: 0,
                 value: MaybeUninit::uninit(),
             }),
-            _ => Err(ZebinError::WriteError),
+            _ => Err(ArchiveError::InvalidResolver { pos: archive_pos }),
         }
     }
 }

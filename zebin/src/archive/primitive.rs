@@ -1,5 +1,6 @@
 use crate::{
     ZebinError,
+    error::{AccessError, ArchiveError, ValidateError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Serialize, Validate},
     validation::context::ValidationContext,
@@ -67,7 +68,7 @@ macro_rules! impl_archive_for_primitive {
             }
 
             impl Validate for $t {
-                unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ZebinError>
+                unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ValidateError>
                 where
                     H: ArchiveHeaderTrait,
                     C: ValidationContext<H> + ?Sized,
@@ -82,7 +83,7 @@ macro_rules! impl_archive_for_primitive {
                 unsafe fn access<H, C>(
                     ptr: *const u8,
                     context: &mut C,
-                ) -> Result<(Self::View, usize), ZebinError>
+                ) -> Result<(Self::View, usize), AccessError>
                 where
                     H: crate::traits::ArchiveHeader,
                     C: ValidationContext<H> + ?Sized,
@@ -98,7 +99,7 @@ macro_rules! impl_archive_for_primitive {
                 type Archived = $t;
                 type Resolver = ();
 
-                fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, ZebinError> {
+                fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, ArchiveError> {
                     Ok(*self)
                 }
             }
@@ -130,18 +131,14 @@ impl Layout for bool {
 }
 
 impl Validate for bool {
-    unsafe fn validate<H, C>(ptr: *const Self, _context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
         let val = unsafe { *(ptr as *const u8) };
         if val > 1 {
-            return Err(ZebinError::ValidationError {
-                message: "Invalid bool value",
-                pos: ptr as usize,
-                path: Default::default(),
-            });
+            return Err(context.validation_error("Invalid bool value", ptr as usize));
         }
         Ok(())
     }
@@ -153,7 +150,7 @@ impl<'a> Access<'a> for bool {
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -175,7 +172,7 @@ impl Archive for bool {
         &self,
         _pos: usize,
         _resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         Ok(*self)
     }
 }

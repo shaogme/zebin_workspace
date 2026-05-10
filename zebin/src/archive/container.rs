@@ -1,4 +1,5 @@
 use crate::{
+    error::ArchiveError,
     ZebinError,
     traits::{Archive, Serialize},
 };
@@ -15,7 +16,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }
@@ -45,7 +46,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }
@@ -75,7 +76,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }
@@ -105,7 +106,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         self.as_ref().resolve(archive_pos, resolver)
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    ZebinError,
+    error::ValidateError,
     core::schema::{SchemaRevision, StableSchemaKey},
     format::ArchiveHeader,
     read::ResolvedLayout,
@@ -12,20 +12,20 @@ pub trait ValidationContext<H = ArchiveHeader>
 where
     H: ArchiveHeaderTrait,
 {
-    fn push_depth(&mut self) -> Result<(), ZebinError>;
+    fn push_depth(&mut self) -> Result<(), ValidateError>;
 
     fn pop_depth(&mut self);
 
-    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self, H>, ZebinError> {
+    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self, H>, ValidateError> {
         ArchivedDepthGuard::new(self)
     }
 
-    fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ZebinError>;
+    fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ValidateError>;
 
-    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError>;
+    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ValidateError>;
 
-    fn validation_error(&self, message: &'static str, pos: usize) -> ZebinError {
-        ZebinError::ValidationError {
+    fn validation_error(&self, message: &'static str, pos: usize) -> ValidateError {
+        ValidateError::ValidationError {
             message,
             pos,
             path: crate::error::ValidationPathStack::new(),
@@ -36,7 +36,7 @@ where
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'_, H>, ZebinError>;
+    ) -> Result<ResolvedLayout<'_, H>, ValidateError>;
 }
 
 /// RAII guard that restores validation depth when dropped.
@@ -53,7 +53,7 @@ where
     C: ValidationContext<H> + ?Sized,
     H: ArchiveHeaderTrait,
 {
-    pub fn new(context: &'a mut C) -> Result<Self, ZebinError> {
+    pub fn new(context: &'a mut C) -> Result<Self, ValidateError> {
         context.push_depth()?;
         Ok(Self {
             context,
@@ -61,7 +61,7 @@ where
         })
     }
 
-    pub fn check_range(&mut self, ptr: *const u8, size: usize) -> Result<(), ZebinError> {
+    pub fn check_range(&mut self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
         self.context.check_range(ptr, size)
     }
 
@@ -69,7 +69,7 @@ where
         &mut self,
         ptr: *const u8,
         alignment: NonZeroUsize,
-    ) -> Result<(), ZebinError> {
+    ) -> Result<(), ValidateError> {
         self.context.check_alignment(ptr, alignment)
     }
 }

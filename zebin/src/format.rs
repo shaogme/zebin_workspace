@@ -1,9 +1,8 @@
 use core::num::NonZeroU32;
 
 use crate::{
-    ZebinError,
+    error::ParseHeaderError,
     traits::{ArchiveHeader as ArchiveHeaderTrait, Layout},
-    utils::num::read_fixed,
 };
 use core::num::NonZeroUsize;
 
@@ -55,52 +54,27 @@ impl ArchiveHeaderTrait for ArchiveHeader {
     const VERSION: u8 = ARCHIVE_VERSION;
     const SIZE: usize = 12;
 
-    fn parse(bytes: &[u8]) -> Result<Self, ZebinError> {
+    fn parse(bytes: &[u8]) -> Result<Self, ParseHeaderError> {
         if bytes.len() < Self::SIZE {
-            return Err(ZebinError::ValidationError {
-                message: "Header too short",
-                pos: 0,
-                path: Default::default(),
-            });
+            return Err(ParseHeaderError::TooShort { pos: 0 });
         }
         if bytes[0..2] != Self::MAGIC {
-            return Err(ZebinError::ValidationError {
-                message: "Invalid magic",
-                pos: 0,
-                path: Default::default(),
-            });
+            return Err(ParseHeaderError::InvalidMagic { pos: 0 });
         }
 
         let version = bytes[2];
         let flags = bytes[3];
         if version != Self::VERSION {
-            return Err(ZebinError::UnsupportedArchiveVersion {
-                version,
-                pos: 2,
-                path: Default::default(),
-            });
+            return Err(ParseHeaderError::UnsupportedVersion { version, pos: 2 });
         }
 
-        let layout_offset = NonZeroU32::new(u32::from_le_bytes(read_fixed::<4>(
-            bytes,
-            4,
-            "Layout offset",
-        )?))
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: "Layout offset cannot be zero",
-            pos: 4,
-            path: Default::default(),
-        })?;
-        let root_offset = NonZeroU32::new(u32::from_le_bytes(read_fixed::<4>(
-            bytes,
-            8,
-            "Root offset",
-        )?))
-        .ok_or_else(|| ZebinError::ValidationError {
-            message: "Root offset cannot be zero",
-            pos: 8,
-            path: Default::default(),
-        })?;
+        let layout_offset_bytes: [u8; 4] = bytes[4..8].try_into().unwrap();
+        let layout_offset = NonZeroU32::new(u32::from_le_bytes(layout_offset_bytes))
+            .ok_or(ParseHeaderError::InvalidLayoutOffset { pos: 4 })?;
+
+        let root_offset_bytes: [u8; 4] = bytes[8..12].try_into().unwrap();
+        let root_offset = NonZeroU32::new(u32::from_le_bytes(root_offset_bytes))
+            .ok_or(ParseHeaderError::InvalidRootOffset { pos: 8 })?;
 
         Ok(Self::new(version, flags, layout_offset, root_offset))
     }

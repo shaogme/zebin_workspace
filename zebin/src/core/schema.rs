@@ -1,5 +1,5 @@
 use crate::{
-    error::ZebinError,
+    error::ValidateError,
     utils::num::{read_fixed, u32_to_usize},
 };
 use core::num::NonZeroUsize;
@@ -56,10 +56,13 @@ impl<'a> LayoutDescriptor<'a> {
         schema_revision: SchemaRevision,
         encoding: ObjectEncoding,
         fields: &'a [LayoutField],
-    ) -> Result<Self, ZebinError> {
+    ) -> Result<Self, ValidateError> {
         for pair in fields.windows(2) {
             if pair[0].field_id >= pair[1].field_id {
-                return Err(ZebinError::LayoutError);
+                return Err(ValidateError::InvalidLayout {
+                    pos: 0,
+                    path: Default::default(),
+                });
             }
         }
         Ok(Self {
@@ -148,16 +151,16 @@ impl<'a> LayoutView<'a> {
         None
     }
 
-    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), ZebinError> {
+    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), ValidateError> {
         let actual = self
             .field_offset(field_id)
-            .ok_or_else(|| ZebinError::MissingLayoutField {
+            .ok_or_else(|| ValidateError::MissingLayoutField {
                 field_id,
                 pos: self.entry_pos,
                 path: Default::default(),
             })?;
         if actual != expected {
-            return Err(ZebinError::LayoutOffsetMismatch {
+            return Err(ValidateError::LayoutOffsetMismatch {
                 field_id,
                 expected,
                 actual,
@@ -221,7 +224,7 @@ pub struct LayoutDirectory<'a> {
 }
 
 impl<'a> LayoutDirectory<'a> {
-    pub fn new(bytes: &'a [u8], section_offset: NonZeroUsize) -> Result<Self, ZebinError> {
+    pub fn new(bytes: &'a [u8], section_offset: NonZeroUsize) -> Result<Self, ValidateError> {
         let parsed = parse_layout_section(bytes, section_offset)?;
         Ok(Self {
             bytes,
@@ -242,7 +245,7 @@ impl<'a> LayoutDirectory<'a> {
         &self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<LayoutView<'a>, ZebinError> {
+    ) -> Result<LayoutView<'a>, ValidateError> {
         self.parsed.lookup(stable_schema_key, schema_revision)
     }
 }
@@ -259,7 +262,7 @@ impl<'a> ParsedLayoutSection<'a> {
         &self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<LayoutView<'a>, ZebinError> {
+    ) -> Result<LayoutView<'a>, ValidateError> {
         let section_offset = self.section_offset;
         let offsets_pos = section_offset + 4;
 
@@ -272,7 +275,7 @@ impl<'a> ParsedLayoutSection<'a> {
                     offset_pos,
                     "Layout offset entry",
                 )?),
-                || ZebinError::ValidationError {
+                || ValidateError::ValidationError {
                     message: "Layout offset entry overflow",
                     pos: offset_pos,
                     path: Default::default(),
@@ -281,7 +284,7 @@ impl<'a> ParsedLayoutSection<'a> {
 
             let entry_pos = section_offset
                 .checked_add(layout_rel_offset)
-                .ok_or_else(|| ZebinError::ValidationError {
+                .ok_or_else(|| ValidateError::ValidationError {
                     message: "Layout entry overflow",
                     pos: offset_pos,
                     path: Default::default(),
@@ -290,75 +293,57 @@ impl<'a> ParsedLayoutSection<'a> {
             let entry_header_end =
                 entry_pos
                     .checked_add(16)
-                    .ok_or_else(|| ZebinError::ValidationError {
+                    .ok_or_else(|| ValidateError::ValidationError {
                         message: "Layout entry overflow",
                         pos: entry_pos,
                         path: Default::default(),
                     })?;
             if entry_header_end > self.bytes.len() {
-                return Err(ZebinError::ValidationError {
+                return Err(ValidateError::ValidationError {
                     message: "Layout entry out of bounds",
                     pos: entry_pos,
                     path: Default::default(),
                 });
             }
 
-            let stored_key = u32::from_le_bytes(
-                self.bytes
-                    .get(entry_pos..entry_pos + 4)
-                    .ok_or_else(|| ZebinError::ValidationError {
-                        message: "Layout stable schema key out of bounds",
-                        pos: entry_pos,
-                        path: Default::default(),
-                    })?
-                    .try_into()
-                    .map_err(|_| ZebinError::LayoutError)?,
-            );
-            let stored_revision = u32::from_le_bytes(
-                self.bytes
-                    .get(entry_pos + 4..entry_pos + 8)
-                    .ok_or_else(|| ZebinError::ValidationError {
-                        message: "Layout schema revision out of bounds",
-                        pos: entry_pos,
-                        path: Default::default(),
-                    })?
-                    .try_into()
-                    .map_err(|_| ZebinError::LayoutError)?,
-            );
+            let stored_key = u32::from_le_bytes(read_fixed::<4>(
+                self.bytes,
+                entry_pos,
+                "Layout stable schema key",
+            )?);
+            let stored_revision = u32::from_le_bytes(read_fixed::<4>(
+                self.bytes,
+                entry_pos + 4,
+                "Layout schema revision",
+            )?);
             if stored_key == stable_schema_key && stored_revision == schema_revision {
                 found_entry = Some((entry_pos, layout_index));
                 break;
             }
         }
 
-        let (entry_pos, _) = found_entry.ok_or_else(|| ZebinError::MissingLayoutRevision {
+        let (entry_pos, _) = found_entry.ok_or_else(|| ValidateError::MissingLayoutRevision {
             key: stable_schema_key,
             revision: schema_revision,
             pos: section_offset,
             path: Default::default(),
         })?;
 
-        let field_count = usize::from(u16::from_le_bytes(
-            self.bytes
-                .get(entry_pos + 8..entry_pos + 10)
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Layout field count out of bounds",
-                    pos: entry_pos,
-                    path: Default::default(),
-                })?
-                .try_into()
-                .map_err(|_| ZebinError::LayoutError)?,
-        ));
+        let field_count = usize::from(u16::from_le_bytes(read_fixed::<2>(
+            self.bytes,
+            entry_pos + 8,
+            "Layout field count",
+        )?));
         let entry_end = entry_pos
             .checked_add(16)
             .and_then(|pos| pos.checked_add(field_count.checked_mul(8)?))
-            .ok_or_else(|| ZebinError::ValidationError {
+            .ok_or_else(|| ValidateError::ValidationError {
                 message: "Layout field table overflow",
                 pos: entry_pos,
                 path: Default::default(),
             })?;
         if entry_end > self.bytes.len() {
-            return Err(ZebinError::ValidationError {
+            return Err(ValidateError::ValidationError {
                 message: "Layout entry payload out of bounds",
                 pos: entry_pos,
                 path: Default::default(),
@@ -372,18 +357,18 @@ impl<'a> ParsedLayoutSection<'a> {
 fn parse_layout_section<'a>(
     bytes: &'a [u8],
     section_offset: NonZeroUsize,
-) -> Result<ParsedLayoutSection<'a>, ZebinError> {
+) -> Result<ParsedLayoutSection<'a>, ValidateError> {
     let section_offset = section_offset.get();
 
     let header_end = section_offset
         .checked_add(4)
-        .ok_or_else(|| ZebinError::ValidationError {
+        .ok_or_else(|| ValidateError::ValidationError {
             message: "Layout section header overflow",
             pos: section_offset,
             path: Default::default(),
         })?;
     if header_end > bytes.len() {
-        return Err(ZebinError::ValidationError {
+        return Err(ValidateError::ValidationError {
             message: "Layout section header out of bounds",
             pos: section_offset,
             path: Default::default(),
@@ -396,7 +381,7 @@ fn parse_layout_section<'a>(
             section_offset,
             "Layout section header",
         )?),
-        || ZebinError::ValidationError {
+        || ValidateError::ValidationError {
             message: "Layout section layout count exceeds usize range",
             pos: section_offset,
             path: Default::default(),
@@ -408,19 +393,19 @@ fn parse_layout_section<'a>(
         .checked_add(
             num_layouts
                 .checked_mul(4)
-                .ok_or_else(|| ZebinError::ValidationError {
+                .ok_or_else(|| ValidateError::ValidationError {
                     message: "Layout offset table overflow",
                     pos: section_offset,
                     path: Default::default(),
                 })?,
         )
-        .ok_or_else(|| ZebinError::ValidationError {
+        .ok_or_else(|| ValidateError::ValidationError {
             message: "Layout offset table overflow",
             pos: section_offset,
             path: Default::default(),
         })?;
     if offsets_end > bytes.len() {
-        return Err(ZebinError::ValidationError {
+        return Err(ValidateError::ValidationError {
             message: "Layout offset table out of bounds",
             pos: offsets_pos,
             path: Default::default(),
@@ -431,7 +416,7 @@ fn parse_layout_section<'a>(
         let offset_pos = offsets_pos + layout_idx * 4;
         let layout_rel_offset = u32_to_usize(
             u32::from_le_bytes(read_fixed::<4>(bytes, offset_pos, "Layout offset entry")?),
-            || ZebinError::ValidationError {
+            || ValidateError::ValidationError {
                 message: "Layout offset entry exceeds usize range",
                 pos: offset_pos,
                 path: Default::default(),
@@ -439,7 +424,7 @@ fn parse_layout_section<'a>(
         )?;
         let layout_pos = section_offset
             .checked_add(layout_rel_offset)
-            .ok_or_else(|| ZebinError::ValidationError {
+            .ok_or_else(|| ValidateError::ValidationError {
                 message: "Layout position overflow",
                 pos: offset_pos,
                 path: Default::default(),
@@ -447,14 +432,14 @@ fn parse_layout_section<'a>(
 
         let entry_header_len = 16;
         let entry_header_end = layout_pos.checked_add(entry_header_len).ok_or_else(|| {
-            ZebinError::ValidationError {
+            ValidateError::ValidationError {
                 message: "Layout entry overflow",
                 pos: layout_pos,
                 path: Default::default(),
             }
         })?;
         if entry_header_end > bytes.len() {
-            return Err(ZebinError::ValidationError {
+            return Err(ValidateError::ValidationError {
                 message: "Layout entry out of bounds",
                 pos: layout_pos,
                 path: Default::default(),
@@ -469,13 +454,13 @@ fn parse_layout_section<'a>(
         let entry_size =
             entry_header_len
                 .checked_add(field_count.checked_mul(8).ok_or_else(|| {
-                    ZebinError::ValidationError {
+                    ValidateError::ValidationError {
                         message: "Layout field table overflow",
                         pos: layout_pos,
                         path: Default::default(),
                     }
                 })?)
-                .ok_or_else(|| ZebinError::ValidationError {
+                .ok_or_else(|| ValidateError::ValidationError {
                     message: "Layout field table overflow",
                     pos: layout_pos,
                     path: Default::default(),
@@ -483,13 +468,13 @@ fn parse_layout_section<'a>(
         let entry_end =
             layout_pos
                 .checked_add(entry_size)
-                .ok_or_else(|| ZebinError::ValidationError {
+                .ok_or_else(|| ValidateError::ValidationError {
                     message: "Layout entry overflow",
                     pos: layout_pos,
                     path: Default::default(),
                 })?;
         if entry_end > bytes.len() {
-            return Err(ZebinError::ValidationError {
+            return Err(ValidateError::ValidationError {
                 message: "Layout entry payload out of bounds",
                 pos: layout_pos,
                 path: Default::default(),

@@ -3,8 +3,7 @@ use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
     core::rel_ptr::RelPtr,
-    error::ValidationPathSegment,
-    error::ZebinError,
+    error::{AccessError, ArchiveError, ValidateError, ValidationPathSegment, ZebinError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::{
@@ -92,7 +91,7 @@ impl<T> ArchivedVec<T> {
         if self.len == 0 {
             return &[];
         }
-        let len = u32_to_usize(self.len, || ZebinError::ValidationError {
+        let len = u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "ArchivedVec length exceeds usize range",
             pos: self as *const _ as usize,
             path: Default::default(),
@@ -107,7 +106,7 @@ impl<T> ArchivedVec<T> {
 
     /// Get the length of the vector.
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || ZebinError::ValidationError {
+        u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "ArchivedVec length exceeds usize range",
             pos: self as *const _ as usize,
             path: Default::default(),
@@ -140,7 +139,7 @@ impl<T> Validate for ArchivedVec<T>
 where
     T: Layout + Validate,
 {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -150,27 +149,15 @@ where
         guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
         let archived = unsafe { &*ptr };
 
-        let len = u32_to_usize(archived.len, || ZebinError::ValidationError {
-            message: "ArchivedVec length exceeds usize range",
-            pos: ptr as usize,
-            path: Default::default(),
-        })?;
+        let len = u32_to_usize(archived.len, || guard.validation_error("ArchivedVec length exceeds usize range", ptr as usize))?;
         if len > 0 {
             let data_ptr = archived
                 .ptr
                 .as_ref()
-                .ok_or_else(|| ZebinError::ValidationError {
-                    message: "Null pointer in non-empty ArchivedVec",
-                    pos: ptr as usize,
-                    path: Default::default(),
-                })?;
+                .ok_or_else(|| guard.validation_error("Null pointer in non-empty ArchivedVec", ptr as usize))?;
             let data_ptr = unsafe { data_ptr.as_ptr() };
             let total_size = len.checked_mul(core::mem::size_of::<T>()).ok_or_else(|| {
-                ZebinError::ValidationError {
-                    message: "ArchivedVec size overflow",
-                    pos: ptr as usize,
-                    path: Default::default(),
-                }
+                guard.validation_error("ArchivedVec size overflow", ptr as usize)
             })?;
             guard.check_range(data_ptr as *const u8, total_size)?;
             guard.check_alignment(data_ptr as *const u8, T::ALIGNMENT)?;
@@ -197,7 +184,7 @@ where
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -535,7 +522,7 @@ pub(crate) fn resolve_sequence_archive<S, T>(
     source: &S,
     archive_pos: usize,
     resolver: usize,
-) -> Result<ArchivedVec<T::Archived>, ZebinError>
+) -> Result<ArchivedVec<T::Archived>, ArchiveError>
 where
     S: ?Sized + SequenceSource<T>,
     T: Archive,
@@ -547,7 +534,9 @@ where
     };
     Ok(ArchivedVec {
         ptr,
-        len: usize_to_u32(source.len(), || ZebinError::WriteError)?,
+        len: usize_to_u32(source.len(), || ArchiveError::LengthOverflow {
+            pos: archive_pos,
+        })?,
     })
 }
 
@@ -559,7 +548,7 @@ impl<T: Archive> Archive for Vec<T> {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         resolve_sequence_archive(self.as_slice(), archive_pos, resolver)
     }
 }
@@ -589,7 +578,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         resolve_sequence_archive(self, archive_pos, resolver)
     }
 }
@@ -619,7 +608,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         resolve_sequence_archive(self, archive_pos, resolver)
     }
 }
@@ -649,7 +638,7 @@ where
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         let elem_size = core::mem::size_of::<T::Archived>();
         let mut out = core::mem::MaybeUninit::<[T::Archived; N]>::uninit();
         let out_ptr = out.as_mut_ptr() as *mut T::Archived;
@@ -658,8 +647,12 @@ where
         for (index, item) in self.iter().enumerate() {
             let item_resolver = resolver_iter.next().expect("array resolver length matches");
             let item_pos = archive_pos
-                .checked_add(index.checked_mul(elem_size).ok_or(ZebinError::WriteError)?)
-                .ok_or(ZebinError::WriteError)?;
+                .checked_add(
+                    index
+                        .checked_mul(elem_size)
+                        .ok_or(ArchiveError::ArithmeticOverflow { pos: archive_pos })?,
+                )
+                .ok_or(ArchiveError::ArithmeticOverflow { pos: archive_pos })?;
             let item = item.resolve(item_pos, item_resolver)?;
             unsafe {
                 out_ptr.add(index).write(item);

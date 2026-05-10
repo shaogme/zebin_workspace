@@ -4,7 +4,7 @@ use core::{marker::PhantomData, num::NonZeroUsize, ops::Deref, task::Poll};
 use crate::{
     core::rel_ptr::RelPtr,
     core::schema::ObjectEncoding,
-    error::ZebinError,
+    error::{AccessError, ArchiveError, ValidateError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     validation::context::ValidationContext,
@@ -61,7 +61,7 @@ pub trait VarIntNumber: Copy {
     const MAX_BYTES: usize;
 
     fn to_u64(self) -> u64;
-    fn try_from_u64(value: u64) -> Result<Self, ZebinError>;
+    fn try_from_u64(value: u64) -> Result<Self, ValidateError>;
     fn from_archived(archived: Self::Archived) -> Self;
     fn to_archived(self) -> Self::Archived;
 }
@@ -104,7 +104,7 @@ macro_rules! impl_varint_number {
         }
 
         impl Validate for $archived {
-            unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+            unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
             where
                 H: crate::traits::ArchiveHeader,
                 C: ValidationContext<H> + ?Sized,
@@ -121,7 +121,7 @@ macro_rules! impl_varint_number {
             unsafe fn access<H, C>(
                 ptr: *const u8,
                 context: &mut C,
-            ) -> Result<(Self::View, usize), ZebinError>
+            ) -> Result<(Self::View, usize), AccessError>
             where
                 H: crate::traits::ArchiveHeader,
                 C: ValidationContext<H> + ?Sized,
@@ -142,8 +142,8 @@ macro_rules! impl_varint_number {
                 self as u64
             }
 
-            fn try_from_u64(value: u64) -> Result<Self, ZebinError> {
-                <$t>::try_from(value).map_err(|_| ZebinError::ValidationError {
+            fn try_from_u64(value: u64) -> Result<Self, ValidateError> {
+                <$t>::try_from(value).map_err(|_| ValidateError::ValidationError {
                     message: "VarInt value out of range",
                     pos: 0,
                     path: Default::default(),
@@ -198,7 +198,7 @@ fn encode_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-fn decode_u64<T, H, C>(bytes: *const u8, context: &mut C) -> Result<(T, usize), ZebinError>
+fn decode_u64<T, H, C>(bytes: *const u8, context: &mut C) -> Result<(T, usize), ValidateError>
 where
     T: VarIntNumber,
     H: crate::traits::ArchiveHeader,
@@ -210,11 +210,7 @@ where
     let mut consumed = 0usize;
     loop {
         if consumed >= T::MAX_BYTES {
-            return Err(ZebinError::ValidationError {
-                message: "VarInt exceeds maximum length",
-                pos: bytes as usize,
-                path: Default::default(),
-            });
+            return Err(guard.validation_error("VarInt exceeds maximum length", bytes as usize));
         }
         let byte_ptr = unsafe { bytes.add(consumed) };
         guard.check_range(byte_ptr, 1)?;
@@ -228,11 +224,7 @@ where
         }
         shift += 7;
         if shift >= 64 {
-            return Err(ZebinError::ValidationError {
-                message: "VarInt shift overflow",
-                pos: bytes as usize,
-                path: Default::default(),
-            });
+            return Err(guard.validation_error("VarInt shift overflow", bytes as usize));
         }
     }
 }
@@ -257,13 +249,13 @@ impl<T> Validate for VarInt<T>
 where
     T: VarIntNumber,
 {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let (view, _) = unsafe { <Self as Access>::access::<H, C>(ptr as *const u8, context)? };
-        let _ = view.get();
+        let (value, _) = decode_u64::<T, H, C>(ptr as *const u8, context)?;
+        let _ = value;
         Ok(())
     }
 }
@@ -277,7 +269,7 @@ where
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -298,7 +290,7 @@ where
         &self,
         _archive_pos: usize,
         _resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         Ok(self.value.to_archived())
     }
 }
@@ -464,11 +456,12 @@ impl<T: VarIntNumber> Layout for ArchivedVarIntVec<T> {
             out[8..16].copy_from_slice(&ptr.offset().to_le_bytes());
         }
         out[16..20].copy_from_slice(&archived.len.to_le_bytes());
+        // Remaining 4 bytes of padding (for 8-byte alignment) are already zeroed by fill.
     }
 }
 
 impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ZebinError>
+    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -479,11 +472,11 @@ impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
 
         let archived = unsafe { &*ptr };
         if archived.len > 0 {
-            let data_ptr = archived.data_ptr.as_ref().ok_or(ZebinError::WriteError)?;
+            let data_ptr = archived.data_ptr.as_ref().ok_or_else(|| guard.validation_error("Null data pointer in non-empty ArchivedVarIntVec", ptr as usize))?;
             let offsets_ptr = archived
                 .offsets_ptr
                 .as_ref()
-                .ok_or(ZebinError::WriteError)?;
+                .ok_or_else(|| guard.validation_error("Null offsets pointer in non-empty ArchivedVarIntVec", ptr as usize))?;
 
             unsafe {
                 guard.check_range(
@@ -508,7 +501,7 @@ impl<'a, T: VarIntNumber + 'a> Access<'a> for ArchivedVarIntVec<T> {
     unsafe fn access<H, C>(
         ptr: *const u8,
         context: &mut C,
-    ) -> Result<(Self::View, usize), ZebinError>
+    ) -> Result<(Self::View, usize), AccessError>
     where
         H: crate::traits::ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
@@ -534,7 +527,7 @@ impl<T: VarIntNumber> Archive for VarIntVec<T> {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         Ok(ArchivedVarIntVec {
             data_ptr: if self.values.is_empty() {
                 None
@@ -624,7 +617,6 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<T> {
                     if self.offsets_pos.is_none() {
                         self.offsets_pos = Some(encoder.pos());
                     }
-
                     let mut offset_bytes = Vec::with_capacity(self.offsets.len() * 4);
                     for &off in &self.offsets {
                         offset_bytes.extend_from_slice(&off.to_le_bytes());
@@ -668,7 +660,7 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
         &self,
         archive_pos: usize,
         resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ZebinError> {
+    ) -> Result<Self::Archived, ArchiveError> {
         Ok(ArchivedVarIntVec {
             data_ptr: if self.values.is_empty() {
                 None

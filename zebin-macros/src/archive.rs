@@ -142,16 +142,18 @@ fn record_layout_checks_logic(
                     let actual = match layout.field_offset(#field_id) {
                         Some(actual) => actual,
                         None => {
-                            return Err(zebin::ZebinError::ValidationError {
-                                message: "Missing layout field",
+                            return Err(zebin::ValidateError::MissingLayoutField {
+                                field_id: #field_id,
                                 pos: ptr as usize,
                                 path: Default::default(),
                             });
                         }
                     };
                     if actual != expected {
-                        return Err(zebin::ZebinError::ValidationError {
-                            message: "Layout offset mismatch",
+                        return Err(zebin::ValidateError::LayoutOffsetMismatch {
+                            field_id: #field_id,
+                            expected,
+                            actual,
                             pos: ptr as usize,
                             path: Default::default(),
                         });
@@ -217,8 +219,8 @@ fn helper_accessors(
             pub unsafe fn #method<'a>(
                 &'a self,
                 layout: &'a zebin::ResolvedLayout<'a>,
-            ) -> Result<&'a #ty, zebin::ZebinError> {
-                let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ZebinError::MissingLayoutField {
+            ) -> Result<&'a #ty, zebin::ValidateError> {
+                let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ValidateError::MissingLayoutField {
                     field_id: #field_id,
                     pos: self as *const _ as usize,
                     path: Default::default(),
@@ -276,7 +278,7 @@ fn helper_bytes_impl(
             unsafe fn validate<H, C>(
                 ptr: *const Self,
                 context: &mut C,
-            ) -> Result<(), zebin::ZebinError>
+            ) -> Result<(), zebin::ValidateError>
             where
                 H: zebin::ArchiveHeaderTrait,
                 C: zebin::ValidationContext<H> + ?Sized,
@@ -297,7 +299,7 @@ fn helper_bytes_impl(
             unsafe fn access<H, C>(
                 ptr: *const u8,
                 context: &mut C,
-            ) -> Result<(Self::View, usize), zebin::ZebinError>
+            ) -> Result<(Self::View, usize), zebin::AccessError>
             where
                 H: zebin::ArchiveHeaderTrait,
                 C: zebin::ValidationContext<H> + ?Sized,
@@ -433,7 +435,7 @@ fn struct_impl(name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
                 &self,
                 pos: usize,
                 resolver: Self::Resolver,
-            ) -> Result<Self::Archived, zebin::ZebinError> {
+            ) -> Result<Self::Archived, zebin::ArchiveError> {
                 Ok(#resolve_expr)
             }
         }
@@ -501,7 +503,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         variant_validate_arms.push(quote! {
             #idx_lit => {
                 let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                let result: Result<(), zebin::ZebinError> = (|| -> Result<(), zebin::ZebinError> {
+                let result: Result<(), zebin::ValidateError> = (|| -> Result<(), zebin::ValidateError> {
                     #layout_checks
                     #(#field_validations)*
                     Ok(())
@@ -639,7 +641,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 unsafe fn validate<H, C>(
                     ptr: *const Self,
                     context: &mut C,
-                ) -> Result<(), zebin::ZebinError>
+                ) -> Result<(), zebin::ValidateError>
                 where
                     H: zebin::ArchiveHeaderTrait,
                     C: zebin::ValidationContext<H> + ?Sized,
@@ -676,7 +678,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 unsafe fn validate<H, C>(
                     ptr: *const Self,
                     context: &mut C,
-                ) -> Result<(), zebin::ZebinError>
+                ) -> Result<(), zebin::ValidateError>
                 where
                     H: zebin::ArchiveHeaderTrait,
                     C: zebin::ValidationContext<H> + ?Sized,
@@ -688,7 +690,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                     match archived.tag {
                         #(#variant_validate_arms)*
                         _ => {
-                            return Err(zebin::ZebinError::ValidationError {
+                            return Err(zebin::ValidateError::ValidationError {
                                 message: "Invalid enum discriminant",
                                 pos: ptr as usize,
                                 path: Default::default(),
@@ -719,7 +721,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
             unsafe fn access<H, C>(
                 ptr: *const u8,
                 context: &mut C,
-            ) -> Result<(Self::View, usize), zebin::ZebinError>
+            ) -> Result<(Self::View, usize), zebin::AccessError>
             where
                 H: zebin::ArchiveHeaderTrait,
                 C: zebin::ValidationContext<H> + ?Sized,
@@ -741,7 +743,7 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                     &self,
                     _pos: usize,
                     _resolver: Self::Resolver,
-                ) -> Result<Self::Archived, zebin::ZebinError> {
+                ) -> Result<Self::Archived, zebin::ArchiveError> {
                     match *self {}
                 }
             }
@@ -756,10 +758,10 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                     &self,
                     pos: usize,
                     resolver: Self::Resolver,
-                ) -> Result<Self::Archived, zebin::ZebinError> {
+                ) -> Result<Self::Archived, zebin::ArchiveError> {
                     match (self, resolver) {
                         #(#variant_resolve_arms),*
-                        _ => unreachable!("mismatched enum resolver"),
+                        _ => Err(zebin::ArchiveError::InvalidResolver { pos }),
                     }
                 }
             }

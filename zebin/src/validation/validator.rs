@@ -1,7 +1,7 @@
 use core::{marker::PhantomData, num::NonZeroUsize};
 
 use crate::{
-    ZebinError,
+    error::ValidateError,
     core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
     format::ArchiveHeader,
     read::ResolvedLayout,
@@ -15,6 +15,7 @@ where
     H: ArchiveHeaderTrait,
 {
     data: &'a [u8],
+    header: H,
     layouts: Option<LayoutDirectory<'a>>,
     cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a, H>)>,
     depth: usize,
@@ -38,9 +39,10 @@ impl<'v, H: ArchiveHeaderTrait> Drop for DepthGuard<'v, H> {
 }
 
 impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
-    pub fn new(data: &'a [u8]) -> Self {
+    pub fn new(data: &'a [u8], header: H) -> Self {
         Self {
             data,
+            header,
             layouts: None,
             cached_layout: None,
             depth: 0,
@@ -48,9 +50,10 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         }
     }
 
-    pub fn with_layouts(data: &'a [u8], layouts: LayoutDirectory<'a>) -> Self {
+    pub fn with_layouts(data: &'a [u8], header: H, layouts: LayoutDirectory<'a>) -> Self {
         Self {
             data,
+            header,
             layouts: Some(layouts),
             cached_layout: None,
             depth: 0,
@@ -59,7 +62,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
     }
 
     /// Enter a nested validation scope and automatically unwind on drop.
-    pub fn enter(&mut self) -> Result<DepthGuard<'a, H>, ZebinError> {
+    pub fn enter(&mut self) -> Result<DepthGuard<'a, H>, ValidateError> {
         self.push_depth()?;
         Ok(DepthGuard {
             context: self as *mut _,
@@ -68,7 +71,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
     }
 
     /// Check if a pointer and its associated size are within the buffer bounds.
-    pub fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ZebinError> {
+    pub fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
         if size == 0 {
             return Ok(());
         }
@@ -96,11 +99,11 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         &self,
         ptr: *const u8,
         alignment: NonZeroUsize,
-    ) -> Result<(), ZebinError> {
+    ) -> Result<(), ValidateError> {
         let alignment_value = alignment.get();
         let addr = ptr as usize;
         if !addr.is_multiple_of(alignment_value) {
-            return Err(ZebinError::AlignmentError {
+            return Err(ValidateError::AlignmentError {
                 expected: alignment,
                 actual: unsafe { NonZeroUsize::new_unchecked(addr % alignment_value) },
                 pos: addr.saturating_sub(self.data.as_ptr() as usize),
@@ -111,11 +114,11 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
     }
 
     /// Push to recursion depth.
-    pub fn push_depth(&mut self) -> Result<(), ZebinError> {
+    pub fn push_depth(&mut self) -> Result<(), ValidateError> {
         self.depth += 1;
         if self.depth > self.max_depth {
             self.depth = self.depth.saturating_sub(1);
-            return Err(ZebinError::RecursionLimitExceeded);
+            return Err(ValidateError::RecursionLimitExceeded);
         }
         Ok(())
     }
@@ -134,7 +137,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'a, H>, ZebinError> {
+    ) -> Result<ResolvedLayout<'a, H>, ValidateError> {
         if let Some((cached_key, cached_revision, resolved)) = &self.cached_layout
             && *cached_key == stable_schema_key
             && *cached_revision == schema_revision
@@ -142,21 +145,28 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
             return Ok(*resolved);
         }
 
-        let layouts = self.layouts.ok_or_else(|| ZebinError::ValidationError {
+        let layouts = self.layouts.ok_or_else(|| ValidateError::ValidationError {
             message: "Missing layout directory",
             pos: 0,
             path: Default::default(),
         })?;
-        let header = H::parse(self.data)?;
         let layout = layouts.lookup(stable_schema_key, schema_revision)?;
-        let resolved = ResolvedLayout::from_parts(self.data, header, layout);
+        let resolved = ResolvedLayout::from_parts(self.data, self.header, layout);
         self.cached_layout = Some((stable_schema_key, schema_revision, resolved));
         Ok(resolved)
+    }
+
+    fn validation_error(&self, message: &'static str, pos: usize) -> ValidateError {
+        ValidateError::ValidationError {
+            message,
+            pos,
+            path: crate::error::ValidationPathStack::new(),
+        }
     }
 }
 
 impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
-    fn push_depth(&mut self) -> Result<(), ZebinError> {
+    fn push_depth(&mut self) -> Result<(), ValidateError> {
         Validator::push_depth(self)
     }
 
@@ -164,11 +174,11 @@ impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
         Validator::pop_depth(self)
     }
 
-    fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ZebinError> {
+    fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
         Validator::check_range(self, ptr, size)
     }
 
-    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ZebinError> {
+    fn check_alignment(&self, ptr: *const u8, alignment: NonZeroUsize) -> Result<(), ValidateError> {
         Validator::check_alignment(self, ptr, alignment)
     }
 
@@ -176,7 +186,7 @@ impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'a, H>, ZebinError> {
+    ) -> Result<ResolvedLayout<'a, H>, ValidateError> {
         Validator::resolved_layout(self, stable_schema_key, schema_revision)
     }
 }

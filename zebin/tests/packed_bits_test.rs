@@ -71,7 +71,13 @@ fn test_packed_nibble_rejects_out_of_range_value() {
     let values = [0u8, 1, 16, 3];
     let packed = PackedU8Slice::<4>::new(&values);
     let err = zebin::encode(&packed).unwrap_err();
-    assert!(matches!(err, zebin::ZebinError::WriteError));
+    assert!(matches!(
+        err,
+        zebin::ZebinError::SerializationError {
+            message: "Value exceeds packed bit capacity",
+            ..
+        }
+    ));
 }
 
 #[test]
