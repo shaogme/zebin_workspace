@@ -54,7 +54,7 @@ pub use crate::archive::{
 };
 #[cfg(feature = "alloc")]
 pub use crate::archive::{
-    packed_vec::{PackedBoolVec, PackedU8Vec, PackedVec},
+    packed_vec::{PackedBoolVec, PackedSequenceState, PackedU8Vec, PackedVec},
     varint_vec::PackedVarIntSlice,
     vec::archived_bytes,
 };

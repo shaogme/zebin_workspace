@@ -369,11 +369,14 @@ pub fn packed_begin_expr(
     field: &FieldSpec<'_>,
     value: proc_macro2::TokenStream,
 ) -> Option<proc_macro2::TokenStream> {
-    let wrapper = packed_wrapper_type_expr(field)?;
-    Some(quote! {
-        <#wrapper as zebin::Serialize>::begin_serialize(
-            &<#wrapper>::new(#value.as_ref())
-        )?
+    let (kind, bits) = packed_info(field)?;
+    Some(match kind {
+        PackedElementKind::Bool => quote! {
+            zebin::PackedSequenceState::new_bool(#value.as_ref())
+        },
+        PackedElementKind::U8 => quote! {
+            zebin::PackedSequenceState::new_u8(#value.as_ref(), #bits)
+        },
     })
 }
 

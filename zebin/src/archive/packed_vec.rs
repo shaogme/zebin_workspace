@@ -1,140 +1,106 @@
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use core::task::Poll;
 
 use crate::{
     archive::packed::{ArchivedPackedBoolSlice, ArchivedPackedU8Slice},
     core::rel_ptr::RelPtr,
-    error::{ArchiveError, ValidateError, ZebinError},
+    error::{ArchiveError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Archive, Serialize, SerializeState},
     utils::num::usize_to_u32,
 };
 
-fn packed_byte_len(value_count: usize, bits_per_value: usize) -> Result<usize, ValidateError> {
-    let total_bits =
-        value_count
-            .checked_mul(bits_per_value)
-            .ok_or(ValidateError::ValidationError {
-                message: "Packed length calculation overflow",
-                pos: 0,
-                path: Default::default(),
-            })?;
-    Ok(total_bits.div_ceil(8))
-}
-
-pub(crate) fn pack_small_values(
-    values: &[u8],
-    bits_per_value: usize,
-) -> Result<Vec<u8>, ZebinError> {
-    if bits_per_value == 0 || bits_per_value > 8 {
-        return Err(ZebinError::SerializationError {
-            pos: 0,
-            message: "Packed bits must be between 1 and 8",
-        });
-    }
-
-    let out_len = packed_byte_len(values.len(), bits_per_value).map_err(|_| {
-        ZebinError::SerializationError {
-            pos: 0,
-            message: "Packed length calculation overflow",
-        }
-    })?;
-    let mut out = vec![0u8; out_len];
-    let mask = if bits_per_value == 8 {
-        u8::MAX
-    } else {
-        (1u8 << bits_per_value) - 1
-    };
-
-    for (index, &value) in values.iter().enumerate() {
-        if value > mask {
-            return Err(ZebinError::SerializationError {
-                pos: index,
-                message: "Value exceeds packed bit capacity",
-            });
-        }
-
-        let bit_offset = index
-            .checked_mul(bits_per_value)
-            .ok_or(ZebinError::ArithmeticOverflow { pos: index })?;
-        let byte_index = bit_offset / 8;
-        let bit_shift = bit_offset % 8;
-        out[byte_index] |= value << bit_shift;
-        if bit_shift + bits_per_value > 8 {
-            out[byte_index + 1] |= value >> (8 - bit_shift);
-        }
-    }
-
-    Ok(out)
-}
-
-pub(crate) fn pack_bools(values: &[bool]) -> Vec<u8> {
-    let out_len = packed_byte_len(values.len(), 1).expect("bool packing length should fit");
-    let mut out = vec![0u8; out_len];
-
-    #[cfg(feature = "simd")]
-    {
-        use wide::u8x16;
-        let mut out_cursor = 0usize;
-        let mut chunks = values.chunks_exact(16);
-        for chunk in &mut chunks {
-            let mut lanes = [0u8; 16];
-            for (index, value) in chunk.iter().enumerate() {
-                lanes[index] = *value as u8;
-            }
-
-            let mask = u8x16::from(lanes).simd_gt(u8x16::splat(0)).to_bitmask();
-            out[out_cursor] = (mask & 0x00FF) as u8;
-            if out_cursor + 1 < out.len() {
-                out[out_cursor + 1] = ((mask >> 8) & 0x00FF) as u8;
-            }
-            out_cursor += 2;
-        }
-
-        let remainder = chunks.remainder();
-        for (index, value) in remainder.iter().enumerate() {
-            if *value {
-                let bit = index;
-                let byte_index = out_cursor + (bit / 8);
-                let bit_in_byte = bit % 8;
-                out[byte_index] |= 1 << bit_in_byte;
-            }
-        }
-    }
-
-    #[cfg(not(feature = "simd"))]
-    {
-        for (index, &value) in values.iter().enumerate() {
-            if value {
-                let byte_index = index / 8;
-                let bit_in_byte = index % 8;
-                out[byte_index] |= 1 << bit_in_byte;
-            }
-        }
-    }
-
-    out
+enum PackedData<'a> {
+    Bool(&'a [bool]),
+    U8(&'a [u8]),
 }
 
 /// Packed sequence state shared by the packed APIs.
 #[doc(hidden)]
-pub struct PackedSequenceState {
-    bytes: Vec<u8>,
-    cursor: usize,
+pub struct PackedSequenceState<'a> {
+    data: PackedData<'a>,
+    bits_per_value: u8,
+    index: usize,
+    len: usize,
     start_pos: Option<usize>,
+    buf: [u8; 64],
+    buf_len: usize,
+    buf_cursor: usize,
 }
 
-impl PackedSequenceState {
-    pub(crate) fn new(bytes: Vec<u8>) -> Self {
+impl<'a> PackedSequenceState<'a> {
+    pub fn new_bool(values: &'a [bool]) -> Self {
         Self {
-            bytes,
-            cursor: 0,
+            data: PackedData::Bool(values),
+            bits_per_value: 1,
+            index: 0,
+            len: values.len(),
             start_pos: None,
+            buf: [0u8; 64],
+            buf_len: 0,
+            buf_cursor: 0,
         }
+    }
+
+    pub fn new_u8(values: &'a [u8], bits_per_value: u8) -> Self {
+        Self {
+            data: PackedData::U8(values),
+            bits_per_value,
+            index: 0,
+            len: values.len(),
+            start_pos: None,
+            buf: [0u8; 64],
+            buf_len: 0,
+            buf_cursor: 0,
+        }
+    }
+
+    fn fill_buf(&mut self) -> Result<(), ZebinError> {
+        self.buf.fill(0);
+        let mut bit_offset = 0usize;
+        let bits_per_value = self.bits_per_value as usize;
+
+        while self.index < self.len && bit_offset + bits_per_value <= 64 * 8 {
+            match self.data {
+                PackedData::Bool(values) => {
+                    if values[self.index] {
+                        let byte_idx = bit_offset / 8;
+                        let bit_idx = bit_offset % 8;
+                        self.buf[byte_idx] |= 1 << bit_idx;
+                    }
+                }
+                PackedData::U8(values) => {
+                    let value = values[self.index];
+                    let mask = if bits_per_value == 8 {
+                        u8::MAX
+                    } else {
+                        (1u8 << bits_per_value) - 1
+                    };
+                    if value > mask {
+                        return Err(ZebinError::SerializationError {
+                            pos: self.index,
+                            message: "Value exceeds packed bit capacity",
+                        });
+                    }
+                    let byte_idx = bit_offset / 8;
+                    let bit_shift = bit_offset % 8;
+                    self.buf[byte_idx] |= value << bit_shift;
+                    if bit_shift + bits_per_value > 8 {
+                        self.buf[byte_idx + 1] |= value >> (8 - bit_shift);
+                    }
+                }
+            }
+            bit_offset += bits_per_value;
+            self.index += 1;
+        }
+
+        self.buf_len = bit_offset.div_ceil(8);
+        self.buf_cursor = 0;
+        Ok(())
     }
 }
 
-impl<'a> SerializeState<'a> for PackedSequenceState {
+impl<'a> SerializeState<'a> for PackedSequenceState<'a> {
     type Resolver = usize;
 
     fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
@@ -145,14 +111,21 @@ impl<'a> SerializeState<'a> for PackedSequenceState {
             self.start_pos = Some(encoder.pos());
         }
 
-        let written = encoder.write(&self.bytes[self.cursor..])?;
-        self.cursor += written;
-        if self.cursor < self.bytes.len() {
-            Ok(Poll::Pending)
-        } else {
-            Ok(Poll::Ready(
-                self.start_pos.expect("start position set above"),
-            ))
+        loop {
+            if self.buf_cursor >= self.buf_len {
+                if self.index >= self.len {
+                    return Ok(Poll::Ready(
+                        self.start_pos.expect("start position set above"),
+                    ));
+                }
+                self.fill_buf()?;
+            }
+
+            let written = encoder.write(&self.buf[self.buf_cursor..self.buf_len])?;
+            self.buf_cursor += written;
+            if self.buf_cursor < self.buf_len {
+                return Ok(Poll::Pending);
+            }
         }
     }
 }
@@ -236,12 +209,12 @@ impl Archive for PackedVec<bool, 1> {
 
 impl Serialize for PackedVec<bool, 1> {
     type State<'a>
-        = PackedSequenceState
+        = PackedSequenceState<'a>
     where
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new(pack_bools(self.values.as_slice())))
+        Ok(PackedSequenceState::new_bool(self.values.as_slice()))
     }
 }
 
@@ -270,39 +243,33 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
 
 impl<const BITS: u8> Serialize for PackedVec<u8, BITS> {
     type State<'a>
-        = PackedSequenceState
+        = PackedSequenceState<'a>
     where
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new(pack_small_values(
-            self.values.as_slice(),
-            usize::from(BITS),
-        )?))
+        Ok(PackedSequenceState::new_u8(self.values.as_slice(), BITS))
     }
 }
 
 impl Serialize for crate::archive::packed::PackedSlice<'_, bool, 1> {
     type State<'a>
-        = PackedSequenceState
+        = PackedSequenceState<'a>
     where
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new(pack_bools(self.values())))
+        Ok(PackedSequenceState::new_bool(self.values()))
     }
 }
 
 impl<const BITS: u8> Serialize for crate::archive::packed::PackedSlice<'_, u8, BITS> {
     type State<'a>
-        = PackedSequenceState
+        = PackedSequenceState<'a>
     where
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new(pack_small_values(
-            self.values(),
-            usize::from(BITS),
-        )?))
+        Ok(PackedSequenceState::new_u8(self.values(), BITS))
     }
 }

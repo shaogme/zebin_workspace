@@ -191,7 +191,9 @@ where
     phase: SequencePhase,
     write_index: usize,
     data_pos: Option<usize>,
-    current_bytes: Option<Vec<u8>>,
+    current_bytes: [u8; 64],
+    current_len: usize,
+    current_bytes_vec: Option<Vec<u8>>,
     current_cursor: usize,
 }
 
@@ -206,7 +208,9 @@ where
             phase: SequencePhase::Serializing,
             write_index: 0,
             data_pos: None,
-            current_bytes: None,
+            current_bytes: [0u8; 64],
+            current_len: 0,
+            current_bytes_vec: None,
             current_cursor: 0,
         }
     }
@@ -241,7 +245,7 @@ where
             ));
         }
 
-        if self.current_bytes.is_none() {
+        if self.current_bytes_vec.is_none() && self.current_len == 0 {
             let resolver = self.children.take_resolver(self.write_index);
             let element_pos = encoder.pos();
             let archived = self
@@ -249,21 +253,39 @@ where
                 .source()
                 .get(self.write_index)
                 .resolve(element_pos, resolver)?;
-            self.current_bytes = Some(archived_bytes(&archived));
+            let size = archived.size_hint();
+            if size <= 64 {
+                <T::Archived as Layout>::write_archived_bytes(
+                    &archived,
+                    &mut self.current_bytes[..size],
+                );
+                self.current_len = size;
+            } else {
+                self.current_bytes_vec = Some(archived_bytes(&archived));
+            }
             self.current_cursor = 0;
         }
 
-        let archived_bytes = self
-            .current_bytes
-            .as_ref()
-            .expect("archived element initialized above");
-        let written = encoder.write(&archived_bytes[self.current_cursor..])?;
-        self.current_cursor += written;
-        if self.current_cursor < archived_bytes.len() {
-            return Ok(Poll::Pending);
-        }
+        let written = if let Some(ref bytes) = self.current_bytes_vec {
+            let written = encoder.write(&bytes[self.current_cursor..])?;
+            self.current_cursor += written;
+            if self.current_cursor < bytes.len() {
+                return Ok(Poll::Pending);
+            }
+            written
+        } else {
+            let written =
+                encoder.write(&self.current_bytes[self.current_cursor..self.current_len])?;
+            self.current_cursor += written;
+            if self.current_cursor < self.current_len {
+                return Ok(Poll::Pending);
+            }
+            written
+        };
 
-        self.current_bytes = None;
+        let _ = written;
+        self.current_bytes_vec = None;
+        self.current_len = 0;
         self.write_index += 1;
         Ok(Poll::Pending)
     }

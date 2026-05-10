@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use core::{marker::PhantomData, num::NonZeroUsize, task::Poll};
 
 use crate::{
@@ -369,17 +369,21 @@ impl<'a, T: VarIntNumber> Serialize for PackedVarIntSlice<'a, T> {
 }
 
 pub struct VarIntArchiveState<T: VarIntNumber> {
-    bytes: Vec<u8>,
-    cursor: usize,
+    bytes: [u8; 10],
+    len: u8,
+    cursor: u8,
     _marker: PhantomData<T>,
 }
 
 impl<T: VarIntNumber> VarIntArchiveState<T> {
     pub(crate) fn new(value: T) -> Self {
-        let mut bytes = vec![0u8; encoded_len_u64(value.to_u64())];
-        encode_u64(value.to_u64(), &mut bytes);
+        let val = value.to_u64();
+        let len = encoded_len_u64(val);
+        let mut bytes = [0u8; 10];
+        encode_u64(val, &mut bytes[..len]);
         Self {
             bytes,
+            len: len as u8,
             cursor: 0,
             _marker: PhantomData,
         }
@@ -393,9 +397,9 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntArchiveState<T> {
         &mut self,
         encoder: &mut E,
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
-        let written = encoder.write(&self.bytes[self.cursor..])?;
-        self.cursor += written;
-        if self.cursor < self.bytes.len() {
+        let written = encoder.write(&self.bytes[self.cursor as usize..self.len as usize])?;
+        self.cursor += written as u8;
+        if self.cursor < self.len {
             Ok(Poll::Pending)
         } else {
             Ok(Poll::Ready(()))
