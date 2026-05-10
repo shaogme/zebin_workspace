@@ -195,7 +195,6 @@ impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
         unsafe { core::slice::from_raw_parts(ptr.as_ptr(), byte_len) }
     }
 }
-
 impl<const BITS: u8> ArchivedDefault for ArchivedPackedU8Slice<BITS> {
     fn archived_default() -> &'static Self {
         static DEFAULT: ArchivedPackedU8Slice<8> = ArchivedPackedU8Slice { ptr: None, len: 0 };

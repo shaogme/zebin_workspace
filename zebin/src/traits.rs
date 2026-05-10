@@ -3,7 +3,7 @@ use core::num::NonZeroUsize;
 use crate::core::schema::ObjectEncoding;
 use crate::error::{AccessError, ArchiveError, ParseHeaderError, ValidateError};
 use crate::validation::context::ValidationContext;
-use crate::{LayoutField, SchemaRevision, StableSchemaKey, ZebinError};
+use crate::{LayoutField, ResolvedLayout, SchemaRevision, StableSchemaKey, ZebinError};
 use core::num::NonZeroU32;
 
 /// Archived-side binary layout contract.
@@ -120,6 +120,28 @@ impl<T: SchemaAware + ?Sized> SchemaAware for &T {
     }
 }
 
+/// Contract for types that can be restored to their original form from an archived representation.
+pub trait Restore<T> {
+    /// Restores the original value from the archived representation.
+    fn restore(&self) -> Result<T, ZebinError>;
+}
+
+/// Contract for schema-aware archived types that require a layout for restoration.
+pub trait RestoreFromView<'a, T, H: ArchiveHeader> {
+    /// Restores the original value using the provided resolved layout.
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<T, ZebinError>;
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, U, H> for &'a T
+where
+    T: RestoreFromView<'a, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<U, ZebinError> {
+        let item_layout = crate::read::get_nested_layout(layout, *self)?;
+        (*self).restore_from_view(&item_layout)
+    }
+}
+
 /// Byte-stream sink used by archive state machines.
 pub trait ByteSink {
     fn pos(&self) -> usize;
@@ -232,4 +254,35 @@ where
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
+}
+
+pub struct OptRestorer<'a, A, H: ArchiveHeader> {
+    pub data: Option<&'a A>,
+    pub layout: &'a crate::read::ResolvedLayout<'a, H>,
+    pub error_msg: &'static str,
+}
+
+pub trait OptRestorerFallback<'a, T, H: ArchiveHeader> {
+    fn restore(self) -> Result<T, ZebinError>;
+}
+
+impl<'a, A, T, H: ArchiveHeader> OptRestorerFallback<'a, T, H> for &OptRestorer<'a, A, H>
+where
+    A: RestoreFromView<'a, T, H> + Layout,
+{
+    fn restore(self) -> Result<T, ZebinError> {
+        match self.data {
+            Some(archived) => {
+                let nested = crate::read::get_nested_layout(self.layout, archived)?;
+                archived.restore_from_view(&nested)
+            }
+            None => Err(ZebinError::DeserializeError {
+                message: self.error_msg,
+            }),
+        }
+    }
+}
+
+pub trait OptRestorerOption<'a, T, H: ArchiveHeader> {
+    fn restore(self) -> Result<Option<T>, ZebinError>;
 }

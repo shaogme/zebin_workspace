@@ -3,7 +3,7 @@ use crate::{
     error::{AccessError, ArchiveError, ValidateError},
     traits::{
         Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
-        LayoutSink, Serialize, SerializeState, Validate,
+        LayoutSink, Restore, Serialize, SerializeState, Validate,
     },
     validation::context::ValidationContext,
 };
@@ -122,6 +122,18 @@ macro_rules! impl_archive_for_primitive {
                     &DEFAULT
                 }
             }
+
+            impl crate::traits::Restore<$t> for $t {
+                fn restore(&self) -> Result<$t, ZebinError> {
+                    Ok(*self)
+                }
+            }
+
+            impl<'a, H: crate::traits::ArchiveHeader> crate::traits::RestoreFromView<'a, $t, H> for $t {
+                fn restore_from_view(&self, _layout: &crate::ResolvedLayout<'a, H>) -> Result<$t, ZebinError> {
+                    Ok(*self)
+                }
+            }
         )*
     };
 }
@@ -197,5 +209,20 @@ impl Serialize for bool {
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ByteState::new([*self as u8], NonZeroUsize::new(1).unwrap()))
+    }
+}
+
+impl Restore<bool> for bool {
+    fn restore(&self) -> Result<bool, ZebinError> {
+        Ok(*self)
+    }
+}
+
+impl<'a, H: crate::traits::ArchiveHeader> crate::traits::RestoreFromView<'a, bool, H> for bool {
+    fn restore_from_view(
+        &self,
+        _layout: &crate::ResolvedLayout<'a, H>,
+    ) -> Result<bool, ZebinError> {
+        Ok(*self)
     }
 }

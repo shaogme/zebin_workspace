@@ -5,7 +5,11 @@ use crate::{
     archive::packed::{ArchivedPackedBoolSlice, ArchivedPackedU8Slice},
     core::rel_ptr::RelPtr,
     error::{ArchiveError, ZebinError},
-    traits::{Archive, ByteSink, LayoutSink, Serialize, SerializeState},
+    read::ResolvedLayout,
+    traits::{
+        Archive, ArchiveHeader, ByteSink, LayoutSink, Restore, RestoreFromView, Serialize,
+        SerializeState,
+    },
     utils::num::usize_to_u32,
 };
 
@@ -270,5 +274,41 @@ impl<const BITS: u8> Serialize for crate::archive::packed::PackedSlice<'_, u8, B
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(PackedSequenceState::new_u8(self.values(), BITS))
+    }
+}
+
+impl Restore<Vec<bool>> for ArchivedPackedBoolSlice {
+    fn restore(&self) -> Result<Vec<bool>, ZebinError> {
+        let len = self.len();
+        let mut out = Vec::with_capacity(len);
+        for i in 0..len {
+            out.push(self.get(i).unwrap());
+        }
+        Ok(out)
+    }
+}
+
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, Vec<bool>, H> for ArchivedPackedBoolSlice {
+    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<Vec<bool>, ZebinError> {
+        self.restore()
+    }
+}
+
+impl<const BITS: u8> Restore<Vec<u8>> for ArchivedPackedU8Slice<BITS> {
+    fn restore(&self) -> Result<Vec<u8>, ZebinError> {
+        let len = self.len();
+        let mut out = Vec::with_capacity(len);
+        for i in 0..len {
+            out.push(self.get(i).unwrap());
+        }
+        Ok(out)
+    }
+}
+
+impl<'a, const BITS: u8, H: ArchiveHeader> RestoreFromView<'a, Vec<u8>, H>
+    for ArchivedPackedU8Slice<BITS>
+{
+    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<Vec<u8>, ZebinError> {
+        self.restore()
     }
 }

@@ -4,8 +4,8 @@ use syn::{DeriveInput, Ident};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, archived_name, field_archived_type, field_user_ident,
-    has_schema, input_member, layout_field_entries, packed_wrapper_type_expr, parse_item,
-    resolver_name, user_member,
+    generate_field_restore_expr, has_schema, input_member, layout_field_entries,
+    packed_wrapper_type_expr, parse_item, resolver_name, user_member,
 };
 
 mod enums;
@@ -112,7 +112,7 @@ pub fn record_layout_checks_logic(
     quote! { #(#checks)* }
 }
 
-pub fn record_field_validations(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
+pub fn field_validations(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let stable_schema_key = record.stable_schema_key;
     let schema_revision = record.schema_revision;
     record.active_fields().map(|(index, field)| {
@@ -245,7 +245,7 @@ pub fn helper_bytes_impl(
     }
     writes.extend(record_field_inits(record, archived_name));
     let layout_checks = record_layout_checks_logic(record, archived_name);
-    let field_validations = record_field_validations(record);
+    let field_validations = field_validations(record);
     let fixed_range = if has_schema(record) {
         quote! {}
     } else {
@@ -384,7 +384,126 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
         }
         RecordStyle::Unit => quote! { #archived_name },
     };
-    quote! { #helper impl zebin::Archive for #name { type Archived = #archived_name; type Resolver = #resolver_name; fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, zebin::ArchiveError> { Ok(#resolve_expr) } } }
+    let view_restore_impl = if has_schema(record) {
+        let mut fields = Vec::new();
+        for (index, field) in record.fields.iter().enumerate() {
+            let s_member = input_member(record, index);
+            if field.skip {
+                match record.style {
+                    RecordStyle::Named => {
+                        fields.push(quote! { #s_member: Default::default() });
+                    }
+                    RecordStyle::Unnamed => {
+                        fields.push(quote! { Default::default() });
+                    }
+                    RecordStyle::Unit => {}
+                }
+                continue;
+            }
+            let id = field.ident.expect("named field has ident");
+            let r_field = field.rename.as_ref().unwrap_or(id);
+            match record.style {
+                RecordStyle::Named => {
+                    let field_name_str = format!("missing optional field: {}", r_field);
+                    let restore_expr = generate_field_restore_expr(
+                        field,
+                        quote! { self_view.layout() },
+                        quote! { self_view.#r_field()? },
+                        &field_name_str,
+                    );
+                    fields.push(quote! { #s_member: #restore_expr });
+                }
+                RecordStyle::Unnamed => {
+                    let field_method = format_ident!("field{}", index);
+                    let field_name_str = format!("missing optional field: field{}", index);
+                    let restore_expr = generate_field_restore_expr(
+                        field,
+                        quote! { self_view.layout() },
+                        quote! { self_view.#field_method()? },
+                        &field_name_str,
+                    );
+                    fields.push(restore_expr);
+                }
+                RecordStyle::Unit => {}
+            }
+        }
+        let constructor = match record.style {
+            RecordStyle::Named => quote! { #name { #(#fields),* } },
+            RecordStyle::Unnamed => quote! { #name( #(#fields),* ) },
+            RecordStyle::Unit => quote! { #name },
+        };
+        quote! {
+            impl<'a, H: zebin::ArchiveHeaderTrait> zebin::RestoreFromView<'a, #name, H> for #archived_name {
+                fn restore_from_view(&self, layout: &zebin::ResolvedLayout<'a, H>) -> Result<#name, zebin::ZebinError> {
+                    let self_view: zebin::View<'a, &#archived_name, H> = zebin::View::new_with_layout(self, *layout);
+                    Ok(#constructor)
+                }
+            }
+            impl<'a, H: zebin::ArchiveHeaderTrait> zebin::Restore<#name> for zebin::View<'a, &#archived_name, H> {
+                fn restore(&self) -> Result<#name, zebin::ZebinError> {
+                    self.data().restore_from_view(self.layout())
+                }
+            }
+            impl zebin::Restore<#name> for #archived_name {
+                fn restore(&self) -> Result<#name, zebin::ZebinError> {
+                    self.restore_from_view(&zebin::ResolvedLayout::context_only(&[], (*<zebin::ArchiveHeader as zebin::ArchivedDefault>::archived_default())))
+                }
+            }
+        }
+    } else {
+        let mut fields = Vec::new();
+        for (index, field) in record.fields.iter().enumerate() {
+            let s_member = input_member(record, index);
+            if field.skip {
+                match record.style {
+                    RecordStyle::Named => {
+                        fields.push(quote! { #s_member: Default::default() });
+                    }
+                    RecordStyle::Unnamed => {
+                        fields.push(quote! { Default::default() });
+                    }
+                    RecordStyle::Unit => {}
+                }
+                continue;
+            }
+            let a_member = user_member(record, index);
+            match record.style {
+                RecordStyle::Named => {
+                    fields.push(quote! { #s_member: self.#a_member.restore()? });
+                }
+                RecordStyle::Unnamed => {
+                    fields.push(quote! { self.#a_member.restore()? });
+                }
+                RecordStyle::Unit => {}
+            }
+        }
+        let constructor = match record.style {
+            RecordStyle::Named => quote! { #name { #(#fields),* } },
+            RecordStyle::Unnamed => quote! { #name( #(#fields),* ) },
+            RecordStyle::Unit => quote! { #name },
+        };
+        quote! {
+            impl zebin::Restore<#name> for #archived_name {
+                fn restore(&self) -> Result<#name, zebin::ZebinError> {
+                    Ok(#constructor)
+                }
+            }
+            impl<'a, H: zebin::ArchiveHeaderTrait> zebin::Restore<#name> for zebin::View<'a, &#archived_name, H> {
+                fn restore(&self) -> Result<#name, zebin::ZebinError> {
+                    self.data().restore()
+                }
+            }
+        }
+    };
+
+    let restore_impl = quote! {
+        const _: () = {
+            use zebin::{Restore, RestoreFromView};
+            #view_restore_impl
+        };
+    };
+
+    quote! { #helper #restore_impl impl zebin::Archive for #name { type Archived = #archived_name; type Resolver = #resolver_name; fn resolve(&self, pos: usize, resolver: Self::Resolver) -> Result<Self::Archived, zebin::ArchiveError> { Ok(#resolve_expr) } } }
 }
 
 // --- Main Entry Point ---

@@ -107,3 +107,15 @@ impl ArchiveHeader {
         bytes
     }
 }
+
+impl crate::traits::ArchivedDefault for ArchiveHeader {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchiveHeader = ArchiveHeader {
+            version: ARCHIVE_VERSION,
+            flags: 0,
+            layout_offset: NonZeroU32::new(12).unwrap(),
+            root_offset: NonZeroU32::new(12).unwrap(),
+        };
+        &DEFAULT
+    }
+}

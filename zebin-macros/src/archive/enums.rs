@@ -1,7 +1,8 @@
-use super::{helper_record, record_field_validations, record_layout_checks_logic};
+use super::{field_validations, helper_record, record_layout_checks_logic};
 use crate::shared::{
-    RecordStyle, VariantSpec, archived_name, has_schema, packed_wrapper_type_expr, payload_name,
-    user_member, variant_archived_name, variant_field_name, variant_method_name,
+    RecordStyle, VariantSpec, archived_name, field_user_ident, generate_field_restore_expr,
+    has_schema, input_member, packed_wrapper_type_expr, payload_name, user_member,
+    variant_archived_name, variant_field_name, variant_method_name,
 };
 use quote::{format_ident, quote};
 use syn::Ident;
@@ -59,7 +60,7 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
         }
 
         let layout_checks = record_layout_checks_logic(&variant.record, &helper_name);
-        let field_validations = record_field_validations(&variant.record);
+        let field_validations = field_validations(&variant.record);
         variant_validate_arms.push(quote! {
             #idx_lit => {
                 let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
@@ -189,6 +190,117 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             }
         });
     }
+
+    let mut restore_arms = Vec::new();
+    for (idx, variant) in variants.iter().enumerate() {
+        let idx_lit = idx as u32;
+        let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
+        let variant_ident = variant.ident;
+        let accessor_name = if variant.record.fields.is_empty() {
+            variant_method_name("is", variant_user_ident)
+        } else {
+            variant_method_name("as", variant_user_ident)
+        };
+
+        let mut fields = Vec::new();
+        for (fi, field) in variant.record.fields.iter().enumerate() {
+            let s_member = input_member(&variant.record, fi);
+            if field.skip {
+                match variant.record.style {
+                    RecordStyle::Named => {
+                        fields.push(quote! { #s_member: Default::default() });
+                    }
+                    RecordStyle::Unnamed => {
+                        fields.push(quote! { Default::default() });
+                    }
+                    RecordStyle::Unit => {}
+                }
+                continue;
+            }
+            if has_schema(&variant.record) {
+                let method = field_user_ident(&variant.record, fi);
+                let field_name_str = format!("missing optional field: {}", method);
+                let restore_expr = generate_field_restore_expr(
+                    field,
+                    quote! { variant_view.layout() },
+                    quote! { variant_view.#method()? },
+                    &field_name_str,
+                );
+                if variant.record.style == RecordStyle::Named {
+                    fields.push(quote! { #s_member: #restore_expr });
+                } else {
+                    fields.push(restore_expr);
+                }
+            } else {
+                let a_member = user_member(&variant.record, fi);
+                let restore_expr = quote! {
+                    {
+                        let data = &variant_data.#a_member;
+                        data.restore_from_view(self_view.layout())?
+                    }
+                };
+                if variant.record.style == RecordStyle::Named {
+                    fields.push(quote! { #s_member: #restore_expr });
+                } else {
+                    fields.push(restore_expr);
+                }
+            }
+        }
+
+        let constructor = match variant.record.style {
+            RecordStyle::Named => quote! { #name::#variant_ident { #(#fields),* } },
+            RecordStyle::Unnamed => quote! { #name::#variant_ident( #(#fields),* ) },
+            RecordStyle::Unit => quote! { #name::#variant_ident },
+        };
+
+        let restore_arm = if variant.record.fields.is_empty() {
+            quote! { #idx_lit => Ok(#name::#variant_ident) }
+        } else if has_schema(&variant.record) {
+            quote! {
+                #idx_lit => {
+                    let variant_view = unsafe { self_view.#accessor_name()? }.expect("tag matches");
+                    Ok(#constructor)
+                }
+            }
+        } else {
+            quote! {
+                #idx_lit => {
+                    let variant_data = unsafe { self_view.data().#accessor_name() }.expect("tag matches");
+                    Ok(#constructor)
+                }
+            }
+        };
+        restore_arms.push(restore_arm);
+    }
+
+    let view_restore_impl = quote! {
+        impl<'a, H: zebin::ArchiveHeaderTrait> zebin::RestoreFromView<'a, #name, H> for #archived_name {
+            fn restore_from_view(&self, layout: &zebin::ResolvedLayout<'a, H>) -> Result<#name, zebin::ZebinError> {
+                let self_view: zebin::View<'a, &#archived_name, H> = zebin::View::new_with_layout(self, *layout);
+                match self.tag() {
+                    #(#restore_arms,)*
+                    _ => unreachable!("validated tag"),
+                }
+            }
+        }
+        impl<'a, H: zebin::ArchiveHeaderTrait> zebin::Restore<#name> for zebin::View<'a, &#archived_name, H> {
+            fn restore(&self) -> Result<#name, zebin::ZebinError> {
+                self.data().restore_from_view(self.layout())
+            }
+        }
+        impl zebin::Restore<#name> for #archived_name {
+            fn restore(&self) -> Result<#name, zebin::ZebinError> {
+                self.restore_from_view(&zebin::ResolvedLayout::context_only(&[], (*<zebin::ArchiveHeader as zebin::ArchivedDefault>::archived_default())))
+            }
+        }
+    };
+
+    let restore_impl = quote! {
+        const _: () = {
+            use zebin::{Restore, RestoreFromView};
+            #view_restore_impl
+        };
+    };
 
     let payload_struct = quote! {
         #[repr(C)]
@@ -345,6 +457,7 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
         #root_bytes
         #root_decode
         #root_accessors
+        #restore_impl
         #root_archive
     }
 }

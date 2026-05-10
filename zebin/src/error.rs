@@ -206,6 +206,8 @@ pub enum ZebinError {
     BufferTooSmall { pos: usize, required: usize },
     /// General error during serialization.
     SerializationError { pos: usize, message: &'static str },
+    /// General error during deserialization/restoration.
+    DeserializeError { message: &'static str },
     /// Error during layout registration.
     /// A different layout is already registered for the same stable schema key and revision.
     LayoutCollision {
@@ -260,6 +262,9 @@ impl core::fmt::Display for ZebinError {
             }
             ZebinError::SerializationError { pos, message } => {
                 write!(f, "serialization error at {pos}: {message}")
+            }
+            ZebinError::DeserializeError { message } => {
+                write!(f, "deserialize error: {message}")
             }
             ZebinError::LayoutCollision { key, revision } => {
                 write!(f, "layout collision for key {key} revision {revision}")

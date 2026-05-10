@@ -2,7 +2,9 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    traits::{Access, Archive, ByteSink, Layout, LayoutSink, Serialize, SerializeState, Validate},
+    traits::{
+        Access, Archive, ByteSink, Layout, LayoutSink, Restore, Serialize, SerializeState, Validate,
+    },
     utils::byteops,
     validation::context::ValidationContext,
 };
@@ -145,6 +147,46 @@ where
             <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+    }
+}
+
+impl<T, E, U, V> Restore<Result<U, V>> for ArchivedResult<T, E>
+where
+    T: Restore<U>,
+    E: Restore<V>,
+{
+    fn restore(&self) -> Result<Result<U, V>, ZebinError> {
+        match self.tag {
+            0 => Ok(Ok(unsafe { self.as_ok().unwrap().restore()? })),
+            1 => Ok(Err(unsafe { self.as_err().unwrap().restore()? })),
+            _ => unreachable!("validated tag"),
+        }
+    }
+}
+
+impl<'a, T, E, U, V, H: crate::traits::ArchiveHeader>
+    crate::traits::RestoreFromView<'a, Result<U, V>, H> for ArchivedResult<T, E>
+where
+    T: Restore<U> + for<'b> crate::traits::RestoreFromView<'b, U, H> + crate::traits::Layout,
+    E: Restore<V> + for<'b> crate::traits::RestoreFromView<'b, V, H> + crate::traits::Layout,
+{
+    fn restore_from_view(
+        &self,
+        layout: &crate::ResolvedLayout<'a, H>,
+    ) -> Result<Result<U, V>, ZebinError> {
+        match self.tag {
+            0 => {
+                let val = unsafe { self.as_ok().unwrap() };
+                let item_layout = crate::read::get_nested_layout(layout, val)?;
+                Ok(Ok(val.restore_from_view(&item_layout)?))
+            }
+            1 => {
+                let err = unsafe { self.as_err().unwrap() };
+                let item_layout = crate::read::get_nested_layout(layout, err)?;
+                Ok(Err(err.restore_from_view(&item_layout)?))
+            }
+            _ => unreachable!("validated tag"),
+        }
     }
 }
 

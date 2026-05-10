@@ -1,10 +1,14 @@
-use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
+use crate::ResolvedLayout;
 use crate::{
     archive::slice::{ArchivedVec, SequenceSource, resolve_sequence_archive},
     error::ZebinError,
-    traits::{Archive, ByteSink, Layout, LayoutSink, Serialize, SerializeState},
+    traits::{
+        Archive, ArchiveHeader, ByteSink, Layout, LayoutSink, Restore, RestoreFromView, Serialize,
+        SerializeState,
+    },
 };
 
 impl<T> SequenceSource<T> for VecDeque<T> {
@@ -465,5 +469,104 @@ where
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ArrayArchiveState::new(self))
+    }
+}
+
+impl<T, U> Restore<Vec<U>> for ArchivedVec<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let slice = unsafe { self.as_slice() };
+        let mut vec = Vec::with_capacity(slice.len());
+        for item in slice {
+            vec.push(item.restore()?);
+        }
+        Ok(vec)
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Vec<U>, H> for ArchivedVec<T>
+where
+    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Vec<U>, ZebinError> {
+        let slice = unsafe { self.as_slice() };
+        let mut vec = Vec::with_capacity(slice.len());
+        for item in slice {
+            let item_layout = crate::read::get_nested_layout(layout, item)?;
+            vec.push(item.restore_from_view(&item_layout)?);
+        }
+        Ok(vec)
+    }
+}
+
+impl<T, U> Restore<Cow<'static, [U]>> for ArchivedVec<T>
+where
+    T: Restore<U>,
+    U: Clone,
+{
+    fn restore(&self) -> Result<Cow<'static, [U]>, ZebinError> {
+        Ok(Cow::Owned(self.restore()?))
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Cow<'static, [U]>, H> for ArchivedVec<T>
+where
+    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+    U: Clone,
+{
+    fn restore_from_view(
+        &self,
+        layout: &ResolvedLayout<'a, H>,
+    ) -> Result<Cow<'static, [U]>, ZebinError> {
+        Ok(Cow::Owned(self.restore_from_view(layout)?))
+    }
+}
+
+impl<T, U> Restore<VecDeque<U>> for ArchivedVec<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
+        let slice = unsafe { self.as_slice() };
+        let mut queue = VecDeque::with_capacity(slice.len());
+        for item in slice {
+            queue.push_back(item.restore()?);
+        }
+        Ok(queue)
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, VecDeque<U>, H> for ArchivedVec<T>
+where
+    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<VecDeque<U>, ZebinError> {
+        let slice = unsafe { self.as_slice() };
+        let mut queue = VecDeque::with_capacity(slice.len());
+        for item in slice {
+            let item_layout = crate::read::get_nested_layout(layout, item)?;
+            queue.push_back(item.restore_from_view(&item_layout)?);
+        }
+        Ok(queue)
+    }
+}
+
+impl<T, U> Restore<Box<Vec<U>>> for ArchivedVec<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Box<Vec<U>>, ZebinError> {
+        Ok(Box::new(self.restore()?))
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Box<Vec<U>>, H> for ArchivedVec<T>
+where
+    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Box<Vec<U>>, ZebinError> {
+        Ok(Box::new(self.restore_from_view(layout)?))
     }
 }

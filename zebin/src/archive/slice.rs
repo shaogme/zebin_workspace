@@ -3,7 +3,7 @@ use core::num::NonZeroUsize;
 use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError},
-    traits::{Access, Archive, ArchivedDefault, Layout, Validate},
+    traits::{Access, Archive, ArchivedDefault, Layout, Restore, Validate},
     utils::num::{u32_to_usize, usize_to_u32},
     validation::context::ValidationContext,
 };
@@ -12,10 +12,7 @@ use crate::{
 pub trait SequenceSource<T> {
     fn len(&self) -> usize;
 
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
+    #[cfg(feature = "alloc")]
     fn get(&self, index: usize) -> &T;
 }
 
@@ -24,6 +21,7 @@ impl<T> SequenceSource<T> for [T] {
         <[T]>::len(self)
     }
 
+    #[cfg(feature = "alloc")]
     fn get(&self, index: usize) -> &T {
         &self[index]
     }
@@ -34,6 +32,7 @@ impl<T, const N: usize> SequenceSource<T> for [T; N] {
         N
     }
 
+    #[cfg(feature = "alloc")]
     fn get(&self, index: usize) -> &T {
         &self[index]
     }
@@ -166,6 +165,45 @@ where
             <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
         }
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+    }
+}
+
+impl<T, U, const N: usize> Restore<[U; N]> for [T; N]
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<[U; N], crate::error::ZebinError> {
+        let mut out = core::mem::MaybeUninit::<[U; N]>::uninit();
+        let out_ptr = out.as_mut_ptr() as *mut U;
+        for (index, item) in self.iter().enumerate() {
+            unsafe {
+                out_ptr.add(index).write(item.restore()?);
+            }
+        }
+        Ok(unsafe { out.assume_init() })
+    }
+}
+
+impl<'a, T, U, const N: usize, H: crate::traits::ArchiveHeader>
+    crate::traits::RestoreFromView<'a, [U; N], H> for [T; N]
+where
+    T: Restore<U> + for<'b> crate::traits::RestoreFromView<'b, U, H> + crate::traits::Layout,
+{
+    fn restore_from_view(
+        &self,
+        layout: &crate::ResolvedLayout<'a, H>,
+    ) -> Result<[U; N], crate::error::ZebinError> {
+        let mut out = core::mem::MaybeUninit::<[U; N]>::uninit();
+        let out_ptr = out.as_mut_ptr() as *mut U;
+        for (index, item) in self.iter().enumerate() {
+            let item_layout = crate::read::get_nested_layout(layout, item)?;
+            unsafe {
+                out_ptr
+                    .add(index)
+                    .write(item.restore_from_view(&item_layout)?);
+            }
+        }
+        Ok(unsafe { out.assume_init() })
     }
 }
 

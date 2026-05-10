@@ -192,6 +192,35 @@ pub fn field_resolver_type(field: &FieldSpec<'_>) -> TokenStream {
     }
 }
 
+pub fn generate_field_restore_expr(
+    field: &FieldSpec<'_>,
+    layout_expr: proc_macro2::TokenStream,
+    data_expr: proc_macro2::TokenStream,
+    error_context: &str,
+) -> proc_macro2::TokenStream {
+    let is_default = field.default || field.default_value.is_some();
+    if field.optional && !is_default {
+        quote! {
+            {
+                use zebin::{OptRestorerFallback, OptRestorerOption};
+                zebin::OptRestorer {
+                    data: #data_expr,
+                    layout: &#layout_expr,
+                    error_msg: #error_context,
+                }.restore()?
+            }
+        }
+    } else {
+        quote! {
+            {
+                let data = #data_expr;
+                let nested_layout = zebin::get_nested_layout(#layout_expr, data)?;
+                data.restore_from_view(&nested_layout)?
+            }
+        }
+    }
+}
+
 pub fn field_user_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
     let field = &record.fields[index];
     if let Some(rename) = &field.rename {

@@ -2,13 +2,17 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
+    read::ResolvedLayout,
     traits::{
-        Access, Archive, ArchivedDefault, ByteSink, Layout, LayoutSink, Serialize, SerializeState,
-        Validate,
+        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
+        RestoreFromView, Serialize, SerializeState, Validate,
     },
     utils::byteops,
     validation::context::ValidationContext,
 };
+
+#[cfg(feature = "alloc")]
+use alloc::boxed::Box;
 
 /// Archived representation for `Option<T>`.
 #[repr(C)]
@@ -123,6 +127,83 @@ impl<T: 'static> ArchivedDefault for ArchivedOption<T> {
     }
 }
 
+impl<T, U> Restore<Option<U>> for ArchivedOption<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Option<U>, ZebinError> {
+        match unsafe { self.as_ref() } {
+            Some(value) => Ok(Some(value.restore()?)),
+            None => Ok(None),
+        }
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Option<U>, H> for ArchivedOption<T>
+where
+    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Option<U>, ZebinError> {
+        match unsafe { self.as_ref() } {
+            Some(value) => {
+                let item_layout = crate::read::get_nested_layout(layout, value)?;
+                Ok(Some(value.restore_from_view(&item_layout)?))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T, U> Restore<Box<Option<U>>> for ArchivedOption<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Box<Option<U>>, ZebinError> {
+        Ok(Box::new(self.restore()?))
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Box<Option<U>>, H> for ArchivedOption<T>
+where
+    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
+{
+    fn restore_from_view(
+        &self,
+        layout: &ResolvedLayout<'a, H>,
+    ) -> Result<Box<Option<U>>, ZebinError> {
+        Ok(Box::new(self.restore_from_view(layout)?))
+    }
+}
+
+impl<T, U> Restore<Option<U>> for Option<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Option<U>, ZebinError> {
+        match self {
+            Some(v) => Ok(Some(v.restore()?)),
+            None => Ok(None),
+        }
+    }
+}
+
+impl<'a, T, U, H: ArchiveHeader> RestoreFromView<'a, Option<U>, H> for Option<&'a T>
+where
+    T: RestoreFromView<'a, U, H> + Layout,
+{
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Option<U>, ZebinError> {
+        match *self {
+            Some(val) => {
+                let item_layout = crate::read::get_nested_layout(layout, val)?;
+                Ok(Some(val.restore_from_view(&item_layout)?))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
 /// Resumable serialization state for `Option<T>`.
 pub struct OptionArchiveState<'a, T>
 where
@@ -215,5 +296,21 @@ where
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
         OptionArchiveState::new(self.as_ref())
+    }
+}
+
+impl<'a, A, T, H: ArchiveHeader> crate::traits::OptRestorerOption<'a, T, H>
+    for crate::traits::OptRestorer<'a, ArchivedOption<A>, H>
+where
+    ArchivedOption<A>: RestoreFromView<'a, Option<T>, H> + Layout,
+{
+    fn restore(self) -> Result<Option<T>, ZebinError> {
+        match self.data {
+            Some(archived) => {
+                let nested = crate::read::get_nested_layout(self.layout, archived)?;
+                archived.restore_from_view(&nested)
+            }
+            None => Ok(None),
+        }
     }
 }

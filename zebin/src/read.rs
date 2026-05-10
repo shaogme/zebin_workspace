@@ -2,7 +2,10 @@ use crate::{
     core::schema::{LayoutDirectory, LayoutView, ObjectEncoding},
     error::{ValidateError, ZebinError},
     format::ArchiveHeader,
-    traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, SchemaAware, Validate},
+    traits::{
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Restore, SchemaAware,
+        Validate,
+    },
     utils::num::{u32_to_nonzero_usize, u32_to_usize},
     validation::validator::Validator,
 };
@@ -42,6 +45,14 @@ where
     /// Wrap a schema-aware object into a view using this reader's archive context.
     pub fn view<S: SchemaAware>(&self, obj: &'a S) -> Result<View<'a, &'a S, H>, ZebinError> {
         self.view.view(obj)
+    }
+
+    /// Restore the original root object from this reader.
+    pub fn restore(&self) -> Result<T, ZebinError>
+    where
+        View<'a, <T::Archived as Access<'a>>::View, H>: Restore<T>,
+    {
+        self.view.restore()
     }
 
     /// Decode and validate the archived root object.
@@ -245,6 +256,26 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
     }
 }
 
+/// Helper for resolving a nested layout from a context layout and an archived field.
+pub fn get_nested_layout<'a, T: Layout, H: ArchiveHeaderTrait>(
+    context: &ResolvedLayout<'a, H>,
+    data: &T,
+) -> Result<ResolvedLayout<'a, H>, ZebinError> {
+    if T::ENCODING == crate::core::schema::ObjectEncoding::SchemaAware {
+        // Safety: Schema-aware objects MUST start with 4-byte key and 4-byte revision.
+        // We know T is SchemaAware because of the ENCODING check.
+        let ptr = data as *const T as *const u32;
+        let key = unsafe { *ptr };
+        let rev = unsafe { *ptr.add(1) };
+        context.resolve_nested(key, rev)
+    } else {
+        Ok(ResolvedLayout::context_only(
+            context.bytes(),
+            *context.header(),
+        ))
+    }
+}
+
 /// A view wrapper that binds an archived object with its resolved layout.
 pub struct View<'a, T, H: ArchiveHeaderTrait = ArchiveHeader> {
     data: T,
@@ -253,7 +284,7 @@ pub struct View<'a, T, H: ArchiveHeaderTrait = ArchiveHeader> {
 
 impl<'a, T, H: ArchiveHeaderTrait> View<'a, T, H> {
     /// Create a new view from archived data and its layout.
-    fn new_with_layout(data: T, layout: ResolvedLayout<'a, H>) -> Self {
+    pub fn new_with_layout(data: T, layout: ResolvedLayout<'a, H>) -> Self {
         Self { data, layout }
     }
 
@@ -273,6 +304,14 @@ impl<'a, T, H: ArchiveHeaderTrait> View<'a, T, H> {
             .layout
             .resolve_nested(data.stable_schema_key(), data.schema_revision())?;
         Ok(View::new_with_layout(data, layout))
+    }
+
+    /// Restore the original object from this view.
+    pub fn restore<U>(&self) -> Result<U, ZebinError>
+    where
+        Self: Restore<U>,
+    {
+        Restore::restore(self)
     }
 }
 

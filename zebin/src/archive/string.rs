@@ -1,13 +1,14 @@
 use core::{num::NonZeroUsize, str, task::Poll};
 
-use alloc::string::String;
+use alloc::{borrow::Cow, string::String};
 
 use crate::{
     core::rel_ptr::RelPtr,
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
+    read::ResolvedLayout,
     traits::{
-        Access, Archive, ArchivedDefault, ByteSink, Layout, LayoutSink, Serialize, SerializeState,
-        Validate,
+        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
+        RestoreFromView, Serialize, SerializeState, Validate,
     },
     utils::{
         byteops,
@@ -111,6 +112,45 @@ impl ArchivedDefault for ArchivedString {
     fn archived_default() -> &'static Self {
         static DEFAULT: ArchivedString = ArchivedString { ptr: None, len: 0 };
         &DEFAULT
+    }
+}
+
+impl Restore<String> for ArchivedString {
+    fn restore(&self) -> Result<String, ZebinError> {
+        Ok(unsafe { self.as_str() }.to_string())
+    }
+}
+
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, String, H> for ArchivedString {
+    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<String, ZebinError> {
+        self.restore()
+    }
+}
+
+impl Restore<Cow<'static, str>> for ArchivedString {
+    fn restore(&self) -> Result<Cow<'static, str>, ZebinError> {
+        Ok(Cow::Owned(self.restore()?))
+    }
+}
+
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, Cow<'static, str>, H> for ArchivedString {
+    fn restore_from_view(
+        &self,
+        _layout: &ResolvedLayout<'a, H>,
+    ) -> Result<Cow<'static, str>, ZebinError> {
+        self.restore()
+    }
+}
+
+impl Restore<Box<String>> for ArchivedString {
+    fn restore(&self) -> Result<Box<String>, ZebinError> {
+        Ok(Box::new(self.restore()?))
+    }
+}
+
+impl<'a, H: ArchiveHeader> RestoreFromView<'a, Box<String>, H> for ArchivedString {
+    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Box<String>, ZebinError> {
+        Ok(Box::new(self.restore_from_view(layout)?))
     }
 }
 

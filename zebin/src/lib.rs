@@ -35,7 +35,8 @@ pub mod prelude {
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
         Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
-        LayoutSink, SchemaAware, Serialize, SerializeState, Validate,
+        LayoutSink, OptRestorer, OptRestorerFallback, OptRestorerOption, Restore, RestoreFromView,
+        SchemaAware, Serialize, SerializeState, Validate,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::{
@@ -67,10 +68,11 @@ pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::io::storage::mmap::Mmap;
-pub use crate::read::{ResolvedLayout, View, ZebinReader};
+pub use crate::read::{ResolvedLayout, View, ZebinReader, get_nested_layout};
 pub use crate::traits::{
     Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
-    LayoutSink, SchemaAware, Serialize, SerializeState, Validate,
+    LayoutSink, OptRestorer, OptRestorerFallback, OptRestorerOption, Restore, RestoreFromView,
+    SchemaAware, Serialize, SerializeState, Validate,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::validator::{ValidationPathSegment, ValidationPathStack, Validator};
