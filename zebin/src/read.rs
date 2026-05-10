@@ -55,14 +55,12 @@ where
             ValidateError::ValidationError {
                 message: "Root offset exceeds usize range",
                 pos: 8,
-                path: Default::default(),
             }
         })?;
         if root_pos < H::SIZE {
             return Err(ValidateError::ValidationError {
                 message: "Root overlaps archive header",
                 pos: root_pos,
-                path: Default::default(),
             }
             .into());
         }
@@ -73,7 +71,6 @@ where
                     NonZeroUsize::new_unchecked(root_pos % <T::Archived as Layout>::ALIGNMENT.get())
                 },
                 pos: root_pos,
-                path: Default::default(),
             }
             .into());
         }
@@ -82,7 +79,6 @@ where
             ValidateError::ValidationError {
                 message: "Layout offset exceeds usize range",
                 pos: 4,
-                path: Default::default(),
             }
         })?;
 
@@ -93,12 +89,10 @@ where
                 || ValidateError::ValidationError {
                     message: "Layout offset exceeds usize range",
                     pos: 4,
-                    path: Default::default(),
                 },
                 || ValidateError::ValidationError {
                     message: "Layout offset cannot be zero",
                     pos: 4,
-                    path: Default::default(),
                 },
             )?,
         )?;
@@ -106,19 +100,16 @@ where
         let root_ptr = unsafe { bytes.as_ptr().add(root_pos) };
         let (root_view, root_span) =
             unsafe { <T::Archived as Access<'a>>::access(root_ptr, &mut validator)? };
-        let root_end =
-            root_pos
-                .checked_add(root_span)
-                .ok_or_else(|| ValidateError::ValidationError {
-                    message: "Root range overflow",
-                    pos: root_pos,
-                    path: Default::default(),
-                })?;
+        let root_end = root_pos
+            .checked_add(root_span)
+            .ok_or(ValidateError::ValidationError {
+                message: "Root range overflow",
+                pos: root_pos,
+            })?;
         if root_end > bytes.len() {
             return Err(ValidateError::ValidationError {
                 message: "Root out of bounds",
                 pos: root_pos,
-                path: Default::default(),
             }
             .into());
         }
@@ -127,7 +118,6 @@ where
             return Err(ValidateError::ValidationError {
                 message: "Layout section overlaps root",
                 pos: layout_offset,
-                path: Default::default(),
             }
             .into());
         }
@@ -190,12 +180,10 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
                 || ValidateError::ValidationError {
                     message: "Layout offset exceeds usize range",
                     pos: 4,
-                    path: Default::default(),
                 },
                 || ValidateError::ValidationError {
                     message: "Layout offset cannot be zero",
                     pos: 4,
-                    path: Default::default(),
                 },
             )?,
         )?;

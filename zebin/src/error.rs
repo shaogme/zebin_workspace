@@ -3,7 +3,7 @@ use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
 
 #[cfg(feature = "alloc")]
-use crate::alloc::{boxed::Box, vec::Vec};
+use crate::alloc::vec::Vec;
 
 /// A single segment in a validation path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -17,16 +17,16 @@ pub enum ValidationPathSegment {
 #[derive(Clone)]
 #[cfg_attr(not(feature = "alloc"), derive(Copy))]
 pub struct ValidationPathStack {
-    segments: [MaybeUninit<ValidationPathSegment>; 8],
+    segments: [MaybeUninit<ValidationPathSegment>; 32],
     len: usize,
     #[cfg(feature = "alloc")]
-    extra: Option<Box<Vec<ValidationPathSegment>>>,
+    extra: Option<Vec<ValidationPathSegment>>,
 }
 
 impl ValidationPathStack {
     pub const fn new() -> Self {
         Self {
-            segments: [MaybeUninit::uninit(); 8],
+            segments: [MaybeUninit::uninit(); 32],
             len: 0,
             #[cfg(feature = "alloc")]
             extra: None,
@@ -34,7 +34,7 @@ impl ValidationPathStack {
     }
 
     pub fn push(&mut self, segment: ValidationPathSegment) {
-        if self.len < 8 {
+        if self.len < 32 {
             self.segments[self.len].write(segment);
             self.len += 1;
         } else {
@@ -43,9 +43,25 @@ impl ValidationPathStack {
                 if let Some(extra) = &mut self.extra {
                     extra.push(segment);
                 } else {
-                    self.extra = Some(Box::new(crate::alloc::vec![segment]));
+                    self.extra = Some(crate::alloc::vec![segment]);
                 }
             }
+        }
+    }
+
+    pub fn pop(&mut self) {
+        #[cfg(feature = "alloc")]
+        if let Some(extra) = &mut self.extra
+            && extra.pop().is_some()
+        {
+            if extra.is_empty() {
+                self.extra = None;
+            }
+            return;
+        }
+
+        if self.len > 0 {
+            self.len -= 1;
         }
     }
 
@@ -225,92 +241,49 @@ pub enum ValidateError {
         expected: NonZeroUsize,
         actual: NonZeroUsize,
         pos: usize,
-        path: ValidationPathStack,
     },
     InvalidLayout {
         pos: usize,
-        path: ValidationPathStack,
     },
     ValidationError {
         message: &'static str,
         pos: usize,
-        path: ValidationPathStack,
     },
     MissingLayoutField {
         field_id: u16,
         pos: usize,
-        path: ValidationPathStack,
     },
     LayoutOffsetMismatch {
         field_id: u16,
         expected: u32,
         actual: u32,
         pos: usize,
-        path: ValidationPathStack,
     },
     MissingLayoutRevision {
         key: u32,
         revision: u32,
         pos: usize,
-        path: ValidationPathStack,
     },
     FieldOverflow {
         field: &'static str,
         pos: usize,
-        path: ValidationPathStack,
     },
     FieldOutOfBounds {
         field: &'static str,
         pos: usize,
-        path: ValidationPathStack,
     },
     RecursionLimitExceeded,
 }
 
 impl ValidateError {
-    /// Attach a path segment to the error.
-    pub fn at(mut self, segment: ValidationPathSegment) -> Self {
-        match &mut self {
-            ValidateError::AlignmentError { path, .. }
-            | ValidateError::ValidationError { path, .. }
-            | ValidateError::MissingLayoutField { path, .. }
-            | ValidateError::LayoutOffsetMismatch { path, .. }
-            | ValidateError::MissingLayoutRevision { path, .. }
-            | ValidateError::FieldOutOfBounds { path, .. }
-            | ValidateError::InvalidLayout { path, .. } => {
-                path.push(segment);
-            }
-            _ => {}
-        }
+    /// No-op for backward compatibility.
+    pub fn at(self, _segment: ValidationPathSegment) -> Self {
         self
-    }
-
-    /// Get the validation path if present.
-    pub fn path(&self) -> Option<&ValidationPathStack> {
-        match self {
-            ValidateError::AlignmentError { path, .. }
-            | ValidateError::ValidationError { path, .. }
-            | ValidateError::MissingLayoutField { path, .. }
-            | ValidateError::LayoutOffsetMismatch { path, .. }
-            | ValidateError::MissingLayoutRevision { path, .. }
-            | ValidateError::FieldOverflow { path, .. }
-            | ValidateError::FieldOutOfBounds { path, .. }
-            | ValidateError::InvalidLayout { path, .. } => Some(path),
-            _ => None,
-        }
     }
 }
 
 impl core::fmt::Display for ValidateError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if let Some(path) = self.path() {
-            if path.len > 0 {
-                write!(f, "at ")?;
-                path.format(f)?;
-                write!(f, ": ")?;
-            }
-        }
-
         match self {
             ValidateError::Infallible => write!(f, "infallible error"),
             ValidateError::AlignmentError {
@@ -403,22 +376,9 @@ pub enum ZebinError {
 }
 
 impl ZebinError {
-    /// Attach a path segment to the error.
-    pub fn at(self, segment: ValidationPathSegment) -> Self {
-        if let ZebinError::Access(err) = self {
-            ZebinError::Access(err.at(segment))
-        } else {
-            self
-        }
-    }
-
-    /// Get the validation path if present.
-    pub fn path(&self) -> Option<&ValidationPathStack> {
-        if let ZebinError::Access(err) = self {
-            err.path()
-        } else {
-            None
-        }
+    /// No-op for backward compatibility.
+    pub fn at(self, _segment: ValidationPathSegment) -> Self {
+        self
     }
 }
 

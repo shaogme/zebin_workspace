@@ -41,12 +41,10 @@ where
         || ValidateError::ValidationError {
             message: "Root offset exceeds u32 range",
             pos: root_offset,
-            path: Default::default(),
         },
         || ValidateError::ValidationError {
             message: "Root offset cannot be zero",
             pos: root_offset,
-            path: Default::default(),
         },
     )?;
 
@@ -63,12 +61,10 @@ where
         || ValidateError::ValidationError {
             message: "Layout section offset exceeds u32 range",
             pos: layout_offset,
-            path: Default::default(),
         },
         || ValidateError::ValidationError {
             message: "Layout section offset cannot be zero",
             pos: layout_offset,
-            path: Default::default(),
         },
     )?;
 

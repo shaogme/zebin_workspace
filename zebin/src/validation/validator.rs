@@ -2,7 +2,7 @@ use core::{marker::PhantomData, num::NonZeroUsize};
 
 use crate::{
     core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
-    error::ValidateError,
+    error::{ValidateError, ValidationPathSegment, ValidationPathStack},
     format::ArchiveHeader,
     read::ResolvedLayout,
     traits::ArchiveHeader as ArchiveHeaderTrait,
@@ -20,6 +20,8 @@ where
     cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a, H>)>,
     depth: usize,
     max_depth: usize,
+    path: ValidationPathStack,
+    last_error_path: Option<ValidationPathStack>,
 }
 
 pub struct DepthGuard<'v, H = ArchiveHeader>
@@ -47,6 +49,8 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
             cached_layout: None,
             depth: 0,
             max_depth: 128,
+            path: ValidationPathStack::new(),
+            last_error_path: None,
         }
     }
 
@@ -58,6 +62,8 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
             cached_layout: None,
             depth: 0,
             max_depth: 128,
+            path: ValidationPathStack::new(),
+            last_error_path: None,
         }
     }
 
@@ -70,8 +76,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         })
     }
 
-    /// Check if a pointer and its associated size are within the buffer bounds.
-    pub fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
+    pub fn check_range(&mut self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
         if size == 0 {
             return Ok(());
         }
@@ -96,7 +101,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
 
     /// Check if a pointer is properly aligned.
     pub fn check_alignment(
-        &self,
+        &mut self,
         ptr: *const u8,
         alignment: NonZeroUsize,
     ) -> Result<(), ValidateError> {
@@ -107,7 +112,6 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
                 expected: alignment,
                 actual: unsafe { NonZeroUsize::new_unchecked(addr % alignment_value) },
                 pos: addr.saturating_sub(self.data.as_ptr() as usize),
-                path: Default::default(),
             });
         }
         Ok(())
@@ -128,6 +132,26 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         self.depth = self.depth.saturating_sub(1);
     }
 
+    /// Push to validation path.
+    pub fn push_path(&mut self, segment: ValidationPathSegment) {
+        self.path.push(segment);
+    }
+
+    /// Pop from validation path.
+    pub fn pop_path(&mut self) {
+        self.path.pop();
+    }
+
+    pub fn record_error_path(&mut self) {
+        if self.last_error_path.is_none() {
+            self.last_error_path = Some(self.path.clone());
+        }
+    }
+
+    pub fn last_error_path(&self) -> Option<&ValidationPathStack> {
+        self.last_error_path.as_ref()
+    }
+
     /// Get the underlying data slice.
     pub fn data(&self) -> &[u8] {
         self.data
@@ -145,10 +169,9 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
             return Ok(*resolved);
         }
 
-        let layouts = self.layouts.ok_or_else(|| ValidateError::ValidationError {
+        let layouts = self.layouts.ok_or(ValidateError::ValidationError {
             message: "Missing layout directory",
             pos: 0,
-            path: Default::default(),
         })?;
         let layout = layouts.lookup(stable_schema_key, schema_revision)?;
         let resolved = ResolvedLayout::from_parts(self.data, self.header, layout);
@@ -156,12 +179,9 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         Ok(resolved)
     }
 
-    fn validation_error(&self, message: &'static str, pos: usize) -> ValidateError {
-        ValidateError::ValidationError {
-            message,
-            pos,
-            path: crate::error::ValidationPathStack::new(),
-        }
+    fn validation_error(&mut self, message: &'static str, pos: usize) -> ValidateError {
+        self.record_error_path();
+        ValidateError::ValidationError { message, pos }
     }
 }
 
@@ -174,12 +194,24 @@ impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
         Validator::pop_depth(self)
     }
 
-    fn check_range(&self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
+    fn push_path(&mut self, segment: ValidationPathSegment) {
+        Validator::push_path(self, segment)
+    }
+
+    fn pop_path(&mut self) {
+        Validator::pop_path(self)
+    }
+
+    fn record_error_path(&mut self) {
+        Validator::record_error_path(self)
+    }
+
+    fn check_range(&mut self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
         Validator::check_range(self, ptr, size)
     }
 
     fn check_alignment(
-        &self,
+        &mut self,
         ptr: *const u8,
         alignment: NonZeroUsize,
     ) -> Result<(), ValidateError> {

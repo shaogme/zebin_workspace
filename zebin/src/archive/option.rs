@@ -1,7 +1,7 @@
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    error::{AccessError, ArchiveError, ValidateError, ValidationPathSegment, ZebinError},
+    error::{AccessError, ArchiveError, ValidateError, ZebinError},
     io::sink::{ByteSink, LayoutSink},
     traits::{Access, Archive, Layout, Serialize, SerializeState, Validate},
     utils::byteops,
@@ -76,9 +76,11 @@ where
                 let value_ptr = archived.value.as_ptr();
                 guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
                 guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
-                unsafe {
-                    T::validate::<H, _>(value_ptr, &mut *guard)
-                        .map_err(|e| e.at(ValidationPathSegment::Variant("Some")))?;
+                {
+                    let mut _path_guard = guard.push_variant("Some");
+                    unsafe {
+                        T::validate::<H, _>(value_ptr, &mut *_path_guard)?;
+                    }
                 }
                 Ok(())
             }

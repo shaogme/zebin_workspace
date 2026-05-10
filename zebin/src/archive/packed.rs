@@ -21,7 +21,6 @@ pub(crate) fn packed_byte_len(
             .ok_or(ValidateError::ValidationError {
                 message: "Packed length calculation overflow",
                 pos: 0,
-                path: Default::default(),
             })?;
     Ok(total_bits.div_ceil(8))
 }
@@ -49,7 +48,6 @@ impl ArchivedPackedBoolSlice {
         u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "Archived packed bool length exceeds usize range",
             pos: self as *const _ as usize,
-            path: Default::default(),
         })
         .expect("validated packed bool length should fit in usize")
     }
@@ -159,7 +157,6 @@ impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
         u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "Archived packed integer length exceeds usize range",
             pos: self as *const _ as usize,
-            path: Default::default(),
         })
         .expect("validated packed integer length should fit in usize")
     }

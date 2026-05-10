@@ -128,16 +128,17 @@ impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
         let data_ptr = ptr as *const T;
         let elem_size = core::mem::size_of::<T>();
 
-        use crate::error::ValidationPathSegment;
         for index in 0..N {
             let element_ptr = if elem_size == 0 {
                 data_ptr
             } else {
                 unsafe { data_ptr.add(index) }
             };
-            unsafe {
-                T::validate::<H, _>(element_ptr, &mut *guard)
-                    .map_err(|e| e.at(ValidationPathSegment::Index(index)))?;
+            {
+                let mut _path_guard = guard.push_index(index);
+                unsafe {
+                    T::validate::<H, _>(element_ptr, &mut *_path_guard)?;
+                }
             }
         }
 

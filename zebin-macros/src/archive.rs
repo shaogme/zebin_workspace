@@ -151,7 +151,6 @@ fn record_layout_checks_logic(
                             return Err(zebin::ValidateError::MissingLayoutField {
                                 field_id: #field_id,
                                 pos: ptr as usize,
-                                path: Default::default(),
                             });
                         }
                     };
@@ -161,7 +160,6 @@ fn record_layout_checks_logic(
                             expected,
                             actual,
                             pos: ptr as usize,
-                            path: Default::default(),
                         });
                     }
                 }
@@ -194,9 +192,11 @@ fn record_field_validations(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenSt
             quote! {
                 {
                     let field_ptr = unsafe { core::ptr::addr_of!((*ptr).#member) };
-                    unsafe {
-                        <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *guard)
-                            .map_err(|e| e.at(zebin::ValidationPathSegment::Field(stringify!(#path_name))))?;
+                    {
+                        let mut guard = guard.push_field(stringify!(#path_name));
+                        unsafe {
+                            <#ty as zebin::Validate>::validate::<H, _>(field_ptr, &mut *guard)?;
+                        }
                     }
                 }
             }
@@ -235,7 +235,6 @@ fn helper_accessors(
                 let offset = layout.field_offset(#field_id).ok_or_else(|| zebin::ValidateError::MissingLayoutField {
                     field_id: #field_id,
                     pos: self as *const _ as usize,
-                    path: Default::default(),
                 })?;
                 let base = self as *const _ as *const u8;
                 Ok(&*(((base.add(offset as usize)) as *const #ty)))
@@ -530,12 +529,11 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         variant_validate_arms.push(quote! {
             #idx_lit => {
                 let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                let result: Result<(), zebin::ValidateError> = (|| -> Result<(), zebin::ValidateError> {
+                {
+                    let mut guard = guard.push_variant(stringify!(#variant_ident));
                     #layout_checks
                     #(#field_validations)*
-                    Ok(())
-                })();
-                result.map_err(|e| e.at(zebin::ValidationPathSegment::Variant(stringify!(#variant_ident))))?;
+                }
             }
         });
 
@@ -563,14 +561,18 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                 quote! { Self::#variant_ident { #(#fields),* } }
             }
             RecordStyle::Unnamed => {
-                let fields = record.fields.iter().enumerate().map(|(field_index, field)| {
-                    if field.skip {
-                        quote! { _ }
-                    } else {
-                        let ident = format_ident!("field{}", field_index);
-                        quote! { #ident }
-                    }
-                });
+                let fields = record
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(field_index, field)| {
+                        if field.skip {
+                            quote! { _ }
+                        } else {
+                            let ident = format_ident!("field{}", field_index);
+                            quote! { #ident }
+                        }
+                    });
                 quote! { Self::#variant_ident( #(#fields),* ) }
             }
             RecordStyle::Unit => quote! { Self::#variant_ident },
@@ -732,7 +734,6 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
                             return Err(zebin::ValidateError::ValidationError {
                                 message: "Invalid enum discriminant",
                                 pos: ptr as usize,
-                                path: Default::default(),
                             });
                         }
                     }

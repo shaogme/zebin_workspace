@@ -26,8 +26,7 @@ impl<T> RelPtr<T> {
             (diff as i64).wrapping_neg()
         };
 
-        let offset =
-            NonZeroI64::new(offset).ok_or_else(|| ArchiveError::ZeroOffset { pos: from })?;
+        let offset = NonZeroI64::new(offset).ok_or(ArchiveError::ZeroOffset { pos: from })?;
 
         Ok(Self {
             offset,

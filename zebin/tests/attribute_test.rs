@@ -4,13 +4,13 @@ use zebin::{ZebinArchive, ZebinSerialize};
 #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
 pub struct AttributeTest {
     pub id: u64,
-    
+
     #[zebin(rename = "name")]
     pub username: String,
-    
+
     #[zebin(skip)]
     pub ignored: i32,
-    
+
     #[zebin(skip_serializing)]
     pub also_ignored: String,
 }
@@ -23,10 +23,10 @@ fn test_rename_and_skip() {
         ignored: 123,
         also_ignored: "Secret".to_string(),
     };
-    
+
     let buf = zebin::encode(&user).unwrap();
     let archived = zebin::decode::<AttributeTest>(&buf).unwrap();
-    
+
     assert_eq!(archived.id, 42);
     // 检查重命名后的字段
     assert_eq!(unsafe { archived.name.as_str() }, "Alice");
@@ -34,18 +34,14 @@ fn test_rename_and_skip() {
 
 #[allow(dead_code)]
 #[derive(ZebinArchive, ZebinSerialize)]
-pub struct TupleTest(
-    u32,
-    #[zebin(skip)] String,
-    u64
-);
+pub struct TupleTest(u32, #[zebin(skip)] String, u64);
 
 #[test]
 fn test_tuple_skip() {
     let t = TupleTest(1, "ignored".to_string(), 2);
     let buf = zebin::encode(&t).unwrap();
     let archived = zebin::decode::<TupleTest>(&buf).unwrap();
-    
+
     assert_eq!(archived.0, 1);
     // 原本 index 为 2 的字段现在应该是 index 为 1 的字段
     assert_eq!(archived.1, 2);

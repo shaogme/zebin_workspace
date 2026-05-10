@@ -36,7 +36,7 @@ impl ArchiveHeader {
 }
 
 impl Layout for ArchiveHeader {
-    const ALIGNMENT: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(4) };
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(4).unwrap();
 
     fn size_hint(&self) -> usize {
         Self::SIZE

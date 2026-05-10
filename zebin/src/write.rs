@@ -125,14 +125,16 @@ where
                 },
                 EncodePhase::RootAlign { resolver } => {
                     encoder.align(<T::Archived as Layout>::ALIGNMENT)?;
-                    if encoder.pos() % <T::Archived as Layout>::ALIGNMENT.get() != 0 {
+                    if !encoder
+                        .pos()
+                        .is_multiple_of(<T::Archived as Layout>::ALIGNMENT.get())
+                    {
                         break;
                     }
                     if encoder.pos() != self.plan.root_pos {
                         return Err(ValidateError::ValidationError {
                             message: "Root offset mismatch during emission",
                             pos: encoder.pos(),
-                            path: Default::default(),
                         }
                         .into());
                     }
@@ -151,7 +153,6 @@ where
                         return Err(ValidateError::ValidationError {
                             message: "Root offset mismatch during root write",
                             pos: encoder.pos(),
-                            path: Default::default(),
                         }
                         .into());
                     }
@@ -176,7 +177,6 @@ where
                         return Err(ValidateError::ValidationError {
                             message: "Layout offset mismatch during emission",
                             pos: encoder.pos(),
-                            path: Default::default(),
                         }
                         .into());
                     }
@@ -185,7 +185,6 @@ where
                         return Err(ValidateError::ValidationError {
                             message: "Layout registry diverged during emission",
                             pos: encoder.pos(),
-                            path: Default::default(),
                         }
                         .into());
                     }

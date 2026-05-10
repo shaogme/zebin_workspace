@@ -2,7 +2,7 @@ use core::num::NonZeroUsize;
 
 use crate::{
     core::rel_ptr::RelPtr,
-    error::{AccessError, ArchiveError, ValidateError, ValidationPathSegment},
+    error::{AccessError, ArchiveError, ValidateError},
     traits::{Access, Archive, Layout, Validate},
     utils::num::{u32_to_usize, usize_to_u32},
     validation::context::ValidationContext,
@@ -58,7 +58,6 @@ impl<T> ArchivedVec<T> {
         let len = u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "ArchivedVec length exceeds usize range",
             pos: self as *const _ as usize,
-            path: Default::default(),
         })
         .expect("validated archived vector length should fit in usize");
         let ptr = self
@@ -73,7 +72,6 @@ impl<T> ArchivedVec<T> {
         u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "ArchivedVec length exceeds usize range",
             pos: self as *const _ as usize,
-            path: Default::default(),
         })
         .expect("archived vector length should fit in usize")
     }
@@ -129,9 +127,11 @@ where
 
             for i in 0..len {
                 let element_ptr = unsafe { data_ptr.add(i) };
-                unsafe {
-                    T::validate::<H, _>(element_ptr, &mut *guard)
-                        .map_err(|e| e.at(ValidationPathSegment::Index(i)))?;
+                {
+                    let mut _path_guard = guard.push_index(i);
+                    unsafe {
+                        T::validate::<H, _>(element_ptr, &mut *_path_guard)?;
+                    }
                 }
             }
         }

@@ -143,7 +143,6 @@ macro_rules! impl_varint_number {
                 <$t>::try_from(value).map_err(|_| ValidateError::ValidationError {
                     message: "VarInt value out of range",
                     pos: 0,
-                    path: Default::default(),
                 })
             }
 

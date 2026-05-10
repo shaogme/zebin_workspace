@@ -33,7 +33,6 @@ impl ArchivedString {
         let len = u32_to_usize(self.len, || ValidateError::ValidationError {
             message: "ArchivedString length exceeds usize range",
             pos: self as *const _ as usize,
-            path: Default::default(),
         })
         .expect("validated archived string length should fit in usize");
         let ptr = self

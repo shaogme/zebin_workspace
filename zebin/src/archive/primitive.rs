@@ -38,7 +38,7 @@ impl<'a, const N: usize> SerializeState<'a> for ByteState<N> {
     ) -> Result<Poll<Self::Resolver>, ZebinError> {
         if !self.aligned {
             encoder.align(self.alignment)?;
-            if encoder.pos() % self.alignment.get() != 0 {
+            if !encoder.pos().is_multiple_of(self.alignment.get()) {
                 return Ok(Poll::Pending);
             }
             self.aligned = true;

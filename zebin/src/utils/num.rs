@@ -10,18 +10,10 @@ pub(crate) fn read_fixed<const N: usize>(
 ) -> Result<[u8; N], ValidateError> {
     let end = pos
         .checked_add(N)
-        .ok_or_else(|| ValidateError::FieldOverflow {
-            field,
-            pos,
-            path: Default::default(),
-        })?;
+        .ok_or(ValidateError::FieldOverflow { field, pos })?;
     let slice = bytes
         .get(pos..end)
-        .ok_or_else(|| ValidateError::FieldOutOfBounds {
-            field,
-            pos,
-            path: Default::default(),
-        })?;
+        .ok_or(ValidateError::FieldOutOfBounds { field, pos })?;
     let mut out = [0u8; N];
     out.copy_from_slice(slice);
     Ok(out)

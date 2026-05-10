@@ -33,8 +33,7 @@ pub trait SequenceResolverBuffer<T: Archive>: Sized {
 
 pub fn archived_bytes<L: Layout>(archived: &L) -> Vec<u8> {
     let size = archived.size_hint();
-    let mut out = Vec::new();
-    out.resize(size, 0);
+    let mut out = vec![0; size];
     L::write_archived_bytes(archived, &mut out);
     out
 }
@@ -227,7 +226,10 @@ where
         encoder: &mut E,
     ) -> Result<Poll<()>, ZebinError> {
         encoder.align(<T::Archived as Layout>::ALIGNMENT)?;
-        if encoder.pos() % <T::Archived as Layout>::ALIGNMENT.get() != 0 {
+        if !encoder
+            .pos()
+            .is_multiple_of(<T::Archived as Layout>::ALIGNMENT.get())
+        {
             return Ok(Poll::Pending);
         }
         self.data_pos = Some(encoder.pos());

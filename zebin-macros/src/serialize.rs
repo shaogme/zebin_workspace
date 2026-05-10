@@ -5,8 +5,8 @@ use syn::DeriveInput;
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, VariantSpec, binder_slot_ident, field_resolver_type,
     has_schema, input_member, layout_field_entries, packed_begin_expr, packed_wrapper_type,
-    parse_item, resolver_name, resolver_slot_ident, state_name,
-    variant_resolver_name, variant_state_name,
+    parse_item, resolver_name, resolver_slot_ident, state_name, variant_resolver_name,
+    variant_state_name,
 };
 
 // --- Helper Functions for Code Generation ---
@@ -375,14 +375,19 @@ fn variant_begin_arm(
             }
         }
         RecordStyle::Unnamed => {
-            let binders = variant.record.fields.iter().enumerate().map(|(index, field)| {
-                if field.skip {
-                    quote! { _ }
-                } else {
-                    let binder = binder_slot_ident(&variant.record, index);
-                    quote! { #binder }
-                }
-            });
+            let binders = variant
+                .record
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    if field.skip {
+                        quote! { _ }
+                    } else {
+                        let binder = binder_slot_ident(&variant.record, index);
+                        quote! { #binder }
+                    }
+                });
             let init_fields = variant
                 .record
                 .fields

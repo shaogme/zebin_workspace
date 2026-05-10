@@ -163,9 +163,7 @@ struct FieldAttrs {
     rename: Option<Ident>,
 }
 
-fn parse_field_attrs(
-    field: &Field,
-) -> Result<FieldAttrs> {
+fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
     let mut field_id = None;
     let mut skip = false;
     let mut rename = None;
@@ -174,9 +172,10 @@ fn parse_field_attrs(
         if attr.path().is_ident("zebin") {
             let tokens = attr.meta.require_list()?.tokens.clone();
             if let Some(value) = parse_name_value_u32(tokens.clone(), "id")? {
-                field_id = Some(u16::try_from(value).map_err(|_| {
-                    syn::Error::new(field.span(), "field id exceeds u16 range")
-                })?);
+                field_id =
+                    Some(u16::try_from(value).map_err(|_| {
+                        syn::Error::new(field.span(), "field id exceeds u16 range")
+                    })?);
             }
             if let Some(name) = parse_name_value_str(tokens.clone(), "rename")? {
                 rename = Some(Ident::new(&name, field.span()));
