@@ -1,4 +1,8 @@
+use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
+
+#[cfg(feature = "alloc")]
+use crate::alloc::{boxed::Box, vec::Vec};
 
 /// A single segment in a validation path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,46 +13,74 @@ pub enum ValidationPathSegment {
 }
 
 /// A fixed-capacity stack for validation path segments.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone)]
+#[cfg_attr(not(feature = "alloc"), derive(Copy))]
 pub struct ValidationPathStack {
-    segments: [Option<ValidationPathSegment>; 8],
+    segments: [MaybeUninit<ValidationPathSegment>; 8],
     len: usize,
+    #[cfg(feature = "alloc")]
+    extra: Option<Box<Vec<ValidationPathSegment>>>,
 }
 
 impl ValidationPathStack {
     pub const fn new() -> Self {
         Self {
-            segments: [None; 8],
+            segments: [MaybeUninit::uninit(); 8],
             len: 0,
+            #[cfg(feature = "alloc")]
+            extra: None,
         }
     }
 
     pub fn push(&mut self, segment: ValidationPathSegment) {
         if self.len < 8 {
-            self.segments[self.len] = Some(segment);
+            self.segments[self.len].write(segment);
             self.len += 1;
-        }
-    }
-
-    pub fn segments(&self) -> &[Option<ValidationPathSegment>] {
-        &self.segments[..self.len]
-    }
-
-    pub fn format(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        for i in (0..self.len).rev() {
-            if let Some(segment) = self.segments[i] {
-                match segment {
-                    ValidationPathSegment::Field(name) => {
-                        if i < self.len - 1 {
-                            write!(f, ".")?;
-                        }
-                        write!(f, "{}", name)?;
-                    }
-                    ValidationPathSegment::Index(index) => write!(f, "[{}]", index)?,
-                    ValidationPathSegment::Variant(name) => write!(f, "({})", name)?,
+        } else {
+            #[cfg(feature = "alloc")]
+            {
+                if let Some(extra) = &mut self.extra {
+                    extra.push(segment);
+                } else {
+                    self.extra = Some(Box::new(crate::alloc::vec![segment]));
                 }
             }
         }
+    }
+
+    pub fn format(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut first = true;
+
+        #[cfg(feature = "alloc")]
+        if let Some(extra) = &self.extra {
+            for segment in extra.iter().rev() {
+                Self::format_segment(f, segment, &mut first)?;
+            }
+        }
+
+        for i in (0..self.len).rev() {
+            let segment = unsafe { self.segments[i].assume_init_ref() };
+            Self::format_segment(f, segment, &mut first)?;
+        }
+        Ok(())
+    }
+
+    fn format_segment(
+        f: &mut core::fmt::Formatter<'_>,
+        segment: &ValidationPathSegment,
+        first: &mut bool,
+    ) -> core::fmt::Result {
+        match segment {
+            ValidationPathSegment::Field(name) => {
+                if !*first {
+                    write!(f, ".")?;
+                }
+                write!(f, "{}", name)?;
+            }
+            ValidationPathSegment::Index(index) => write!(f, "[{}]", index)?,
+            ValidationPathSegment::Variant(name) => write!(f, "({})", name)?,
+        }
+        *first = false;
         Ok(())
     }
 }
@@ -56,6 +88,53 @@ impl ValidationPathStack {
 impl Default for ValidationPathStack {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl PartialEq for ValidationPathStack {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len != other.len {
+            return false;
+        }
+        for i in 0..self.len {
+            let s1 = unsafe { self.segments[i].assume_init_ref() };
+            let s2 = unsafe { other.segments[i].assume_init_ref() };
+            if s1 != s2 {
+                return false;
+            }
+        }
+        #[cfg(feature = "alloc")]
+        if self.extra != other.extra {
+            return false;
+        }
+        true
+    }
+}
+
+impl Eq for ValidationPathStack {}
+
+impl core::hash::Hash for ValidationPathStack {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        for i in 0..self.len {
+            unsafe { self.segments[i].assume_init_ref() }.hash(state);
+        }
+        self.len.hash(state);
+        #[cfg(feature = "alloc")]
+        self.extra.hash(state);
+    }
+}
+
+impl core::fmt::Debug for ValidationPathStack {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut list = f.debug_list();
+        for i in 0..self.len {
+            list.entry(unsafe { self.segments[i].assume_init_ref() });
+        }
+        #[cfg(feature = "alloc")]
+        if let Some(extra) = &self.extra {
+            list.entries(extra.iter());
+        }
+        list.finish()
     }
 }
 
