@@ -1,11 +1,11 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::DeriveInput;
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, VariantSpec, binder_slot_ident, field_resolver_type,
     has_schema, input_member, layout_field_entries, packed_begin_expr, packed_wrapper_type,
-    parse_item, resolver_name, resolver_slot_ident, state_name, state_slot_ident,
+    parse_item, resolver_name, resolver_slot_ident, state_name,
     variant_resolver_name, variant_state_name,
 };
 
@@ -15,8 +15,11 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
     match record.style {
         RecordStyle::Named => {
             let mut fields = Vec::new();
-            for field in &record.fields {
-                let ident = field.ident.expect("named field has ident");
+            for field in record.fields.iter().filter(|f| !f.skip) {
+                let ident = field
+                    .rename
+                    .as_ref()
+                    .unwrap_or_else(|| field.ident.expect("named field has ident"));
                 let ty = field_resolver_type(field);
                 fields.push(quote! { pub #ident: #ty });
             }
@@ -24,7 +27,7 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
         }
         RecordStyle::Unnamed => {
             let mut fields = Vec::new();
-            for field in &record.fields {
+            for field in record.fields.iter().filter(|f| !f.skip) {
                 let ty = field_resolver_type(field);
                 fields.push(quote! { #ty });
             }
@@ -35,26 +38,31 @@ fn resolver_def(resolver_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_mac
 }
 
 fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let fields = record.fields.iter().enumerate().map(|(index, field)| {
-        let state_ident = &field.state_ident;
-        let state_ty = if let Some(wrapper) = packed_wrapper_type(field) {
-            quote! { <#wrapper as zebin::Serialize>::State<'a> }
-        } else {
-            let ty = field.ty;
-            quote! { <#ty as zebin::Serialize>::State<'a> }
-        };
-        let resolver_ty = if let Some(wrapper) = packed_wrapper_type(field) {
-            quote! { <#wrapper as zebin::Archive>::Resolver }
-        } else {
-            let ty = field.ty;
-            quote! { <#ty as zebin::Archive>::Resolver }
-        };
-        let resolver_ident = resolver_slot_ident(record, index);
-        quote! {
-            pub #state_ident: #state_ty,
-            pub #resolver_ident: ::core::option::Option<#resolver_ty>,
-        }
-    });
+    let fields = record
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| !f.skip)
+        .map(|(index, field)| {
+            let state_ident = &field.state_ident;
+            let state_ty = if let Some(wrapper) = packed_wrapper_type(field) {
+                quote! { <#wrapper as zebin::Serialize>::State<'a> }
+            } else {
+                let ty = field.ty;
+                quote! { <#ty as zebin::Serialize>::State<'a> }
+            };
+            let resolver_ty = if let Some(wrapper) = packed_wrapper_type(field) {
+                quote! { <#wrapper as zebin::Archive>::Resolver }
+            } else {
+                let ty = field.ty;
+                quote! { <#ty as zebin::Archive>::Resolver }
+            };
+            let resolver_ident = resolver_slot_ident(record, index);
+            quote! {
+                pub #state_ident: #state_ty,
+                pub #resolver_ident: ::core::option::Option<#resolver_ty>,
+            }
+        });
 
     quote! {
         pub struct #state_name<'a> {
@@ -65,23 +73,28 @@ fn state_def(state_name: &syn::Ident, record: &RecordSpec<'_>) -> proc_macro2::T
 }
 
 fn state_init(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let fields = record.fields.iter().enumerate().map(|(index, field)| {
-        let state_ident = &field.state_ident;
-        let resolver_ident = resolver_slot_ident(record, index);
-        let input_member = input_member(record, index);
-        let init = if let Some(init) = packed_begin_expr(field, quote! { self.#input_member }) {
-            init
-        } else {
-            let ty = field.ty;
+    let fields = record
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| !f.skip)
+        .map(|(index, field)| {
+            let state_ident = &field.state_ident;
+            let resolver_ident = resolver_slot_ident(record, index);
+            let input_member = input_member(record, index);
+            let init = if let Some(init) = packed_begin_expr(field, quote! { self.#input_member }) {
+                init
+            } else {
+                let ty = field.ty;
+                quote! {
+                    <#ty as zebin::Serialize>::begin_serialize(&self.#input_member)?
+                }
+            };
             quote! {
-                <#ty as zebin::Serialize>::begin_serialize(&self.#input_member)?
+                #state_ident: #init,
+                #resolver_ident: ::core::option::Option::None,
             }
-        };
-        quote! {
-            #state_ident: #init,
-            #resolver_ident: ::core::option::Option::None,
-        }
-    });
+        });
 
     quote! {
         _marker: ::core::marker::PhantomData,
@@ -122,6 +135,7 @@ fn poll_steps(
         .fields
         .iter()
         .enumerate()
+        .filter(|(_, f)| !f.skip)
         .map(|(index, field)| {
             let state_ident = &field.state_ident;
             let resolver_ident = resolver_slot_ident(record, index);
@@ -147,18 +161,21 @@ fn resolver_expr(
     match record.style {
         RecordStyle::Named => {
             let mut fields = Vec::new();
-            for (index, _field) in record.fields.iter().enumerate() {
-                let state_ident = state_slot_ident(record, index);
-                let resolver_ident = resolver_slot_ident(record, index);
+            for (index, field) in record.fields.iter().enumerate().filter(|(_, f)| !f.skip) {
+                let resolver_name_in_struct = field
+                    .rename
+                    .as_ref()
+                    .unwrap_or_else(|| field.ident.expect("named field has ident"));
+                let resolver_ident_in_state = resolver_slot_ident(record, index);
                 fields.push(quote! {
-                    #state_ident: #prefix.#resolver_ident.take().expect("field resolver available after polling")
+                    #resolver_name_in_struct: #prefix.#resolver_ident_in_state.take().expect("field resolver available after polling")
                 });
             }
             quote! { #resolver_name { #(#fields),* } }
         }
         RecordStyle::Unnamed => {
             let mut fields = Vec::new();
-            for (index, _field) in record.fields.iter().enumerate() {
+            for (index, _field) in record.fields.iter().enumerate().filter(|(_, f)| !f.skip) {
                 let resolver_ident = resolver_slot_ident(record, index);
                 fields.push(quote! {
                     #prefix.#resolver_ident
@@ -267,7 +284,7 @@ fn variant_state_def(
     enum_name: &syn::Ident,
     variant: &VariantSpec<'_>,
 ) -> proc_macro2::TokenStream {
-    let name = variant_state_name(enum_name, variant.ident);
+    let name = variant_state_name(enum_name, variant.rename.as_ref().unwrap_or(variant.ident));
     state_def(&name, &variant.record)
 }
 
@@ -275,9 +292,10 @@ fn variant_state_impl(
     enum_name: &syn::Ident,
     variant: &VariantSpec<'_>,
 ) -> proc_macro2::TokenStream {
-    let state = variant_state_name(enum_name, variant.ident);
-    let resolver = variant_resolver_name(enum_name, variant.ident);
-    let archived_name = crate::shared::variant_archived_name(enum_name, variant.ident);
+    let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
+    let state = variant_state_name(enum_name, variant_user_ident);
+    let resolver = variant_resolver_name(enum_name, variant_user_ident);
+    let archived_name = crate::shared::variant_archived_name(enum_name, variant_user_ident);
     let stable_schema_key = if has_schema(&variant.record) {
         let stable_schema_key = variant
             .record
@@ -300,7 +318,7 @@ fn variant_resolver_def(
     enum_name: &syn::Ident,
     variant: &VariantSpec<'_>,
 ) -> proc_macro2::TokenStream {
-    let name = variant_resolver_name(enum_name, variant.ident);
+    let name = variant_resolver_name(enum_name, variant.rename.as_ref().unwrap_or(variant.ident));
     resolver_def(&name, &variant.record)
 }
 
@@ -309,57 +327,27 @@ fn variant_begin_arm(
     enum_name: &syn::Ident,
     variant: &VariantSpec<'_>,
 ) -> proc_macro2::TokenStream {
-    let state = variant_state_name(enum_name, variant.ident);
+    let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
+    let state = variant_state_name(enum_name, variant_user_ident);
     let variant_ident = variant.ident;
     match variant.record.style {
         RecordStyle::Named => {
-            let binders = variant
-                .record
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(index, _)| binder_slot_ident(&variant.record, index));
-            let init_fields = variant.record.fields.iter().map(|field| {
+            let binders = variant.record.fields.iter().map(|field| {
                 let ident = field.ident.expect("named field has ident");
-                let state_ident = &field.state_ident;
-                let ty = field.ty;
-                let begin = if let Some(begin) = packed_begin_expr(field, quote! { #ident }) {
-                    begin
+                if field.skip {
+                    quote! { #ident: _ }
                 } else {
-                    quote! {
-                        <#ty as zebin::Serialize>::begin_serialize(&#ident)?
-                    }
-                };
-                quote! {
-                    #state_ident: #begin,
-                    #ident: ::core::option::Option::None,
+                    quote! { #ident }
                 }
             });
-            quote! {
-                Self::#variant_ident { #(#binders),* } => {
-                    Ok(#state_name::#variant_ident(
-                        #state {
-                            _marker: ::core::marker::PhantomData,
-                            #(#init_fields)*
-                        }
-                    ))
-                }
-            }
-        }
-        RecordStyle::Unnamed => {
-            let binders = variant
-                .record
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(index, _)| binder_slot_ident(&variant.record, index));
             let init_fields = variant
                 .record
                 .fields
                 .iter()
                 .enumerate()
+                .filter(|(_, f)| !f.skip)
                 .map(|(index, field)| {
-                    let binder = format_ident!("field{}", index);
+                    let binder = binder_slot_ident(&variant.record, index);
                     let state_ident = &field.state_ident;
                     let ty = field.ty;
                     let begin = if let Some(begin) = packed_begin_expr(field, quote! { #binder }) {
@@ -369,14 +357,58 @@ fn variant_begin_arm(
                             <#ty as zebin::Serialize>::begin_serialize(&#binder)?
                         }
                     };
+                    let resolver_ident = resolver_slot_ident(&variant.record, index);
                     quote! {
                         #state_ident: #begin,
-                        #binder: ::core::option::Option::None,
+                        #resolver_ident: ::core::option::Option::None,
+                    }
+                });
+            quote! {
+                Self::#variant_ident { #(#binders),* } => {
+                    Ok(#state_name::#variant_user_ident(
+                        #state {
+                            _marker: ::core::marker::PhantomData,
+                            #(#init_fields)*
+                        }
+                    ))
+                }
+            }
+        }
+        RecordStyle::Unnamed => {
+            let binders = variant.record.fields.iter().enumerate().map(|(index, field)| {
+                if field.skip {
+                    quote! { _ }
+                } else {
+                    let binder = binder_slot_ident(&variant.record, index);
+                    quote! { #binder }
+                }
+            });
+            let init_fields = variant
+                .record
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| !f.skip)
+                .map(|(index, field)| {
+                    let binder = binder_slot_ident(&variant.record, index);
+                    let state_ident = &field.state_ident;
+                    let ty = field.ty;
+                    let begin = if let Some(begin) = packed_begin_expr(field, quote! { #binder }) {
+                        begin
+                    } else {
+                        quote! {
+                            <#ty as zebin::Serialize>::begin_serialize(&#binder)?
+                        }
+                    };
+                    let resolver_ident = resolver_slot_ident(&variant.record, index);
+                    quote! {
+                        #state_ident: #begin,
+                        #resolver_ident: ::core::option::Option::None,
                     }
                 });
             quote! {
                 Self::#variant_ident( #(#binders),* ) => {
-                    Ok(#state_name::#variant_ident(
+                    Ok(#state_name::#variant_user_ident(
                         #state {
                             _marker: ::core::marker::PhantomData,
                             #(#init_fields)*
@@ -388,7 +420,7 @@ fn variant_begin_arm(
         RecordStyle::Unit => {
             quote! {
                 Self::#variant_ident => {
-                    Ok(#state_name::#variant_ident(#state {
+                    Ok(#state_name::#variant_user_ident(#state {
                         _marker: ::core::marker::PhantomData,
                     }))
                 }
@@ -413,15 +445,15 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         .map(|variant| variant_resolver_def(name, variant));
 
     let state_enum_variants = variants.iter().map(|variant| {
-        let variant_state = variant_state_name(name, variant.ident);
-        let variant_ident = variant.ident;
-        quote! { #variant_ident(#variant_state<'a>) }
+        let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
+        let variant_state = variant_state_name(name, variant_user_ident);
+        quote! { #variant_user_ident(#variant_state<'a>) }
     });
 
     let resolver_enum_variants = variants.iter().map(|variant| {
-        let variant_resolver = variant_resolver_name(name, variant.ident);
-        let variant_ident = variant.ident;
-        quote! { #variant_ident(#variant_resolver) }
+        let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
+        let variant_resolver = variant_resolver_name(name, variant_user_ident);
+        quote! { #variant_user_ident(#variant_resolver) }
     });
 
     let begin_arms = variants
@@ -429,9 +461,9 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         .map(|variant| variant_begin_arm(&state_name, name, variant));
 
     let poll_arms = variants.iter().map(|variant| {
-        let variant_ident = variant.ident;
-        let variant_resolver_name = variant_resolver_name(name, variant.ident);
-        let variant_archived_name = crate::shared::variant_archived_name(name, variant.ident);
+        let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
+        let variant_resolver_name = variant_resolver_name(name, variant_user_ident);
+        let variant_archived_name = crate::shared::variant_archived_name(name, variant_user_ident);
         let stable_schema_key = if has_schema(&variant.record) {
             let stable_schema_key = variant
                 .record
@@ -450,9 +482,9 @@ fn enum_impl(name: &syn::Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::To
         let resolver_expr =
             resolver_expr(&variant.record, &variant_resolver_name, quote! { state });
         quote! {
-            #state_name::#variant_ident(state) => {
+            #state_name::#variant_user_ident(state) => {
                 #poll_logic
-                Ok(::core::task::Poll::Ready(#resolver_name::#variant_ident(#resolver_expr)))
+                Ok(::core::task::Poll::Ready(#resolver_name::#variant_user_ident(#resolver_expr)))
             }
         }
     });

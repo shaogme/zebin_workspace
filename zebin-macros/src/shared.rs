@@ -21,6 +21,8 @@ pub struct FieldSpec<'a> {
     pub ty: &'a Type,
     pub field_id: Option<u16>,
     pub packed_bits: Option<u8>,
+    pub skip: bool,
+    pub rename: Option<Ident>,
 }
 
 /// Specification of a struct or enum variant.
@@ -34,6 +36,7 @@ pub struct RecordSpec<'a> {
 /// Specification of an enum variant.
 pub struct VariantSpec<'a> {
     pub ident: &'a Ident,
+    pub rename: Option<Ident>,
     pub record: RecordSpec<'a>,
 }
 
@@ -105,6 +108,24 @@ fn variant_snake_case(variant: &Ident) -> String {
     out
 }
 
+fn parse_name_value_str(tokens: proc_macro2::TokenStream, target: &str) -> Result<Option<String>> {
+    let text = tokens.to_string();
+    for part in text.split(',') {
+        let mut pieces = part.split('=');
+        let Some(name) = pieces.next() else {
+            continue;
+        };
+        if name.trim() != target {
+            continue;
+        }
+        let Some(value) = pieces.next() else {
+            continue;
+        };
+        return Ok(Some(value.trim().trim_matches('"').to_string()));
+    }
+    Ok(None)
+}
+
 fn parse_name_value_u32(tokens: proc_macro2::TokenStream, target: &str) -> Result<Option<u32>> {
     let text = tokens.to_string();
     for part in text.split(',') {
@@ -135,20 +156,48 @@ fn parse_name_value_u32(tokens: proc_macro2::TokenStream, target: &str) -> Resul
     Ok(None)
 }
 
-fn parse_field_id(field: &Field) -> Result<Option<u16>> {
-    let mut field_id: Option<u16> = None;
+struct FieldAttrs {
+    field_id: Option<u16>,
+    packed_bits: Option<u8>,
+    skip: bool,
+    rename: Option<Ident>,
+}
+
+fn parse_field_attrs(
+    field: &Field,
+) -> Result<FieldAttrs> {
+    let mut field_id = None;
+    let mut skip = false;
+    let mut rename = None;
+
     for attr in &field.attrs {
         if attr.path().is_ident("zebin") {
             let tokens = attr.meta.require_list()?.tokens.clone();
-            if let Some(value) = parse_name_value_u32(tokens, "id")? {
-                field_id =
-                    Some(u16::try_from(value).map_err(|_| {
-                        syn::Error::new(field.span(), "field id exceeds u16 range")
-                    })?);
+            if let Some(value) = parse_name_value_u32(tokens.clone(), "id")? {
+                field_id = Some(u16::try_from(value).map_err(|_| {
+                    syn::Error::new(field.span(), "field id exceeds u16 range")
+                })?);
+            }
+            if let Some(name) = parse_name_value_str(tokens.clone(), "rename")? {
+                rename = Some(Ident::new(&name, field.span()));
+            }
+            let text = tokens.to_string();
+            for part in text.split(',') {
+                let part = part.trim();
+                if part == "skip" || part == "skip_serializing" {
+                    skip = true;
+                }
             }
         }
     }
-    Ok(field_id)
+
+    let packed_bits = parse_packed_bits(field)?;
+    Ok(FieldAttrs {
+        field_id,
+        packed_bits,
+        skip,
+        rename,
+    })
 }
 
 fn parse_uint_after_token(text: &str, token: &str) -> Option<u32> {
@@ -413,12 +462,15 @@ fn parse_fields_named(fields: &FieldsNamed) -> Result<RecordSpec<'_>> {
     let mut out = Vec::with_capacity(fields.named.len());
     for (index, field) in fields.named.iter().enumerate() {
         let ident = field.ident.as_ref();
+        let attrs = parse_field_attrs(field)?;
         out.push(FieldSpec {
             ident,
             state_ident: field_state_ident(ident, index),
             ty: &field.ty,
-            field_id: parse_field_id(field)?,
-            packed_bits: parse_packed_bits(field)?,
+            field_id: attrs.field_id,
+            packed_bits: attrs.packed_bits,
+            skip: attrs.skip,
+            rename: attrs.rename,
         });
     }
     Ok(RecordSpec {
@@ -432,12 +484,15 @@ fn parse_fields_named(fields: &FieldsNamed) -> Result<RecordSpec<'_>> {
 fn parse_fields_unnamed(fields: &FieldsUnnamed) -> Result<RecordSpec<'_>> {
     let mut out = Vec::with_capacity(fields.unnamed.len());
     for (index, field) in fields.unnamed.iter().enumerate() {
+        let attrs = parse_field_attrs(field)?;
         out.push(FieldSpec {
             ident: None,
             state_ident: field_state_ident(None, index),
             ty: &field.ty,
-            field_id: parse_field_id(field)?,
-            packed_bits: parse_packed_bits(field)?,
+            field_id: attrs.field_id,
+            packed_bits: attrs.packed_bits,
+            skip: attrs.skip,
+            rename: attrs.rename,
         });
     }
     Ok(RecordSpec {
@@ -475,13 +530,16 @@ fn parse_schema_revision(attrs: &[syn::Attribute]) -> Result<u32> {
 }
 
 fn validate_field_ids(record: &RecordSpec<'_>, span: Span) -> Result<()> {
-    let has_any_id = record.fields.iter().any(|field| field.field_id.is_some());
+    let has_any_id = record
+        .fields
+        .iter()
+        .any(|field| !field.skip && field.field_id.is_some());
     if has_any_id {
         for field in &record.fields {
-            if field.field_id.is_none() {
+            if !field.skip && field.field_id.is_none() {
                 return Err(syn::Error::new(
                     span,
-                    "启用 #[zebin(id = ...)] 后，所有字段都必须提供 id",
+                    "启用 #[zebin(id = ...)] 后，所有非 skip 字段都必须提供 id",
                 ));
             }
         }
@@ -528,8 +586,20 @@ pub fn parse_item(input: &DeriveInput) -> Result<ItemSpec<'_>> {
                 record = finalize_record(record, &variant.attrs, variant.span())?;
                 record.schema_revision = schema_revision;
                 validate_field_ids(&record, variant.span())?;
+
+                let mut rename = None;
+                for attr in &variant.attrs {
+                    if attr.path().is_ident("zebin") {
+                        let tokens = attr.meta.require_list()?.tokens.clone();
+                        if let Some(name) = parse_name_value_str(tokens, "rename")? {
+                            rename = Some(Ident::new(&name, variant.span()));
+                        }
+                    }
+                }
+
                 parsed.push(VariantSpec {
                     ident: &variant.ident,
+                    rename,
                     record,
                 });
             }
@@ -543,19 +613,25 @@ pub fn parse_item(input: &DeriveInput) -> Result<ItemSpec<'_>> {
 }
 
 pub fn has_schema(record: &RecordSpec<'_>) -> bool {
-    record.fields.iter().any(|field| field.field_id.is_some())
+    record
+        .fields
+        .iter()
+        .any(|field| !field.skip && field.field_id.is_some())
 }
 
 pub fn user_member(record: &RecordSpec<'_>, index: usize) -> Member {
+    let field = &record.fields[index];
     match record.style {
-        RecordStyle::Named => Member::Named(
-            record.fields[index]
-                .ident
-                .expect("named field has ident")
-                .clone(),
-        ),
+        RecordStyle::Named => {
+            let ident = field
+                .rename
+                .as_ref()
+                .unwrap_or_else(|| field.ident.expect("named field has ident"));
+            Member::Named(ident.clone())
+        }
         RecordStyle::Unnamed => {
-            Member::Unnamed(Index::from(index + usize::from(has_schema(record))))
+            let active_index = record.fields[..index].iter().filter(|f| !f.skip).count();
+            Member::Unnamed(Index::from(active_index + usize::from(has_schema(record))))
         }
         RecordStyle::Unit => unreachable!("unit has no fields"),
     }
@@ -565,7 +641,12 @@ pub fn layout_field_entries(
     record: &RecordSpec<'_>,
     archived_name: &Ident,
 ) -> Vec<proc_macro2::TokenStream> {
-    let mut fields: Vec<_> = record.fields.iter().enumerate().collect();
+    let mut fields: Vec<_> = record
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| !f.skip)
+        .collect();
 
     // Sort fields by field_id to ensure LayoutDescriptor::new doesn't fail with LayoutError
     fields.sort_by_key(|(_, field)| field.field_id.expect("field ids are validated above"));
