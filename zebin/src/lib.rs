@@ -13,13 +13,17 @@ mod validation;
 mod write;
 
 pub mod prelude {
-    #[cfg(feature = "alloc")]
     pub use crate::archive::{
         packed::{
-            ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
-            PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
+            ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedSlice,
+            PackedU8Slice,
         },
-        varint::{PackedVarIntSlice, VarInt, VarIntVec, VarIntView},
+        varint::{VarInt, VarIntView},
+    };
+    #[cfg(feature = "alloc")]
+    pub use crate::archive::{
+        packed_vec::{PackedBoolVec, PackedU8Vec, PackedVec},
+        varint_vec::{PackedVarIntSlice, VarIntVec},
     };
     pub use crate::core::rel_ptr::RelPtr;
     pub use crate::core::schema::{
@@ -42,13 +46,16 @@ pub mod prelude {
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
 
-#[cfg(feature = "alloc")]
 pub use crate::archive::{
     packed::{
-        ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedBoolVec,
-        PackedSlice, PackedU8Slice, PackedU8Vec, PackedVec,
+        ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedSlice, PackedU8Slice,
     },
-    varint::{PackedVarIntSlice, VarInt, VarIntView},
+    varint::{VarInt, VarIntView},
+};
+#[cfg(feature = "alloc")]
+pub use crate::archive::{
+    packed_vec::{PackedBoolVec, PackedU8Vec, PackedVec},
+    varint_vec::PackedVarIntSlice,
     vec::archived_bytes,
 };
 pub use crate::core::rel_ptr::RelPtr;
