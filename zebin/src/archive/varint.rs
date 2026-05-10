@@ -552,14 +552,17 @@ impl<T: VarIntNumber> Archive for VarIntVec<T> {
     }
 }
 
-pub struct VarIntVecBuilderState<T: VarIntNumber> {
-    data: Vec<u8>,
-    offsets: Vec<u32>,
+pub struct VarIntVecBuilderState<'a, T: VarIntNumber> {
+    values: &'a [T],
+    index: usize,
     phase: VarIntVecBuilderPhase,
     data_pos: Option<usize>,
     offsets_pos: Option<usize>,
     cursor: usize,
-    _marker: PhantomData<T>,
+    current_val_buf: [u8; 10],
+    current_val_len: usize,
+    current_total_offset: u32,
+    offsets: Vec<u32>,
 }
 
 enum VarIntVecBuilderPhase {
@@ -568,36 +571,24 @@ enum VarIntVecBuilderPhase {
     Done,
 }
 
-impl<T: VarIntNumber> VarIntVecBuilderState<T> {
-    fn new(values: &[T]) -> Self {
-        let mut data = Vec::new();
-        let mut offsets = Vec::with_capacity(values.len() + 1);
-        let mut current_offset = 0u32;
-
-        for &val in values {
-            offsets.push(current_offset);
-            let val_u64 = val.to_u64();
-            let len = encoded_len_u64(val_u64);
-            let mut buf = vec![0u8; len];
-            encode_u64(val_u64, &mut buf);
-            data.extend_from_slice(&buf);
-            current_offset += len as u32;
-        }
-        offsets.push(current_offset);
-
+impl<'a, T: VarIntNumber> VarIntVecBuilderState<'a, T> {
+    fn new(values: &'a [T]) -> Self {
         Self {
-            data,
-            offsets,
+            values,
+            index: 0,
             phase: VarIntVecBuilderPhase::Data,
             data_pos: None,
             offsets_pos: None,
             cursor: 0,
-            _marker: PhantomData,
+            current_val_buf: [0u8; 10],
+            current_val_len: 0,
+            current_total_offset: 0,
+            offsets: Vec::with_capacity(values.len() + 1),
         }
     }
 }
 
-impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<T> {
+impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<'a, T> {
     type Resolver = VarIntVecResolver;
 
     fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
@@ -610,32 +601,49 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<T> {
                     if self.data_pos.is_none() {
                         self.data_pos = Some(encoder.pos());
                     }
-                    let written = encoder.write(&self.data[self.cursor..])?;
-                    self.cursor += written;
-                    if self.cursor >= self.data.len() {
-                        self.phase = VarIntVecBuilderPhase::Offsets;
-                        self.cursor = 0;
-                    } else {
-                        return Ok(Poll::Pending);
+                    
+                    while self.index < self.values.len() {
+                        if self.current_val_len == 0 {
+                            self.offsets.push(self.current_total_offset);
+                            let val = self.values[self.index].to_u64();
+                            self.current_val_len = encoded_len_u64(val);
+                            encode_u64(val, &mut self.current_val_buf[..self.current_val_len]);
+                            self.cursor = 0;
+                        }
+                        
+                        let written = encoder.write(&self.current_val_buf[self.cursor..self.current_val_len])?;
+                        self.cursor += written;
+                        if self.cursor < self.current_val_len {
+                            return Ok(Poll::Pending);
+                        }
+                        
+                        self.current_total_offset += self.current_val_len as u32;
+                        self.current_val_len = 0;
+                        self.index += 1;
                     }
+                    
+                    self.offsets.push(self.current_total_offset);
+                    self.phase = VarIntVecBuilderPhase::Offsets;
+                    self.cursor = 0;
+                    self.index = 0;
                 }
                 VarIntVecBuilderPhase::Offsets => {
                     encoder.align(NonZeroUsize::new(4).unwrap())?;
                     if self.offsets_pos.is_none() {
                         self.offsets_pos = Some(encoder.pos());
                     }
-                    let mut offset_bytes = Vec::with_capacity(self.offsets.len() * 4);
-                    for &off in &self.offsets {
-                        offset_bytes.extend_from_slice(&off.to_le_bytes());
+                    
+                    while self.index < self.offsets.len() {
+                        let bytes = self.offsets[self.index].to_le_bytes();
+                        let written = encoder.write(&bytes[self.cursor..])?;
+                        self.cursor += written;
+                        if self.cursor < 4 {
+                            return Ok(Poll::Pending);
+                        }
+                        self.cursor = 0;
+                        self.index += 1;
                     }
-
-                    let written = encoder.write(&offset_bytes[self.cursor..])?;
-                    self.cursor += written;
-                    if self.cursor >= offset_bytes.len() {
-                        self.phase = VarIntVecBuilderPhase::Done;
-                    } else {
-                        return Ok(Poll::Pending);
-                    }
+                    self.phase = VarIntVecBuilderPhase::Done;
                 }
                 VarIntVecBuilderPhase::Done => {
                     return Ok(Poll::Ready(VarIntVecResolver {
@@ -650,7 +658,7 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<T> {
 
 impl<T: VarIntNumber> Serialize for VarIntVec<T> {
     type State<'a>
-        = VarIntVecBuilderState<T>
+        = VarIntVecBuilderState<'a, T>
     where
         Self: 'a;
 
@@ -687,7 +695,7 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
 
 impl<'a, T: VarIntNumber> Serialize for PackedVarIntSlice<'a, T> {
     type State<'b>
-        = VarIntVecBuilderState<T>
+        = VarIntVecBuilderState<'b, T>
     where
         Self: 'b;
 
