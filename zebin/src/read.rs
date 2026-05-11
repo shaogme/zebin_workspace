@@ -12,6 +12,34 @@ use crate::{
 use core::num::NonZeroUsize;
 use core::ops::Deref;
 
+fn validate_new_layout_header<H: ArchiveHeaderTrait>(header: &H) -> Result<(), ValidateError> {
+    let layout_pos = u32_to_usize(header.layout_offset().get(), || {
+        ValidateError::ValidationError {
+            message: "Layout offset exceeds usize range",
+            pos: H::LAYOUT_OFFSET_POS,
+        }
+    })?;
+    let root_pos = u32_to_usize(header.root_offset().get(), || {
+        ValidateError::ValidationError {
+            message: "Root offset exceeds usize range",
+            pos: H::ROOT_OFFSET_POS,
+        }
+    })?;
+    if layout_pos < H::SIZE {
+        return Err(ValidateError::ValidationError {
+            message: "Layout overlaps archive header",
+            pos: layout_pos,
+        });
+    }
+    if layout_pos >= root_pos {
+        return Err(ValidateError::ValidationError {
+            message: "Layout must precede root",
+            pos: layout_pos,
+        });
+    }
+    Ok(())
+}
+
 /// Safe access layer output that keeps the validated byte slice alive.
 ///
 /// ZebinReader acts as a Root View of the archive. It implements Deref to the root [View],
@@ -61,19 +89,14 @@ where
         T::Archived: Layout + Validate,
     {
         let header = H::parse(bytes)?;
+        validate_new_layout_header(&header)?;
         let root_pos = u32_to_usize(header.root_offset().get(), || {
             ValidateError::ValidationError {
                 message: "Root offset exceeds usize range",
-                pos: 8,
+                pos: H::ROOT_OFFSET_POS,
             }
         })?;
-        if root_pos < H::SIZE {
-            return Err(ValidateError::ValidationError {
-                message: "Root overlaps archive header",
-                pos: root_pos,
-            }
-            .into());
-        }
+
         if root_pos % <T::Archived as Layout>::ALIGNMENT.get() != 0 {
             return Err(ValidateError::AlignmentError {
                 expected: <T::Archived as Layout>::ALIGNMENT,
@@ -85,27 +108,28 @@ where
             .into());
         }
 
-        let layout_offset = u32_to_usize(header.layout_offset().get(), || {
-            ValidateError::ValidationError {
-                message: "Layout offset exceeds usize range",
-                pos: 4,
-            }
-        })?;
-
         let layout_dir = LayoutDirectory::new(
             bytes,
             u32_to_nonzero_usize(
                 header.layout_offset().get(),
                 || ValidateError::ValidationError {
                     message: "Layout offset exceeds usize range",
-                    pos: 4,
+                    pos: H::LAYOUT_OFFSET_POS,
                 },
                 || ValidateError::ValidationError {
                     message: "Layout offset cannot be zero",
-                    pos: 4,
+                    pos: H::LAYOUT_OFFSET_POS,
                 },
             )?,
         )?;
+        let layout_end = layout_dir.section_end();
+        if layout_end > root_pos {
+            return Err(ValidateError::ValidationError {
+                message: "Layout section overlaps root",
+                pos: layout_end,
+            }
+            .into());
+        }
         let mut validator = Validator::<'a, H>::with_layouts(bytes, header, layout_dir);
         let root_ptr = unsafe { bytes.as_ptr().add(root_pos) };
         let (root_view, root_span) =
@@ -120,13 +144,6 @@ where
             return Err(ValidateError::ValidationError {
                 message: "Root out of bounds",
                 pos: root_pos,
-            }
-            .into());
-        }
-        if layout_offset < root_end {
-            return Err(ValidateError::ValidationError {
-                message: "Layout section overlaps root",
-                pos: layout_offset,
             }
             .into());
         }
@@ -204,20 +221,35 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
         schema_revision: u32,
     ) -> Result<Self, ZebinError> {
         let header = H::parse(bytes)?;
+        validate_new_layout_header(&header)?;
         let layout_dir = LayoutDirectory::new(
             bytes,
             u32_to_nonzero_usize(
                 header.layout_offset().get(),
                 || ValidateError::ValidationError {
                     message: "Layout offset exceeds usize range",
-                    pos: 4,
+                    pos: H::LAYOUT_OFFSET_POS,
                 },
                 || ValidateError::ValidationError {
                     message: "Layout offset cannot be zero",
-                    pos: 4,
+                    pos: H::LAYOUT_OFFSET_POS,
                 },
             )?,
         )?;
+        let root_pos = u32_to_usize(header.root_offset().get(), || {
+            ValidateError::ValidationError {
+                message: "Root offset exceeds usize range",
+                pos: H::ROOT_OFFSET_POS,
+            }
+        })?;
+        let layout_end = layout_dir.section_end();
+        if layout_end > root_pos {
+            return Err(ValidateError::ValidationError {
+                message: "Layout section overlaps root",
+                pos: layout_end,
+            }
+            .into());
+        }
         let layout = layout_dir.lookup(stable_schema_key, schema_revision)?;
         Ok(Self::from_parts(bytes, header, Some(layout)))
     }

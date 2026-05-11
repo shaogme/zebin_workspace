@@ -247,7 +247,7 @@ pub fn helper_bytes_impl(
     let layout_checks = record_layout_checks_logic(record, archived_name);
     let field_validations = field_validations(record);
     let fixed_range = if has_schema(record) {
-        quote! {}
+        quote! { guard.check_range(ptr as *const u8, 8)?; }
     } else {
         quote! { guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?; }
     };

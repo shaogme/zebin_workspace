@@ -30,14 +30,15 @@ where
     Body {
         state: <T as Serialize>::State<'a>,
     },
+    Layout {
+        resolver: Option<<T as Archive>::Resolver>,
+        cursor: usize,
+    },
     RootAlign {
         resolver: Option<<T as Archive>::Resolver>,
     },
     Root {
         archived: T::Archived,
-        cursor: usize,
-    },
-    Layout {
         cursor: usize,
     },
     Done {
@@ -117,11 +118,57 @@ where
                 EncodePhase::Body { state } => match state.poll(&mut encoder)? {
                     ::core::task::Poll::Pending => break,
                     ::core::task::Poll::Ready(resolver) => {
-                        self.phase = EncodePhase::RootAlign {
+                        self.phase = EncodePhase::Layout {
                             resolver: Some(resolver),
+                            cursor: 0,
                         };
                     }
                 },
+                EncodePhase::Layout { resolver, cursor } => {
+                    if encoder.pos() != self.plan.layout_pos && *cursor == 0 {
+                        return Err(ValidateError::ValidationError {
+                            message: "Layout offset mismatch during emission",
+                            pos: encoder.pos(),
+                        }
+                        .into());
+                    }
+
+                    if encoder.layouts().count() != self.plan.layouts.count() && *cursor == 0 {
+                        return Err(ValidateError::ValidationError {
+                            message: "Layout registry diverged during emission",
+                            pos: encoder.pos(),
+                        }
+                        .into());
+                    }
+
+                    let total_layout_len = self.plan.layout_section_len;
+                    let mut temp_buf = [0u8; 256];
+                    let remaining = total_layout_len.saturating_sub(*cursor);
+                    if remaining == 0 {
+                        self.phase = EncodePhase::RootAlign {
+                            resolver: resolver.take(),
+                        };
+                        continue;
+                    }
+
+                    let chunk_size = temp_buf.len().min(remaining);
+                    crate::write::plan::fill_layout_section_chunk(
+                        &self.plan.layouts,
+                        *cursor,
+                        &mut temp_buf[..chunk_size],
+                    )?;
+
+                    let written = encoder.write(&temp_buf[..chunk_size])?;
+                    *cursor += written;
+                    if written == 0 && chunk_size > 0 {
+                        break;
+                    }
+                    if *cursor >= total_layout_len {
+                        self.phase = EncodePhase::RootAlign {
+                            resolver: resolver.take(),
+                        };
+                    }
+                }
                 EncodePhase::RootAlign { resolver } => {
                     encoder.align(<T::Archived as Layout>::ALIGNMENT)?;
                     if !encoder
@@ -172,54 +219,10 @@ where
                         break;
                     }
 
-                    if encoder.pos() != self.plan.layout_pos {
-                        return Err(ValidateError::ValidationError {
-                            message: "Layout offset mismatch during emission",
-                            pos: encoder.pos(),
-                        }
-                        .into());
-                    }
-
-                    if encoder.layouts().count() != self.plan.layouts.count() {
-                        return Err(ValidateError::ValidationError {
-                            message: "Layout registry diverged during emission",
-                            pos: encoder.pos(),
-                        }
-                        .into());
-                    }
-
-                    self.phase = EncodePhase::Layout { cursor: 0 };
-                }
-                EncodePhase::Layout { cursor } => {
-                    let total_layout_len =
-                        crate::write::plan::layout_section_len_registry(&self.plan.layouts)?;
-                    let mut temp_buf = [0u8; 256];
-                    let remaining = total_layout_len.saturating_sub(*cursor);
-                    if remaining == 0 {
-                        self.phase = EncodePhase::Done {
-                            _phantom: PhantomData,
-                        };
-                        break;
-                    }
-
-                    let chunk_size = temp_buf.len().min(remaining);
-                    crate::write::plan::fill_layout_section_chunk(
-                        &self.plan.layouts,
-                        *cursor,
-                        &mut temp_buf[..chunk_size],
-                    )?;
-
-                    let written = encoder.write(&temp_buf[..chunk_size])?;
-                    *cursor += written;
-                    if written == 0 && chunk_size > 0 {
-                        break;
-                    }
-                    if *cursor >= total_layout_len {
-                        self.phase = EncodePhase::Done {
-                            _phantom: PhantomData,
-                        };
-                        break;
-                    }
+                    self.phase = EncodePhase::Done {
+                        _phantom: PhantomData,
+                    };
+                    break;
                 }
                 EncodePhase::Done { .. } => break,
             }

@@ -4,13 +4,14 @@ use crate::{
     traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Layout, Serialize, SerializeState,
     },
-    utils::num::{u32_to_usize, usize_to_nonzero_u32},
+    utils::num::usize_to_nonzero_u32,
     write::encoder::{LayoutRegistry, MeasureEncoder},
 };
 
 pub(crate) struct EncodePlan<'a, H: ArchiveHeaderTrait = ArchiveHeader> {
     pub root_pos: usize,
     pub layout_pos: usize,
+    pub layout_section_len: usize,
     pub total_len: usize,
     pub header: H,
     pub layouts: LayoutRegistry<'a>,
@@ -30,59 +31,56 @@ where
         }
     };
 
-    encoder.align(<T::Archived as Layout>::ALIGNMENT)?;
-    let root_offset = encoder.pos();
+    let layout_pos = encoder.pos();
+    let section_len = layout_section_len_registry(encoder.layouts())?;
+    let root_alignment = <T::Archived as Layout>::ALIGNMENT.get();
+    let layout_end = layout_pos
+        .checked_add(section_len)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: layout_pos })?;
+    let root_pos = layout_end
+        .checked_add((root_alignment - (layout_end % root_alignment)) % root_alignment)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: layout_end })?;
     let root_offset = usize_to_nonzero_u32(
-        root_offset,
+        root_pos,
         || ValidateError::ValidationError {
             message: "Root offset exceeds u32 range",
-            pos: root_offset,
+            pos: root_pos,
         },
         || ValidateError::ValidationError {
             message: "Root offset cannot be zero",
-            pos: root_offset,
+            pos: root_pos,
         },
     )?;
 
-    let root_pos = u32_to_usize(root_offset.get(), || ZebinError::ArithmeticOverflow {
-        pos: root_offset.get() as usize,
-    })?;
     let archived = value.resolve(root_pos, resolver)?;
     let size = archived.size_hint();
-    encoder.skip(size)?;
+    let total_len = root_pos
+        .checked_add(size)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: root_pos })?;
 
-    let layout_offset = encoder.pos();
     let layout_offset = usize_to_nonzero_u32(
-        layout_offset,
+        layout_pos,
         || ValidateError::ValidationError {
             message: "Layout section offset exceeds u32 range",
-            pos: layout_offset,
+            pos: layout_pos,
         },
         || ValidateError::ValidationError {
             message: "Layout section offset cannot be zero",
-            pos: layout_offset,
+            pos: layout_pos,
         },
     )?;
-
-    let layouts = encoder.layouts_moved();
-    let section_len = layout_section_len_registry(&layouts)?;
-    let layout_pos = u32_to_usize(layout_offset.get(), || ZebinError::ArithmeticOverflow {
-        pos: layout_offset.get() as usize,
-    })?;
-    let total_len = layout_pos
-        .checked_add(section_len)
-        .ok_or(ZebinError::ArithmeticOverflow { pos: layout_pos })?;
 
     Ok(EncodePlan {
         root_pos,
         layout_pos,
+        layout_section_len: section_len,
         total_len,
         header: H::create(
             <T::Archived as Layout>::ENCODING as u8,
             layout_offset,
             root_offset,
         ),
-        layouts,
+        layouts: encoder.layouts_moved(),
     })
 }
 

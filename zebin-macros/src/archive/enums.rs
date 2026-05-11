@@ -53,24 +53,42 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             variant_accessors.push(quote! {
                 pub unsafe fn #accessor_name<'a>(&'a self) -> Option<&'a #helper_name> {
                     if self.tag != #idx_lit { return None; }
-                    let ptr = unsafe { &self.payload.#payload_field_ident as *const _ as *const #helper_name };
-                    Some(&*ptr)
+                    let variant_ptr = unsafe {
+                        (self as *const Self as *const u8)
+                            .add(zebin::memoffset::offset_of!(Self, payload))
+                            as *const #helper_name
+                    };
+                    Some(&*variant_ptr)
                 }
             });
         }
 
-        let layout_checks = record_layout_checks_logic(&variant.record, &helper_name);
-        let field_validations = field_validations(&variant.record);
-        variant_validate_arms.push(quote! {
-            #idx_lit => {
-                let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                {
+        if has_schema(&variant.record) {
+            variant_validate_arms.push(quote! {
+                #idx_lit => {
+                    let variant_ptr = unsafe {
+                        (ptr as *const u8)
+                            .add(zebin::memoffset::offset_of!(Self, payload))
+                            as *const #helper_name
+                    };
                     let mut guard = guard.push_variant(stringify!(#variant_ident));
-                    #layout_checks
-                    #(#field_validations)*
+                    unsafe { <#helper_name as zebin::Validate>::validate::<H, _>(variant_ptr, &mut *guard)?; }
                 }
-            }
-        });
+            });
+        } else {
+            let layout_checks = record_layout_checks_logic(&variant.record, &helper_name);
+            let field_validations = field_validations(&variant.record);
+            variant_validate_arms.push(quote! {
+                #idx_lit => {
+                    let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
+                    {
+                        let mut guard = guard.push_variant(stringify!(#variant_ident));
+                        #layout_checks
+                        #(#field_validations)*
+                    }
+                }
+            });
+        }
 
         variant_write_arms.push(quote! {
             #idx_lit => {
@@ -348,7 +366,10 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
                     where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
                         let mut guard = context.guard()?;
                         guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
-                        guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
+                        guard.check_range(
+                            ptr as *const u8,
+                            zebin::memoffset::offset_of!(Self, payload),
+                        )?;
                         let archived = unsafe { &*ptr };
                         match archived.tag {
                             #(#variant_validate_arms)*
@@ -432,7 +453,7 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
     };
     let has_schema_variants = variants.iter().any(|v| has_schema(&v.record));
     let span_expr = if has_schema_variants {
-        quote! { 4 }
+        quote! { zebin::memoffset::offset_of!(Self, payload) }
     } else {
         quote! { ::core::mem::size_of::<Self>() }
     };

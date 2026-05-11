@@ -79,6 +79,10 @@ impl ArchiveHeaderTrait for ArchiveHeader {
         Ok(Self::new(version, flags, layout_offset, root_offset))
     }
 
+    fn flags(&self) -> u8 {
+        self.flags
+    }
+
     fn encode(&self) -> Self::Bytes {
         Self::to_bytes(self.flags, self.layout_offset, self.root_offset)
     }
@@ -114,7 +118,7 @@ impl crate::traits::ArchivedDefault for ArchiveHeader {
             version: ARCHIVE_VERSION,
             flags: 0,
             layout_offset: NonZeroU32::new(12).unwrap(),
-            root_offset: NonZeroU32::new(12).unwrap(),
+            root_offset: NonZeroU32::new(16).unwrap(),
         };
         &DEFAULT
     }

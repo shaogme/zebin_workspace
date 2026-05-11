@@ -263,6 +263,10 @@ impl<'a> LayoutDirectory<'a> {
     ) -> Result<LayoutView<'a>, ValidateError> {
         self.parsed.lookup(stable_schema_key, schema_revision)
     }
+
+    pub fn section_end(&self) -> usize {
+        self.parsed.section_end
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -270,6 +274,7 @@ pub(crate) struct ParsedLayoutSection<'a> {
     bytes: &'a [u8],
     section_offset: usize,
     num_layouts: usize,
+    section_end: usize,
 }
 
 impl<'a> ParsedLayoutSection<'a> {
@@ -412,9 +417,64 @@ fn parse_layout_section<'a>(
         });
     }
 
+    let mut section_end = offsets_end;
+    for layout_index in 0..num_layouts {
+        let offset_pos = offsets_pos + layout_index * 4;
+        let layout_rel_offset = u32_to_usize(
+            u32::from_le_bytes(read_fixed::<4>(bytes, offset_pos, "Layout offset entry")?),
+            || ValidateError::ValidationError {
+                message: "Layout offset entry overflow",
+                pos: offset_pos,
+            },
+        )?;
+
+        let entry_pos = section_offset.checked_add(layout_rel_offset).ok_or(
+            ValidateError::ValidationError {
+                message: "Layout entry overflow",
+                pos: offset_pos,
+            },
+        )?;
+
+        let entry_header_end = entry_pos
+            .checked_add(16)
+            .ok_or(ValidateError::ValidationError {
+                message: "Layout entry overflow",
+                pos: entry_pos,
+            })?;
+        if entry_header_end > bytes.len() {
+            return Err(ValidateError::ValidationError {
+                message: "Layout entry out of bounds",
+                pos: entry_pos,
+            });
+        }
+
+        let field_count = usize::from(u16::from_le_bytes(read_fixed::<2>(
+            bytes,
+            entry_pos + 8,
+            "Layout field count",
+        )?));
+        let entry_end = entry_pos
+            .checked_add(16)
+            .and_then(|pos| pos.checked_add(field_count.checked_mul(8)?))
+            .ok_or(ValidateError::ValidationError {
+                message: "Layout field table overflow",
+                pos: entry_pos,
+            })?;
+        if entry_end > bytes.len() {
+            return Err(ValidateError::ValidationError {
+                message: "Layout entry payload out of bounds",
+                pos: entry_pos,
+            });
+        }
+        if entry_end > section_end {
+            section_end = entry_end;
+        }
+    }
+
     Ok(ParsedLayoutSection {
         bytes,
         section_offset,
         num_layouts,
+        section_end,
     })
 }

@@ -34,9 +34,16 @@ pub trait ArchiveHeader: Layout + Clone + Copy {
     const VERSION: u8;
     /// Fixed size of the header in bytes.
     const SIZE: usize;
+    /// Byte offset of the layout section offset in the header.
+    const LAYOUT_OFFSET_POS: usize = 4;
+    /// Byte offset of the root object offset in the header.
+    const ROOT_OFFSET_POS: usize = 8;
 
     /// Parse header from bytes.
     fn parse(bytes: &[u8]) -> Result<Self, ParseHeaderError>;
+
+    /// Get the raw archive flags byte.
+    fn flags(&self) -> u8;
 
     /// Encode header into its fixed-size byte representation.
     fn encode(&self) -> Self::Bytes;

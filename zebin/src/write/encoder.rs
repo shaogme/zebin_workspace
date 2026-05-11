@@ -82,6 +82,10 @@ impl<'a> MeasureEncoder<'a> {
         }
     }
 
+    pub fn layouts(&self) -> &LayoutRegistry<'a> {
+        &self.layouts
+    }
+
     pub fn layouts_moved(self) -> LayoutRegistry<'a> {
         self.layouts
     }
