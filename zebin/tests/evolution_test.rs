@@ -106,7 +106,7 @@ fn test_enum_evolution() {
 
     // Directly access variants on the reader.
     // The variant accessor on View (for enums) returns a nested View for the variant record.
-    let login = reader.as_login().unwrap().expect("Should be Login variant");
+    let login = reader.as_login().expect("Should be Login variant");
 
     assert_eq!(unsafe { login.user().unwrap().as_str() }, "Alice");
     assert!(login.device().unwrap().is_none());

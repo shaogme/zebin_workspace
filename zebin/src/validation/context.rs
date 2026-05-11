@@ -1,18 +1,8 @@
-use crate::{
-    core::schema::{SchemaRevision, StableSchemaKey},
-    error::AccessError,
-    format::ArchiveHeader,
-    read::ResolvedLayout,
-    traits::ArchiveHeader as ArchiveHeaderTrait,
-    validation::validator::ValidationPathSegment,
-};
-use core::{marker::PhantomData, num::NonZeroUsize};
+use crate::{error::AccessError, validation::validator::ValidationPathSegment};
+use core::num::NonZeroUsize;
 
-/// Validation context used by archived representations.
-pub trait ValidationContext<H = ArchiveHeader>
-where
-    H: ArchiveHeaderTrait,
-{
+/// Validation context used while sequentially decoding archive data.
+pub trait ValidationContext {
     fn push_depth(&mut self) -> Result<(), AccessError>;
 
     fn pop_depth(&mut self);
@@ -23,19 +13,19 @@ where
 
     fn record_error_path(&mut self);
 
-    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self, H>, AccessError> {
+    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self>, AccessError> {
         ArchivedDepthGuard::new(self)
     }
 
-    fn push_field(&mut self, name: &'static str) -> PathGuard<'_, Self, H> {
+    fn push_field(&mut self, name: &'static str) -> PathGuard<'_, Self> {
         PathGuard::new(self, ValidationPathSegment::Field(name))
     }
 
-    fn push_index(&mut self, index: usize) -> PathGuard<'_, Self, H> {
+    fn push_index(&mut self, index: usize) -> PathGuard<'_, Self> {
         PathGuard::new(self, ValidationPathSegment::Index(index))
     }
 
-    fn push_variant(&mut self, name: &'static str) -> PathGuard<'_, Self, H> {
+    fn push_variant(&mut self, name: &'static str) -> PathGuard<'_, Self> {
         PathGuard::new(self, ValidationPathSegment::Variant(name))
     }
 
@@ -47,34 +37,20 @@ where
         self.record_error_path();
         AccessError::ValidationError { message, pos }
     }
-
-    fn resolved_layout(
-        &mut self,
-        stable_schema_key: StableSchemaKey,
-        schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'_, H>, AccessError>;
 }
 
 /// RAII guard that restores validation depth when dropped.
-pub struct ArchivedDepthGuard<'a, C: ValidationContext<H> + ?Sized, H = ArchiveHeader>
-where
-    H: ArchiveHeaderTrait,
-{
+pub struct ArchivedDepthGuard<'a, C: ValidationContext + ?Sized> {
     context: &'a mut C,
-    _phantom: PhantomData<H>,
 }
 
-impl<'a, C, H> ArchivedDepthGuard<'a, C, H>
+impl<'a, C> ArchivedDepthGuard<'a, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     pub fn new(context: &'a mut C) -> Result<Self, AccessError> {
         context.push_depth()?;
-        Ok(Self {
-            context,
-            _phantom: PhantomData,
-        })
+        Ok(Self { context })
     }
 
     pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
@@ -90,10 +66,9 @@ where
     }
 }
 
-impl<'a, C, H> core::ops::Deref for ArchivedDepthGuard<'a, C, H>
+impl<C> core::ops::Deref for ArchivedDepthGuard<'_, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     type Target = C;
 
@@ -102,20 +77,18 @@ where
     }
 }
 
-impl<'a, C, H> core::ops::DerefMut for ArchivedDepthGuard<'a, C, H>
+impl<C> core::ops::DerefMut for ArchivedDepthGuard<'_, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.context
     }
 }
 
-impl<'a, C, H> Drop for ArchivedDepthGuard<'a, C, H>
+impl<C> Drop for ArchivedDepthGuard<'_, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     fn drop(&mut self) {
         self.context.pop_depth();
@@ -123,32 +96,23 @@ where
 }
 
 /// RAII guard that restores validation path when dropped.
-pub struct PathGuard<'a, C: ValidationContext<H> + ?Sized, H = ArchiveHeader>
-where
-    H: ArchiveHeaderTrait,
-{
+pub struct PathGuard<'a, C: ValidationContext + ?Sized> {
     context: &'a mut C,
-    _phantom: PhantomData<H>,
 }
 
-impl<'a, C, H> PathGuard<'a, C, H>
+impl<'a, C> PathGuard<'a, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     pub fn new(context: &'a mut C, segment: ValidationPathSegment) -> Self {
         context.push_path(segment);
-        Self {
-            context,
-            _phantom: PhantomData,
-        }
+        Self { context }
     }
 }
 
-impl<'a, C, H> core::ops::Deref for PathGuard<'a, C, H>
+impl<C> core::ops::Deref for PathGuard<'_, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     type Target = C;
 
@@ -157,20 +121,18 @@ where
     }
 }
 
-impl<'a, C, H> core::ops::DerefMut for PathGuard<'a, C, H>
+impl<C> core::ops::DerefMut for PathGuard<'_, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.context
     }
 }
 
-impl<'a, C, H> Drop for PathGuard<'a, C, H>
+impl<C> Drop for PathGuard<'_, C>
 where
-    C: ValidationContext<H> + ?Sized,
-    H: ArchiveHeaderTrait,
+    C: ValidationContext + ?Sized,
 {
     fn drop(&mut self) {
         self.context.pop_path();

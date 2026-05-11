@@ -1,18 +1,14 @@
 pub mod encoder;
-pub mod plan;
 
 use core::marker::PhantomData;
 
 use crate::{
-    error::{AccessError, ZebinError},
+    error::ZebinError,
     format::ArchiveHeader,
     traits::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Layout, Serialize, SerializeState,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Decode, Serialize, SerializeState,
     },
-    write::{
-        encoder::{LayoutRegistry, SliceEncoder},
-        plan::{EncodePlan, measure_plan},
-    },
+    write::encoder::{MeasureEncoder, SliceEncoder},
 };
 
 #[cfg(feature = "alloc")]
@@ -26,20 +22,10 @@ where
     Header {
         bytes: H::Bytes,
         cursor: usize,
+        next_state: Option<<T as Serialize>::State<'a>>,
     },
     Body {
         state: <T as Serialize>::State<'a>,
-    },
-    Layout {
-        resolver: Option<<T as Archive>::Resolver>,
-        cursor: usize,
-    },
-    RootAlign {
-        resolver: Option<<T as Archive>::Resolver>,
-    },
-    Root {
-        archived: T::Archived,
-        cursor: usize,
     },
     Done {
         _phantom: PhantomData<H>,
@@ -54,37 +40,33 @@ where
     T: Serialize + Archive + 'a,
     H: ArchiveHeaderTrait,
 {
-    value: &'a T,
-    plan: EncodePlan<'a, H>,
-    body_state: Option<<T as Serialize>::State<'a>>,
     phase: EncodePhase<'a, T, H>,
     archive_pos: usize,
-    layouts: LayoutRegistry<'a>,
+    total_len: usize,
 }
 
 impl<'a, T, H> ArchiveWriter<'a, T, H>
 where
     T: Serialize + Archive + 'a,
     H: ArchiveHeaderTrait,
+    T::Archived: for<'b> Decode<'b>,
 {
     pub fn new(value: &'a T) -> Result<Self, ZebinError> {
-        let plan = measure_plan::<T, H>(value)?;
-        let header_bytes = plan.header.encode();
+        let total_len = measure_total_len::<T, H>(value)?;
+        let header = H::create(<T::Archived as Decode<'static>>::FIELD_ENCODING as u8);
         Ok(Self {
-            value,
-            body_state: Some(value.begin_serialize()?),
             phase: EncodePhase::Header {
-                bytes: header_bytes,
+                bytes: header.encode(),
                 cursor: 0,
+                next_state: Some(value.begin_serialize()?),
             },
             archive_pos: 0,
-            layouts: LayoutRegistry::default(),
-            plan,
+            total_len,
         })
     }
 
     pub fn total_len(&self) -> usize {
-        self.plan.total_len
+        self.total_len
     }
 
     pub fn written(&self) -> usize {
@@ -100,130 +82,34 @@ where
             return Ok(0);
         }
 
-        let mut encoder = SliceEncoder::new(out, self.archive_pos, &mut self.layouts);
+        let mut encoder = SliceEncoder::new(out, self.archive_pos);
         loop {
             match &mut self.phase {
-                EncodePhase::Header { bytes, cursor } => {
+                EncodePhase::Header {
+                    bytes,
+                    cursor,
+                    next_state,
+                } => {
                     let written = encoder.write(&bytes.as_ref()[*cursor..])?;
                     *cursor += written;
                     if *cursor < bytes.as_ref().len() {
                         break;
                     }
-                    let state = self
-                        .body_state
-                        .take()
-                        .expect("body state should be initialized from writer construction");
+                    let state = next_state.take().ok_or(ZebinError::SerializationError {
+                        pos: encoder.pos(),
+                        message: "writer body state was already consumed",
+                    })?;
                     self.phase = EncodePhase::Body { state };
                 }
                 EncodePhase::Body { state } => match state.poll(&mut encoder)? {
-                    ::core::task::Poll::Pending => break,
-                    ::core::task::Poll::Ready(resolver) => {
-                        self.phase = EncodePhase::Layout {
-                            resolver: Some(resolver),
-                            cursor: 0,
+                    core::task::Poll::Pending => break,
+                    core::task::Poll::Ready(()) => {
+                        self.phase = EncodePhase::Done {
+                            _phantom: PhantomData,
                         };
+                        break;
                     }
                 },
-                EncodePhase::Layout { resolver, cursor } => {
-                    if encoder.pos() != self.plan.layout_pos && *cursor == 0 {
-                        return Err(AccessError::ValidationError {
-                            message: "Layout offset mismatch during emission",
-                            pos: encoder.pos(),
-                        }
-                        .into());
-                    }
-
-                    if encoder.layouts().count() != self.plan.layouts.count() && *cursor == 0 {
-                        return Err(AccessError::ValidationError {
-                            message: "Layout registry diverged during emission",
-                            pos: encoder.pos(),
-                        }
-                        .into());
-                    }
-
-                    let total_layout_len = self.plan.layout_section_len;
-                    let mut temp_buf = [0u8; 256];
-                    let remaining = total_layout_len.saturating_sub(*cursor);
-                    if remaining == 0 {
-                        self.phase = EncodePhase::RootAlign {
-                            resolver: resolver.take(),
-                        };
-                        continue;
-                    }
-
-                    let chunk_size = temp_buf.len().min(remaining);
-                    crate::write::plan::fill_layout_section_chunk(
-                        &self.plan.layouts,
-                        *cursor,
-                        &mut temp_buf[..chunk_size],
-                    )?;
-
-                    let written = encoder.write(&temp_buf[..chunk_size])?;
-                    *cursor += written;
-                    if written == 0 && chunk_size > 0 {
-                        break;
-                    }
-                    if *cursor >= total_layout_len {
-                        self.phase = EncodePhase::RootAlign {
-                            resolver: resolver.take(),
-                        };
-                    }
-                }
-                EncodePhase::RootAlign { resolver } => {
-                    encoder.align(<T::Archived as Layout>::ALIGNMENT)?;
-                    if !encoder
-                        .pos()
-                        .is_multiple_of(<T::Archived as Layout>::ALIGNMENT.get())
-                    {
-                        break;
-                    }
-                    if encoder.pos() != self.plan.root_pos {
-                        return Err(AccessError::ValidationError {
-                            message: "Root offset mismatch during emission",
-                            pos: encoder.pos(),
-                        }
-                        .into());
-                    }
-
-                    let resolver = resolver
-                        .take()
-                        .expect("resolver available while entering root alignment");
-                    let archived = self.value.resolve(encoder.pos(), resolver)?;
-                    self.phase = EncodePhase::Root {
-                        archived,
-                        cursor: 0,
-                    };
-                }
-                EncodePhase::Root { archived, cursor } => {
-                    if encoder.pos() != self.plan.root_pos && *cursor == 0 {
-                        return Err(AccessError::ValidationError {
-                            message: "Root offset mismatch during root write",
-                            pos: encoder.pos(),
-                        }
-                        .into());
-                    }
-
-                    let size = archived.size_hint();
-                    let mut temp_buf = [0u8; 1024];
-                    if size > temp_buf.len() {
-                        return Err(ZebinError::BufferTooSmall {
-                            pos: encoder.pos(),
-                            required: size,
-                        });
-                    }
-                    T::Archived::write_archived_bytes(archived, &mut temp_buf[..size]);
-
-                    let written = encoder.write(&temp_buf[*cursor..size])?;
-                    *cursor += written;
-                    if *cursor < size {
-                        break;
-                    }
-
-                    self.phase = EncodePhase::Done {
-                        _phantom: PhantomData,
-                    };
-                    break;
-                }
                 EncodePhase::Done { .. } => break,
             }
         }
@@ -232,7 +118,6 @@ where
         Ok(encoder.written())
     }
 
-    /// Writes the archive into the provided buffer until completion.
     pub fn write_all(&mut self, out: &mut [u8]) -> Result<usize, ZebinError> {
         let mut total_written = 0usize;
         while !self.is_finished() {
@@ -253,12 +138,10 @@ where
         Ok(total_written)
     }
 
-    /// Create a chunked archive writer.
     pub fn encode_chunked(value: &'a T) -> Result<Self, ZebinError> {
         Self::new(value)
     }
 
-    /// Archive a value into a newly allocated byte vector.
     #[cfg(feature = "alloc")]
     pub fn encode(value: &'a T) -> Result<Vec<u8>, ZebinError> {
         let mut writer = Self::encode_chunked(value)?;
@@ -274,5 +157,30 @@ where
         buf.resize(writer.total_len(), 0);
         writer.write_all(buf)?;
         Ok(())
+    }
+}
+
+fn measure_total_len<'a, T, H>(value: &'a T) -> Result<usize, ZebinError>
+where
+    T: Serialize + Archive + 'a,
+    H: ArchiveHeaderTrait,
+{
+    let body_len = crate::measure_serialized_len(value)?;
+    H::SIZE
+        .checked_add(body_len)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: H::SIZE })
+}
+
+pub fn measure_body_len<T>(value: &T) -> Result<usize, ZebinError>
+where
+    T: Serialize + Archive + ?Sized,
+{
+    let mut encoder = MeasureEncoder::new(0);
+    let mut state = value.begin_serialize()?;
+    loop {
+        match state.poll(&mut encoder)? {
+            core::task::Poll::Pending => continue,
+            core::task::Poll::Ready(()) => return Ok(encoder.pos()),
+        }
     }
 }

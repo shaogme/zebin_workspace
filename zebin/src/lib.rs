@@ -25,54 +25,51 @@ pub mod prelude {
         packed_vec::{PackedBoolVec, PackedU8Vec, PackedVec},
         varint_vec::{PackedVarIntSlice, VarIntVec},
     };
-    pub use crate::core::rel_ptr::RelPtr;
     pub use crate::core::schema::{
-        FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
+        FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaRevision,
+        StableSchemaKey,
     };
     pub use crate::error::{AccessError, ArchiveError, ZebinError};
     pub use crate::format::ArchiveHeader;
     #[cfg(feature = "mmap")]
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
-        LayoutSink, OptRestorer, OptRestorerFallback, OptRestorerOption, Restore, RestoreFromView,
-        SchemaAware, Serialize, SerializeState,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Decode,
+        FixedLayout, Restore, SchemaAware, Serialize, SerializeState,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::{
-        Cursor, ResolvedLayout, Storage, Validator, View, ZebinReader, ZebinWriter, decode,
-        encode_chunked, reader, validate,
+        Cursor, Storage, Validator, ZebinReader, ZebinWriter, decode, encode_chunked, reader,
+        validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
 
 pub use crate::archive::{
     packed::{
-        ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedSlice, PackedU8Slice,
+        ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView, ArchivedPackedU8Slice,
+        ArchivedPackedU8SliceView, PackedBoolSlice, PackedSlice, PackedU8Slice,
     },
     varint::{VarInt, VarIntView},
 };
 #[cfg(feature = "alloc")]
 pub use crate::archive::{
     packed_vec::{PackedBoolVec, PackedSequenceState, PackedU8Vec, PackedVec},
-    varint_vec::PackedVarIntSlice,
+    varint_vec::{PackedVarIntSlice, VarIntVec},
     vec::archived_bytes,
 };
-pub use crate::core::rel_ptr::RelPtr;
 pub use crate::core::schema::{
-    FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
-    SchemaRevision, StableSchemaKey,
+    FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaRevision, StableSchemaKey,
 };
 pub use crate::error::{AccessError, ArchiveError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::io::storage::mmap::Mmap;
-pub use crate::read::{Cursor, ResolvedLayout, View, ZebinReader, get_nested_layout};
+pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
-    Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
-    LayoutSink, OptRestorer, OptRestorerFallback, OptRestorerOption, Restore, RestoreFromView,
-    SchemaAware, Serialize, SerializeState,
+    Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Decode, FixedLayout,
+    Restore, SchemaAware, Serialize, SerializeState,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::validator::{ValidationPathSegment, ValidationPathStack, Validator};
@@ -81,14 +78,19 @@ pub use crate::write::{ArchiveWriter, ZebinWriter};
 pub use memoffset;
 pub use zebin_macros::*;
 
-use ::core::ops::Deref;
+/// Measure the body length a value will occupy when serialized without the archive header.
+pub fn measure_serialized_len<T>(value: &T) -> Result<usize, ZebinError>
+where
+    T: Serialize + Archive + ?Sized,
+{
+    crate::write::measure_body_len(value)
+}
 
 /// Create a reader for the archived root object using the default header.
 pub fn reader<'a, T>(bytes: &'a [u8]) -> Result<ZebinReader<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: Layout + Access<'a>,
-    <T::Archived as Access<'a>>::View: Deref,
+    T::Archived: Decode<'a>,
 {
     ZebinReader::new(bytes)
 }
@@ -97,9 +99,8 @@ where
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<T, ZebinError>
 where
     T: Archive,
-    T::Archived: Layout + Access<'a>,
-    <T::Archived as Access<'a>>::View: Deref,
-    View<'a, <T::Archived as Access<'a>>::View, ArchiveHeader>: Restore<T>,
+    T::Archived: Decode<'a>,
+    <T::Archived as Decode<'a>>::View: Restore<T>,
 {
     ZebinReader::<T>::decode(bytes)
 }
@@ -108,9 +109,7 @@ where
 pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
-    T::Archived: 'a,
-    T::Archived: Layout + Access<'a>,
-    <T::Archived as Access<'a>>::View: Deref,
+    T::Archived: Decode<'a>,
 {
     ZebinReader::<T>::validate(bytes)
 }
@@ -119,9 +118,11 @@ where
 pub fn encode_chunked<T>(value: &T) -> Result<ZebinWriter<'_, T>, ZebinError>
 where
     T: Serialize + Archive,
+    T::Archived: for<'a> Decode<'a>,
 {
     ZebinWriter::encode_chunked(value)
 }
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -130,6 +131,7 @@ use alloc::vec::Vec;
 pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
 where
     T: Serialize + Archive,
+    T::Archived: for<'a> Decode<'a>,
 {
     ZebinWriter::encode(value)
 }
@@ -139,6 +141,7 @@ where
 pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
 where
     T: Serialize + Archive,
+    T::Archived: for<'a> Decode<'a>,
 {
     ZebinWriter::encode_into(value, buf)
 }

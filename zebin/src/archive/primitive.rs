@@ -1,50 +1,28 @@
 use crate::{
     ZebinError,
-    error::{AccessError, ArchiveError},
+    error::AccessError,
     read::Cursor,
     traits::{
-        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
-        RestoreFromView, Serialize, SerializeState,
+        Archive, ArchivedDefault, ByteSink, Decode, FixedLayout, Restore, Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
-use core::num::NonZeroUsize;
-use core::task::Poll;
+use core::{num::NonZeroUsize, task::Poll};
 
 /// Byte-oriented state used by fixed-width primitive encoders.
 pub struct ByteState<const N: usize> {
     bytes: [u8; N],
     cursor: usize,
-    alignment: NonZeroUsize,
-    aligned: bool,
 }
 
 impl<const N: usize> ByteState<N> {
-    pub fn new(bytes: [u8; N], alignment: NonZeroUsize) -> Self {
-        Self {
-            bytes,
-            cursor: 0,
-            alignment,
-            aligned: false,
-        }
+    pub fn new(bytes: [u8; N]) -> Self {
+        Self { bytes, cursor: 0 }
     }
 }
 
 impl<'a, const N: usize> SerializeState<'a> for ByteState<N> {
-    type Resolver = ();
-
-    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
-        &mut self,
-        encoder: &mut E,
-    ) -> Result<Poll<Self::Resolver>, ZebinError> {
-        if !self.aligned {
-            encoder.align(self.alignment)?;
-            if !encoder.pos().is_multiple_of(self.alignment.get()) {
-                return Ok(Poll::Pending);
-            }
-            self.aligned = true;
-        }
-
+    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         let written = encoder.write(&self.bytes[self.cursor..])?;
         self.cursor += written;
         if self.cursor < N {
@@ -58,55 +36,50 @@ impl<'a, const N: usize> SerializeState<'a> for ByteState<N> {
 macro_rules! impl_archive_for_primitive {
     ($($t:ty),* $(,)?) => {
         $(
-            impl Layout for $t {
+            impl FixedLayout for $t {
                 const ALIGNMENT: NonZeroUsize = unsafe {
                     NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                 };
 
-                fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+                fn write_fixed(archived: &Self, out: &mut [u8]) {
                     crate::utils::byteops::copy_exact(out, &archived.to_le_bytes());
                 }
             }
 
-            impl<'a> Access<'a> for $t {
-                type View = &'a Self;
+            impl<'a> Decode<'a> for $t {
+                type View = Self;
 
-                unsafe fn access<H, C>(
+                const FIXED_SIZE: Option<usize> = Some(core::mem::size_of::<Self>());
+                const ALIGNMENT: NonZeroUsize = unsafe {
+                    NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
+                };
+
+                fn decode<C>(
                     cursor: &mut Cursor<'a>,
                     context: &mut C,
-                ) -> Result<(Self::View, usize), AccessError>
+                ) -> Result<Self::View, AccessError>
                 where
-                    H: ArchiveHeader,
-                    C: ValidationContext<H> + ?Sized,
+                    C: ValidationContext + ?Sized,
                 {
-                    let pos = cursor.pos();
-                    context.check_range(pos, core::mem::size_of::<Self>())?;
-                    let typed_ptr = unsafe { cursor.bytes().as_ptr().add(pos) as *const Self };
-                    Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+                    let bytes = cursor.read_exact(core::mem::size_of::<Self>(), context)?;
+                    let mut fixed = [0u8; core::mem::size_of::<Self>()];
+                    fixed.copy_from_slice(bytes);
+                    Ok(<$t>::from_le_bytes(fixed))
                 }
             }
 
             impl Archive for $t {
                 type Archived = $t;
-                type Resolver = ();
-
-                fn resolve(&self, _pos: usize, _resolver: Self::Resolver) -> Result<Self::Archived, ArchiveError> {
-                    Ok(*self)
-                }
             }
 
             impl Serialize for $t {
                 type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
 
                 fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-                    Ok(ByteState::new(
-                        self.to_le_bytes(),
-                        unsafe {
-                            NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
-                        },
-                    ))
+                    Ok(ByteState::new(self.to_le_bytes()))
                 }
             }
+
             impl ArchivedDefault for $t {
                 fn archived_default() -> &'static Self {
                     static DEFAULT: $t = 0 as $t;
@@ -119,65 +92,43 @@ macro_rules! impl_archive_for_primitive {
                     Ok(*self)
                 }
             }
-
-            impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for $t {
-                fn restore_from_view(&self, _layout: &crate::ResolvedLayout<'a, H>) -> Result<$t, ZebinError> {
-                    Ok(*self)
-                }
-            }
         )*
     };
 }
 
 impl_archive_for_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
-impl Layout for bool {
+impl FixedLayout for bool {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+    const SIZE: usize = 1;
 
-    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
+    fn write_fixed(archived: &Self, out: &mut [u8]) {
         out[0] = *archived as u8;
     }
 }
 
-impl ArchivedDefault for bool {
-    fn archived_default() -> &'static Self {
-        &false
-    }
-}
+impl<'a> Decode<'a> for bool {
+    type View = bool;
 
-impl<'a> Access<'a> for bool {
-    type View = &'a Self;
+    const FIXED_SIZE: Option<usize> = Some(1);
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 
-    unsafe fn access<H, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<(Self::View, usize), AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
     where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
+        C: ValidationContext + ?Sized,
     {
         let pos = cursor.pos();
-        context.check_range(pos, core::mem::size_of::<Self>())?;
-        let val = cursor.bytes().get(pos).copied().unwrap_or_default();
-        if val > 1 {
-            return Err(context.validation_error("Invalid bool value", pos));
+        let value = cursor.read_u8(context)?;
+        match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(context.validation_error("Invalid bool value", pos)),
         }
-        let typed_ptr = unsafe { cursor.bytes().as_ptr().add(pos) as *const Self };
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 
 impl Archive for bool {
     type Archived = bool;
-    type Resolver = ();
-
-    fn resolve(
-        &self,
-        _pos: usize,
-        _resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        Ok(*self)
-    }
 }
 
 impl Serialize for bool {
@@ -187,21 +138,18 @@ impl Serialize for bool {
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(ByteState::new([*self as u8], NonZeroUsize::new(1).unwrap()))
+        Ok(ByteState::new([*self as u8]))
+    }
+}
+
+impl ArchivedDefault for bool {
+    fn archived_default() -> &'static Self {
+        &false
     }
 }
 
 impl Restore<bool> for bool {
     fn restore(&self) -> Result<bool, ZebinError> {
-        Ok(*self)
-    }
-}
-
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, bool, H> for bool {
-    fn restore_from_view(
-        &self,
-        _layout: &crate::ResolvedLayout<'a, H>,
-    ) -> Result<bool, ZebinError> {
         Ok(*self)
     }
 }

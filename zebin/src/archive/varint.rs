@@ -1,10 +1,10 @@
-use core::{num::NonZeroUsize, ops::Deref};
+use core::{marker::PhantomData, ops::Deref, task::Poll};
 
 use crate::{
-    core::schema::ObjectEncoding,
-    error::{AccessError, ArchiveError, ZebinError},
-    read::{Cursor, ResolvedLayout},
-    traits::{Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView},
+    core::schema::FieldEncoding,
+    error::{AccessError, ZebinError},
+    read::Cursor,
+    traits::{Archive, ByteSink, Decode, Restore, Serialize, SerializeState},
     validation::context::ValidationContext,
 };
 
@@ -55,200 +55,64 @@ impl<T> Deref for VarIntView<T> {
 }
 
 pub trait VarIntNumber: Copy {
-    type Archived: Layout + Copy + Send + Sync + 'static;
     const MAX_BYTES: usize;
 
     fn to_u64(self) -> u64;
     fn try_from_u64(value: u64) -> Result<Self, AccessError>;
-    fn from_archived(archived: Self::Archived) -> Self;
-    fn to_archived(self) -> Self::Archived;
 }
 
 macro_rules! impl_varint_number {
-    ($t:ty, $archived:ident, $max_bytes:expr) => {
-        #[repr(C)]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub struct $archived {
-            bytes: [u8; $max_bytes],
-        }
+    ($($t:ty => $max_bytes:expr),* $(,)?) => {
+        $(
+            impl VarIntNumber for $t {
+                const MAX_BYTES: usize = $max_bytes;
 
-        impl $archived {
-            pub fn get(self) -> $t {
-                let mut value = 0u64;
-                let mut shift = 0u32;
-                for &byte in &self.bytes {
-                    let payload = u64::from(byte & 0x7F);
-                    value |= payload << shift;
-                    if byte & 0x80 == 0 {
-                        break;
-                    }
-                    shift += 7;
+                fn to_u64(self) -> u64 {
+                    self as u64
                 }
-                value as $t
-            }
-        }
 
-        impl ArchivedDefault for $archived {
-            fn archived_default() -> &'static Self {
-                static DEFAULT: $archived = $archived {
-                    bytes: [0u8; $max_bytes],
-                };
-                &DEFAULT
-            }
-        }
-
-        impl Layout for $archived {
-            const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-            const ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
-
-            fn size_hint(&self) -> usize {
-                encoded_len_u64(self.get() as u64)
+                fn try_from_u64(value: u64) -> Result<Self, AccessError> {
+                    <$t>::try_from(value).map_err(|_| AccessError::ValidationError {
+                        message: "VarInt value out of range",
+                        pos: 0,
+                    })
+                }
             }
 
-            fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-                encode_u64(archived.get() as u64, out);
-            }
-        }
-
-        impl<'a> Access<'a> for $archived {
-            type View = &'a Self;
-
-            unsafe fn access<H, C>(
-                cursor: &mut Cursor<'a>,
-                context: &mut C,
-            ) -> Result<(Self::View, usize), AccessError>
-            where
-                H: ArchiveHeader,
-                C: ValidationContext<H> + ?Sized,
-            {
-                let pos = cursor.pos();
-                context.check_range(pos, $max_bytes)?;
-                let typed_ptr = unsafe { cursor.bytes().as_ptr().add(pos) as *const Self };
-                Ok((unsafe { &*typed_ptr }, $max_bytes))
-            }
-        }
-
-        impl Restore<$t> for $archived {
-            fn restore(&self) -> Result<$t, crate::error::ZebinError> {
-                Ok(self.get())
-            }
-        }
-
-        impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for $archived {
-            fn restore_from_view(
-                &self,
-                _layout: &ResolvedLayout<'a, H>,
-            ) -> Result<$t, crate::error::ZebinError> {
-                Ok(self.get())
-            }
-        }
-
-        impl Restore<crate::archive::varint::VarInt<$t>> for $archived {
-            fn restore(
-                &self,
-            ) -> Result<crate::archive::varint::VarInt<$t>, crate::error::ZebinError> {
-                Ok(crate::archive::varint::VarInt { value: self.get() })
-            }
-        }
-
-        impl<'a, H: ArchiveHeader> RestoreFromView<'a, crate::archive::varint::VarInt<$t>, H>
-            for $archived
-        {
-            fn restore_from_view(
-                &self,
-                _layout: &ResolvedLayout<'a, H>,
-            ) -> Result<crate::archive::varint::VarInt<$t>, crate::error::ZebinError> {
-                self.restore()
-            }
-        }
-
-        impl VarIntNumber for $t {
-            type Archived = $archived;
-            const MAX_BYTES: usize = $max_bytes;
-
-            fn to_u64(self) -> u64 {
-                self as u64
+            impl Restore<$t> for VarInt<$t> {
+                fn restore(&self) -> Result<$t, ZebinError> {
+                    Ok(self.value)
+                }
             }
 
-            fn try_from_u64(value: u64) -> Result<Self, AccessError> {
-                <$t>::try_from(value).map_err(|_| AccessError::ValidationError {
-                    message: "VarInt value out of range",
-                    pos: 0,
-                })
+            impl Restore<VarInt<$t>> for VarInt<$t> {
+                fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
+                    Ok(*self)
+                }
             }
 
-            fn from_archived(archived: Self::Archived) -> Self {
-                archived.get()
+            impl Restore<$t> for VarIntView<$t> {
+                fn restore(&self) -> Result<$t, ZebinError> {
+                    Ok(self.value)
+                }
             }
 
-            fn to_archived(self) -> Self::Archived {
-                let mut bytes = [0u8; $max_bytes];
-                encode_u64(self as u64, &mut bytes);
-                $archived { bytes }
+            impl Restore<VarInt<$t>> for VarIntView<$t> {
+                fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
+                    Ok(VarInt { value: self.value })
+                }
             }
-        }
-
-        impl Restore<$t> for VarInt<$t> {
-            fn restore(&self) -> Result<$t, ZebinError> {
-                Ok(self.value)
-            }
-        }
-
-        impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for VarInt<$t> {
-            fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<$t, ZebinError> {
-                Ok(self.value)
-            }
-        }
-
-        impl Restore<VarInt<$t>> for VarInt<$t> {
-            fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
-                Ok(*self)
-            }
-        }
-
-        impl<'a, H: ArchiveHeader> RestoreFromView<'a, VarInt<$t>, H> for VarInt<$t> {
-            fn restore_from_view(
-                &self,
-                _layout: &ResolvedLayout<'a, H>,
-            ) -> Result<VarInt<$t>, ZebinError> {
-                Ok(*self)
-            }
-        }
-
-        impl Restore<$t> for VarIntView<$t> {
-            fn restore(&self) -> Result<$t, ZebinError> {
-                Ok(self.value)
-            }
-        }
-
-        impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for VarIntView<$t> {
-            fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<$t, ZebinError> {
-                Ok(self.value)
-            }
-        }
-
-        impl Restore<VarInt<$t>> for VarIntView<$t> {
-            fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
-                Ok(VarInt { value: self.value })
-            }
-        }
-
-        impl<'a, H: ArchiveHeader> RestoreFromView<'a, VarInt<$t>, H> for VarIntView<$t> {
-            fn restore_from_view(
-                &self,
-                _layout: &ResolvedLayout<'a, H>,
-            ) -> Result<VarInt<$t>, ZebinError> {
-                Ok(VarInt { value: self.value })
-            }
-        }
+        )*
     };
 }
 
-impl_varint_number!(u8, ArchivedVarIntU8, 2);
-impl_varint_number!(u16, ArchivedVarIntU16, 3);
-impl_varint_number!(u32, ArchivedVarIntU32, 5);
-impl_varint_number!(u64, ArchivedVarIntU64, 10);
-impl_varint_number!(usize, ArchivedVarIntUsize, 10);
+impl_varint_number!(u8 => 2, u16 => 3, u32 => 5, u64 => 10, usize => 10);
+
+/// Zero-sized decode marker for a varint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ArchivedVarInt<T> {
+    _marker: PhantomData<T>,
+}
 
 pub(crate) fn encoded_len_u64(value: u64) -> usize {
     let mut value = value;
@@ -270,82 +134,53 @@ pub(crate) fn encode_u64(mut value: u64, out: &mut [u8]) {
         }
         out[cursor] = byte;
         cursor += 1;
-        if value == 0 {
-            break;
-        }
-        if cursor >= out.len() {
+        if value == 0 || cursor >= out.len() {
             break;
         }
     }
 }
 
-fn decode_u64<T, H, C>(
-    bytes: &[u8],
-    start_pos: usize,
-    context: &mut C,
-) -> Result<(T, usize), AccessError>
+pub(crate) fn decode_u64<T, C>(cursor: &mut Cursor<'_>, context: &mut C) -> Result<T, AccessError>
 where
     T: VarIntNumber,
-    H: ArchiveHeader,
-    C: ValidationContext<H> + ?Sized,
+    C: ValidationContext + ?Sized,
 {
-    let mut guard = context.guard()?;
+    let start_pos = cursor.pos();
     let mut value = 0u64;
     let mut shift = 0u32;
     let mut consumed = 0usize;
     loop {
         if consumed >= T::MAX_BYTES {
-            return Err(guard.validation_error("VarInt exceeds maximum length", start_pos));
+            return Err(context.validation_error("VarInt exceeds maximum length", start_pos));
         }
-        let pos = start_pos + consumed;
-        guard.check_range(pos, 1)?;
-        let byte = bytes[pos];
+        let byte = cursor.read_u8(context)?;
         let payload = u64::from(byte & 0x7F);
         value |= payload << shift;
         consumed += 1;
         if byte & 0x80 == 0 {
-            let value = T::try_from_u64(value)?;
-            return Ok((value, consumed));
+            return T::try_from_u64(value);
         }
         shift += 7;
         if shift >= 64 {
-            return Err(guard.validation_error("VarInt shift overflow", start_pos));
+            return Err(context.validation_error("VarInt shift overflow", start_pos));
         }
     }
 }
 
-impl<T> Layout for VarInt<T>
+impl<'a, T> Decode<'a> for ArchivedVarInt<T>
 where
-    T: VarIntNumber,
-{
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-    const ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
-
-    fn size_hint(&self) -> usize {
-        encoded_len_u64(self.value.to_u64())
-    }
-
-    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        encode_u64(archived.value.to_u64(), out);
-    }
-}
-
-impl<'a, T: VarIntNumber + 'a> Access<'a> for VarInt<T>
-where
-    T: VarIntNumber,
+    T: VarIntNumber + 'a,
 {
     type View = VarIntView<T>;
 
-    unsafe fn access<H, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<(Self::View, usize), AccessError>
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::VarInt;
+
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
     where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
+        C: ValidationContext + ?Sized,
     {
-        let (value, consumed) = decode_u64::<T, H, C>(cursor.bytes(), cursor.pos(), context)?;
-        Ok((VarIntView { value }, consumed))
+        let value = decode_u64::<T, C>(cursor, context)?;
+        Ok(VarIntView { value })
     }
 }
 
@@ -353,14 +188,53 @@ impl<T> Archive for VarInt<T>
 where
     T: VarIntNumber,
 {
-    type Archived = T::Archived;
-    type Resolver = ();
+    type Archived = ArchivedVarInt<T>;
+}
 
-    fn resolve(
-        &self,
-        _archive_pos: usize,
-        _resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        Ok(self.value.to_archived())
+pub struct VarIntArchiveState<T: VarIntNumber> {
+    bytes: [u8; 10],
+    len: u8,
+    cursor: u8,
+    _marker: PhantomData<T>,
+}
+
+impl<T: VarIntNumber> VarIntArchiveState<T> {
+    pub(crate) fn new(value: T) -> Self {
+        let val = value.to_u64();
+        let len = encoded_len_u64(val);
+        let mut bytes = [0u8; 10];
+        encode_u64(val, &mut bytes[..len]);
+        Self {
+            bytes,
+            len: len as u8,
+            cursor: 0,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntArchiveState<T> {
+    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+        let written = encoder.write(&self.bytes[self.cursor as usize..self.len as usize])?;
+        self.cursor += written as u8;
+        if self.cursor < self.len {
+            Ok(Poll::Pending)
+        } else {
+            Ok(Poll::Ready(()))
+        }
+    }
+}
+
+impl<T> Serialize for VarInt<T>
+where
+    T: VarIntNumber,
+{
+    type State<'a>
+        = VarIntArchiveState<T>
+    where
+        Self: 'a;
+
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        Ok(VarIntArchiveState::new(self.get()))
     }
 }

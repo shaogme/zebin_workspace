@@ -2,39 +2,23 @@ use core::{marker::PhantomData, mem::MaybeUninit, num::NonZeroUsize};
 
 #[cfg(feature = "alloc")]
 use crate::alloc::vec::Vec;
-use crate::{
-    core::schema::{LayoutDirectory, SchemaRevision, StableSchemaKey},
-    error::AccessError,
-    format::ArchiveHeader,
-    read::ResolvedLayout,
-    traits::ArchiveHeader as ArchiveHeaderTrait,
-    validation::context::ValidationContext,
-};
+use crate::{error::AccessError, validation::context::ValidationContext};
 
-/// Validator for byte streams to ensure safety before access.
-pub struct Validator<'a, H = ArchiveHeader>
-where
-    H: ArchiveHeaderTrait,
-{
+/// Validator for byte streams to ensure safe sequential decoding.
+pub struct Validator<'a> {
     data: &'a [u8],
-    header: H,
-    layouts: Option<LayoutDirectory<'a>>,
-    cached_layout: Option<(StableSchemaKey, SchemaRevision, ResolvedLayout<'a, H>)>,
     depth: usize,
     max_depth: usize,
     path: ValidationPathStack,
     last_error_path: Option<ValidationPathStack>,
 }
 
-pub struct DepthGuard<'v, H = ArchiveHeader>
-where
-    H: ArchiveHeaderTrait,
-{
-    context: *mut Validator<'v, H>,
-    _phantom: PhantomData<&'v mut Validator<'v, H>>,
+pub struct DepthGuard<'v> {
+    context: *mut Validator<'v>,
+    _phantom: PhantomData<&'v mut Validator<'v>>,
 }
 
-impl<'v, H: ArchiveHeaderTrait> Drop for DepthGuard<'v, H> {
+impl Drop for DepthGuard<'_> {
     fn drop(&mut self) {
         unsafe {
             (*self.context).pop_depth();
@@ -42,13 +26,10 @@ impl<'v, H: ArchiveHeaderTrait> Drop for DepthGuard<'v, H> {
     }
 }
 
-impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
-    pub fn new(data: &'a [u8], header: H) -> Self {
+impl<'a> Validator<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
         Self {
             data,
-            header,
-            layouts: None,
-            cached_layout: None,
             depth: 0,
             max_depth: 128,
             path: ValidationPathStack::new(),
@@ -56,21 +37,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         }
     }
 
-    pub fn with_layouts(data: &'a [u8], header: H, layouts: LayoutDirectory<'a>) -> Self {
-        Self {
-            data,
-            header,
-            layouts: Some(layouts),
-            cached_layout: None,
-            depth: 0,
-            max_depth: 128,
-            path: ValidationPathStack::new(),
-            last_error_path: None,
-        }
-    }
-
-    /// Enter a nested validation scope and automatically unwind on drop.
-    pub fn enter(&mut self) -> Result<DepthGuard<'a, H>, AccessError> {
+    pub fn enter(&mut self) -> Result<DepthGuard<'a>, AccessError> {
         self.push_depth()?;
         Ok(DepthGuard {
             context: self as *mut _,
@@ -92,7 +59,6 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         Ok(())
     }
 
-    /// Check if a pointer is properly aligned.
     pub fn check_alignment(
         &mut self,
         pos: usize,
@@ -109,7 +75,6 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         Ok(())
     }
 
-    /// Push to recursion depth.
     pub fn push_depth(&mut self) -> Result<(), AccessError> {
         self.depth += 1;
         if self.depth > self.max_depth {
@@ -119,17 +84,14 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         Ok(())
     }
 
-    /// Pop from recursion depth.
     pub fn pop_depth(&mut self) {
         self.depth = self.depth.saturating_sub(1);
     }
 
-    /// Push to validation path.
     pub fn push_path(&mut self, segment: ValidationPathSegment) {
         self.path.push(segment);
     }
 
-    /// Pop from validation path.
     pub fn pop_path(&mut self) {
         self.path.pop();
     }
@@ -144,31 +106,8 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
         self.last_error_path.as_ref()
     }
 
-    /// Get the underlying data slice.
     pub fn data(&self) -> &[u8] {
         self.data
-    }
-
-    pub fn resolved_layout(
-        &mut self,
-        stable_schema_key: StableSchemaKey,
-        schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'a, H>, AccessError> {
-        if let Some((cached_key, cached_revision, resolved)) = &self.cached_layout
-            && *cached_key == stable_schema_key
-            && *cached_revision == schema_revision
-        {
-            return Ok(*resolved);
-        }
-
-        let layouts = self.layouts.ok_or(AccessError::ValidationError {
-            message: "Missing layout directory",
-            pos: 0,
-        })?;
-        let layout = layouts.lookup(stable_schema_key, schema_revision)?;
-        let resolved = ResolvedLayout::from_parts(self.data, self.header, Some(layout));
-        self.cached_layout = Some((stable_schema_key, schema_revision, resolved));
-        Ok(resolved)
     }
 
     fn validation_error(&mut self, message: &'static str, pos: usize) -> AccessError {
@@ -177,7 +116,7 @@ impl<'a, H: ArchiveHeaderTrait> Validator<'a, H> {
     }
 }
 
-impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
+impl ValidationContext for Validator<'_> {
     fn push_depth(&mut self) -> Result<(), AccessError> {
         Validator::push_depth(self)
     }
@@ -204,14 +143,6 @@ impl<'a, H: ArchiveHeaderTrait> ValidationContext<H> for Validator<'a, H> {
 
     fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), AccessError> {
         Validator::check_alignment(self, pos, alignment)
-    }
-
-    fn resolved_layout(
-        &mut self,
-        stable_schema_key: StableSchemaKey,
-        schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'a, H>, AccessError> {
-        Validator::resolved_layout(self, stable_schema_key, schema_revision)
     }
 }
 

@@ -71,24 +71,12 @@ pub fn archived_name(name: &Ident) -> Ident {
     format_ident!("Archived{}", name)
 }
 
-pub fn resolver_name(name: &Ident) -> Ident {
-    format_ident!("{}Resolver", name)
-}
-
 pub fn state_name(name: &Ident) -> Ident {
     format_ident!("{}ArchiveState", name)
 }
 
-pub fn payload_name(name: &Ident) -> Ident {
-    format_ident!("Archived{}Payload", name)
-}
-
 pub fn variant_archived_name(enum_name: &Ident, variant: &Ident) -> Ident {
     format_ident!("Archived{}{}", enum_name, variant)
-}
-
-pub fn variant_resolver_name(enum_name: &Ident, variant: &Ident) -> Ident {
-    format_ident!("{}{}Resolver", enum_name, variant)
 }
 
 pub fn variant_state_name(enum_name: &Ident, variant: &Ident) -> Ident {
@@ -126,7 +114,7 @@ fn variant_snake_case(variant: &Ident) -> String {
 
 // --- Logic functions ---
 
-fn is_rel_ptr_like(ty: &Type) -> bool {
+fn is_length_prefixed_like(ty: &Type) -> bool {
     match ty {
         Type::Path(path) => {
             let Some(segment) = path.path.segments.last() else {
@@ -134,7 +122,7 @@ fn is_rel_ptr_like(ty: &Type) -> bool {
             };
             matches!(
                 segment.ident.to_string().as_str(),
-                "String" | "Vec" | "VecDeque" | "Box" | "Rc" | "Arc" | "Cow"
+                "String" | "Vec" | "VecDeque" | "Box" | "Rc" | "Arc" | "Cow" | "VarIntVec"
             )
         }
         _ => false,
@@ -159,8 +147,8 @@ pub fn field_encoding(field: &FieldSpec<'_>) -> TokenStream {
     if is_varint_like(field.ty) {
         return quote! { zebin::FieldEncoding::VarInt };
     }
-    if is_rel_ptr_like(field.ty) {
-        return quote! { zebin::FieldEncoding::RelPtr };
+    if is_length_prefixed_like(field.ty) {
+        return quote! { zebin::FieldEncoding::LengthPrefixed };
     }
     quote! { zebin::FieldEncoding::Fixed }
 }
@@ -174,50 +162,39 @@ pub fn field_archived_type(field: &FieldSpec<'_>) -> TokenStream {
     }
 }
 
+pub fn field_view_type(field: &FieldSpec<'_>) -> TokenStream {
+    let archived = field_archived_type(field);
+    quote! { <#archived as zebin::Decode<'a>>::View }
+}
+
+pub fn field_len_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
+    let base = field_user_ident(record, index);
+    Ident::new(&format!("{}_len", base), base.span())
+}
+
+pub fn active_fields_by_id<'a>(record: &'a RecordSpec<'a>) -> Vec<(usize, &'a FieldSpec<'a>)> {
+    let mut fields: Vec<_> = record.active_fields().collect();
+    fields.sort_by_key(|(_, field)| field.field_id.unwrap_or(u16::MAX));
+    fields
+}
+
+pub fn is_option_type(ty: &Type) -> bool {
+    match ty {
+        Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "Option"),
+        _ => false,
+    }
+}
+
 pub fn field_state_type(field: &FieldSpec<'_>) -> TokenStream {
     if let Some(wrapper) = packed::packed_wrapper_type(field) {
         quote! { <#wrapper as zebin::Serialize>::State<'a> }
     } else {
         let ty = field.ty;
         quote! { <#ty as zebin::Serialize>::State<'a> }
-    }
-}
-
-pub fn field_resolver_type(field: &FieldSpec<'_>) -> TokenStream {
-    if field.packed_bits.is_some() {
-        quote! { usize }
-    } else {
-        let ty = field.ty;
-        quote! { <#ty as zebin::Archive>::Resolver }
-    }
-}
-
-pub fn generate_field_restore_expr(
-    field: &FieldSpec<'_>,
-    layout_expr: proc_macro2::TokenStream,
-    data_expr: proc_macro2::TokenStream,
-    error_context: &str,
-) -> proc_macro2::TokenStream {
-    let is_default = field.default || field.default_value.is_some();
-    if field.optional && !is_default {
-        quote! {
-            {
-                use zebin::{OptRestorerFallback, OptRestorerOption};
-                zebin::OptRestorer {
-                    data: #data_expr,
-                    layout: &#layout_expr,
-                    error_msg: #error_context,
-                }.restore()?
-            }
-        }
-    } else {
-        quote! {
-            {
-                let data = #data_expr;
-                let nested_layout = zebin::get_nested_layout(#layout_expr, data)?;
-                data.restore_from_view(&nested_layout)?
-            }
-        }
     }
 }
 
@@ -237,25 +214,6 @@ pub fn has_schema(record: &RecordSpec<'_>) -> bool {
     record.has_schema()
 }
 
-pub fn user_member(record: &RecordSpec<'_>, index: usize) -> Member {
-    let field = &record.fields[index];
-    match record.style {
-        RecordStyle::Named => {
-            let ident = field
-                .rename
-                .as_ref()
-                .unwrap_or_else(|| field.ident.expect("named field has ident"));
-            Member::Named(ident.clone())
-        }
-        RecordStyle::Unnamed => {
-            let active_index = record.fields[..index].iter().filter(|f| !f.skip).count();
-            let schema_offset = if has_schema(record) { 2 } else { 0 };
-            Member::Unnamed(Index::from(active_index + schema_offset))
-        }
-        RecordStyle::Unit => unreachable!("unit has no fields"),
-    }
-}
-
 pub fn input_member(record: &RecordSpec<'_>, index: usize) -> Member {
     match record.style {
         RecordStyle::Named => Member::Named(
@@ -267,52 +225,6 @@ pub fn input_member(record: &RecordSpec<'_>, index: usize) -> Member {
         RecordStyle::Unnamed => Member::Unnamed(Index::from(index)),
         RecordStyle::Unit => unreachable!("unit has no fields"),
     }
-}
-
-pub fn layout_field_entries(record: &RecordSpec<'_>, archived_name: &Ident) -> Vec<TokenStream> {
-    let mut fields: Vec<_> = record
-        .fields
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| !f.skip)
-        .collect();
-
-    fields.sort_by_key(|(_, field)| field.field_id.expect("field ids are validated above"));
-
-    fields
-        .into_iter()
-        .map(|(index, field)| {
-            let field_id = field.field_id.expect("field ids are validated above");
-            let member = user_member(record, index);
-            let encoding = field_encoding(field);
-            quote! {
-                zebin::LayoutField {
-                    field_id: #field_id,
-                    offset: zebin::memoffset::offset_of!(#archived_name, #member) as u32,
-                    encoding: #encoding,
-                }
-            }
-        })
-        .collect()
-}
-
-pub fn state_slot_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
-    match record.style {
-        RecordStyle::Named => record.fields[index]
-            .ident
-            .expect("named field has ident")
-            .clone(),
-        RecordStyle::Unnamed => Ident::new(&format!("field{index}"), Span::call_site()),
-        RecordStyle::Unit => unreachable!("unit has no fields"),
-    }
-}
-
-pub fn resolver_slot_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
-    state_slot_ident(record, index)
-}
-
-pub fn binder_slot_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
-    state_slot_ident(record, index)
 }
 
 pub fn parse_item(input: &DeriveInput) -> Result<ItemSpec<'_>> {

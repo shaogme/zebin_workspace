@@ -1,14 +1,8 @@
-use core::num::NonZeroUsize;
-
 use crate::{
-    core::rel_ptr::RelPtr,
-    error::{AccessError, ArchiveError},
+    core::schema::FieldEncoding,
+    error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView},
-    utils::{
-        byteops,
-        num::{u32_to_usize, usize_add_signed, usize_to_u32},
-    },
+    traits::{Archive, ArchivedDefault, Decode, Restore},
     validation::context::ValidationContext,
 };
 
@@ -40,20 +34,20 @@ pub(crate) fn read_packed_bits(bytes: &[u8], bit_offset: usize, bits_per_value: 
     value
 }
 
-/// Archived packed boolean slice. Values are stored as one bit per item.
-#[repr(C)]
-pub struct ArchivedPackedBoolSlice {
-    pub(crate) ptr: Option<RelPtr<u8>>,
-    pub(crate) len: u32,
+/// Zero-sized decode marker for archived packed boolean slices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchivedPackedBoolSlice;
+
+/// Archived packed boolean slice view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchivedPackedBoolSliceView<'a> {
+    len: usize,
+    bytes: &'a [u8],
 }
 
-impl ArchivedPackedBoolSlice {
+impl<'a> ArchivedPackedBoolSliceView<'a> {
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || AccessError::ValidationError {
-            message: "Archived packed bool length exceeds usize range",
-            pos: self as *const _ as usize,
-        })
-        .expect("validated packed bool length should fit in usize")
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
@@ -61,100 +55,54 @@ impl ArchivedPackedBoolSlice {
     }
 
     pub fn get(&self, index: usize) -> Option<bool> {
-        let len = self.len();
-        if index >= len {
+        if index >= self.len {
             return None;
         }
-        let bytes = unsafe { self.packed_bytes() };
         let byte_index = index / 8;
         let bit = index % 8;
-        let value = (bytes.get(byte_index)? >> bit) & 1;
+        let value = (self.bytes.get(byte_index)? >> bit) & 1;
         Some(value != 0)
     }
-
-    unsafe fn packed_bytes(&self) -> &[u8] {
-        if self.len == 0 {
-            return &[];
-        }
-        let len = self.len();
-        let byte_len = packed_byte_len(len, 1).expect("packed bool length should fit");
-        let ptr = self
-            .ptr
-            .as_ref()
-            .expect("non-empty packed bool slice must have a pointer");
-        unsafe { core::slice::from_raw_parts(ptr.as_ptr(), byte_len) }
-    }
 }
 
-impl ArchivedDefault for ArchivedPackedBoolSlice {
-    fn archived_default() -> &'static Self {
-        static DEFAULT: ArchivedPackedBoolSlice = ArchivedPackedBoolSlice { ptr: None, len: 0 };
-        &DEFAULT
-    }
-}
+impl<'a> Decode<'a> for ArchivedPackedBoolSlice {
+    type View = ArchivedPackedBoolSliceView<'a>;
 
-impl Layout for ArchivedPackedBoolSlice {
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 
-    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        byteops::fill(out, 0);
-        if let Some(ptr) = &archived.ptr {
-            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
-        }
-        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
-    }
-}
-
-impl<'a> Access<'a> for ArchivedPackedBoolSlice {
-    type View = &'a Self;
-
-    unsafe fn access<H, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<(Self::View, usize), AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
     where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
+        C: ValidationContext + ?Sized,
     {
-        let mut guard = context.guard()?;
-        let pos = cursor.pos();
-        guard.check_alignment(pos, Self::ALIGNMENT)?;
-        guard.check_range(pos, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
-        let len = u32_to_usize(archived.len, || {
-            guard.validation_error("Archived packed bool length exceeds usize range", pos)
-        })?;
-
-        if len > 0 {
-            let rel = archived.ptr.as_ref().ok_or_else(|| {
-                guard.validation_error("Null pointer in non-empty packed bool slice", pos)
-            })?;
-            let ptr_pos = pos + crate::memoffset::offset_of!(ArchivedPackedBoolSlice, ptr);
-            let data_pos = usize_add_signed(ptr_pos, rel.offset(), || {
-                guard.validation_error("Packed bool pointer overflow", pos)
-            })?;
-            let packed_len = packed_byte_len(len, 1)
-                .map_err(|_| guard.validation_error("Packed bool byte length overflow", pos))?;
-            guard.check_range(data_pos, packed_len)?;
-        }
-        Ok((archived, core::mem::size_of::<Self>()))
+        let len = cursor.read_u32(context)? as usize;
+        let byte_len = packed_byte_len(len, 1)?;
+        let bytes = cursor.read_exact(byte_len, context)?;
+        Ok(ArchivedPackedBoolSliceView { len, bytes })
     }
 }
 
-/// Archived packed small-integer slice. Values are stored using `BITS` bits.
-#[repr(C)]
-pub struct ArchivedPackedU8Slice<const BITS: u8> {
-    pub(crate) ptr: Option<RelPtr<u8>>,
-    pub(crate) len: u32,
+impl ArchivedDefault for ArchivedPackedBoolSliceView<'_> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedPackedBoolSliceView<'static> =
+            ArchivedPackedBoolSliceView { len: 0, bytes: &[] };
+        unsafe { &*(&DEFAULT as *const ArchivedPackedBoolSliceView<'static> as *const Self) }
+    }
 }
 
-impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
+/// Zero-sized decode marker for archived packed u8 slices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchivedPackedU8Slice<const BITS: u8 = 8>;
+
+/// Archived packed small-integer slice view. Values are stored using `BITS` bits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchivedPackedU8SliceView<'a, const BITS: u8 = 8> {
+    len: usize,
+    bytes: &'a [u8],
+}
+
+impl<'a, const BITS: u8> ArchivedPackedU8SliceView<'a, BITS> {
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || AccessError::ValidationError {
-            message: "Archived packed integer length exceeds usize range",
-            pos: self as *const _ as usize,
-        })
-        .expect("validated packed integer length should fit in usize")
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
@@ -162,96 +110,50 @@ impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
     }
 
     pub fn get(&self, index: usize) -> Option<u8> {
-        let len = self.len();
-        if index >= len {
+        if index >= self.len {
             return None;
         }
-        let bytes = unsafe { self.packed_bytes() };
         let bit_offset = index * usize::from(BITS);
-        Some(read_packed_bits(bytes, bit_offset, usize::from(BITS)))
-    }
-
-    unsafe fn packed_bytes(&self) -> &[u8] {
-        if self.len == 0 {
-            return &[];
-        }
-        let len = self.len();
-        let byte_len = packed_byte_len(len, usize::from(BITS)).expect("packed length should fit");
-        let ptr = self
-            .ptr
-            .as_ref()
-            .expect("non-empty packed integer slice must have a pointer");
-        unsafe { core::slice::from_raw_parts(ptr.as_ptr(), byte_len) }
-    }
-}
-impl<const BITS: u8> ArchivedDefault for ArchivedPackedU8Slice<BITS> {
-    fn archived_default() -> &'static Self {
-        static DEFAULT: ArchivedPackedU8Slice<8> = ArchivedPackedU8Slice { ptr: None, len: 0 };
-        unsafe {
-            &*(&DEFAULT as *const ArchivedPackedU8Slice<8> as *const ArchivedPackedU8Slice<BITS>)
-        }
+        Some(read_packed_bits(self.bytes, bit_offset, usize::from(BITS)))
     }
 }
 
-impl<const BITS: u8> Layout for ArchivedPackedU8Slice<BITS> {
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+impl<'a, const BITS: u8> Decode<'a> for ArchivedPackedU8Slice<BITS> {
+    type View = ArchivedPackedU8SliceView<'a, BITS>;
 
-    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        byteops::fill(out, 0);
-        if let Some(ptr) = &archived.ptr {
-            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
-        }
-        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
-    }
-}
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 
-impl<'a, const BITS: u8> Access<'a> for ArchivedPackedU8Slice<BITS> {
-    type View = &'a Self;
-
-    unsafe fn access<H, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<(Self::View, usize), AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
     where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
+        C: ValidationContext + ?Sized,
     {
-        let mut guard = context.guard()?;
         let pos = cursor.pos();
-        guard.check_alignment(pos, Self::ALIGNMENT)?;
-        guard.check_range(pos, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
-        let len = u32_to_usize(archived.len, || {
-            guard.validation_error("Archived packed integer length exceeds usize range", pos)
-        })?;
+        let len = cursor.read_u32(context)? as usize;
+        let byte_len = packed_byte_len(len, usize::from(BITS))?;
+        let bytes = cursor.read_exact(byte_len, context)?;
 
-        if len > 0 {
-            let rel = archived.ptr.as_ref().ok_or_else(|| {
-                guard.validation_error("Null pointer in non-empty packed integer slice", pos)
-            })?;
-            let ptr_pos = pos + crate::memoffset::offset_of!(ArchivedPackedU8Slice<BITS>, ptr);
-            let data_pos = usize_add_signed(ptr_pos, rel.offset(), || {
-                guard.validation_error("Packed integer pointer overflow", pos)
-            })?;
-            let packed_len = packed_byte_len(len, usize::from(BITS))
-                .map_err(|_| guard.validation_error("Packed integer byte length overflow", pos))?;
-            guard.check_range(data_pos, packed_len)?;
-
-            let max = if BITS == 8 {
-                u8::MAX
-            } else {
-                (1u8 << BITS) - 1
-            };
-            let bytes = &cursor.bytes()[data_pos..data_pos + packed_len];
-            for index in 0..len {
-                let bit_offset = index * usize::from(BITS);
-                let value = read_packed_bits(bytes, bit_offset, usize::from(BITS));
-                if value > max {
-                    return Err(guard.validation_error("Packed integer value out of range", pos));
-                }
+        let max = if BITS == 8 {
+            u8::MAX
+        } else {
+            (1u8 << BITS) - 1
+        };
+        for index in 0..len {
+            let bit_offset = index * usize::from(BITS);
+            let value = read_packed_bits(bytes, bit_offset, usize::from(BITS));
+            if value > max {
+                return Err(context.validation_error("Packed integer value out of range", pos));
             }
         }
-        Ok((archived, core::mem::size_of::<Self>()))
+
+        Ok(ArchivedPackedU8SliceView { len, bytes })
+    }
+}
+
+impl<const BITS: u8> ArchivedDefault for ArchivedPackedU8SliceView<'_, BITS> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedPackedU8SliceView<'static, 8> =
+            ArchivedPackedU8SliceView { len: 0, bytes: &[] };
+        unsafe { &*(&DEFAULT as *const ArchivedPackedU8SliceView<'static, 8> as *const Self) }
     }
 }
 
@@ -260,9 +162,7 @@ pub struct PackedSlice<'a, T, const BITS: u8> {
     pub(crate) values: &'a [T],
 }
 
-/// Backward-compatible alias for bit-packed booleans.
 pub type PackedBoolSlice<'a> = PackedSlice<'a, bool, 1>;
-/// Backward-compatible alias for packed small integers.
 pub type PackedU8Slice<'a, const BITS: u8> = PackedSlice<'a, u8, BITS>;
 
 impl<'a> PackedSlice<'a, bool, 1> {
@@ -299,73 +199,29 @@ impl<'a, const BITS: u8> From<&'a [u8]> for PackedSlice<'a, u8, BITS> {
 
 impl Archive for PackedSlice<'_, bool, 1> {
     type Archived = ArchivedPackedBoolSlice;
-    type Resolver = usize;
-
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        let ptr = if self.values.is_empty() {
-            None
-        } else {
-            Some(RelPtr::new(archive_pos, resolver)?)
-        };
-        Ok(ArchivedPackedBoolSlice {
-            ptr,
-            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
-                pos: archive_pos,
-            })?,
-        })
-    }
 }
 
 impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
-    type Resolver = usize;
+}
 
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        let ptr = if self.values.is_empty() {
-            None
-        } else {
-            Some(RelPtr::new(archive_pos, resolver)?)
-        };
-        Ok(ArchivedPackedU8Slice {
-            ptr,
-            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
-                pos: archive_pos,
-            })?,
-        })
+#[cfg(feature = "alloc")]
+impl Restore<Vec<bool>> for ArchivedPackedBoolSliceView<'_> {
+    fn restore(&self) -> Result<Vec<bool>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for i in 0..self.len() {
+            out.push(self.get(i).unwrap());
+        }
+        Ok(out)
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, const BITS: u8, U> Restore<Vec<U>> for PackedSlice<'_, T, BITS>
-where
-    T: Restore<U>,
-{
-    fn restore(&self) -> Result<Vec<U>, crate::error::ZebinError> {
-        self.values.restore()
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<'a, T, const BITS: u8, U, H: ArchiveHeader> RestoreFromView<'a, Vec<U>, H>
-    for PackedSlice<'_, T, BITS>
-where
-    T: RestoreFromView<'a, U, H>,
-{
-    fn restore_from_view(
-        &self,
-        layout: &crate::read::ResolvedLayout<'a, H>,
-    ) -> Result<Vec<U>, crate::error::ZebinError> {
-        let mut out = Vec::with_capacity(self.values.len());
-        for item in self.values {
-            out.push(item.restore_from_view(layout)?);
+impl<const BITS: u8> Restore<Vec<u8>> for ArchivedPackedU8SliceView<'_, BITS> {
+    fn restore(&self) -> Result<Vec<u8>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for i in 0..self.len() {
+            out.push(self.get(i).unwrap());
         }
         Ok(out)
     }

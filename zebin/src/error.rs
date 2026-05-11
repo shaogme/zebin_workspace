@@ -1,80 +1,24 @@
 use crate::{
-    core::schema::{SchemaRevision, StableSchemaKey},
+    core::schema::{FieldEncoding, SchemaRevision, StableSchemaKey},
     validation::validator::ValidationPathSegment,
 };
 use core::num::NonZeroUsize;
 
-/// Errors that can occur during the archiving/resolution process.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArchiveError {
-    /// Relative pointer offset out of range.
-    OffsetOutOfRange { pos: usize },
-    /// Relative pointer offset is zero.
-    ZeroOffset { pos: usize },
-    /// A length or offset exceeded the capacity of its representation (e.g., u32).
-    LengthOverflow { pos: usize },
-    /// Arithmetic overflow during position calculation.
-    ArithmeticOverflow { pos: usize },
-    /// The resolver was in an invalid state for the type being resolved.
-    InvalidResolver { pos: usize },
-}
-
-impl core::fmt::Display for ArchiveError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            ArchiveError::OffsetOutOfRange { pos } => {
-                write!(f, "relative pointer offset out of range at {pos}")
-            }
-            ArchiveError::ZeroOffset { pos } => {
-                write!(f, "relative pointer offset cannot be zero at {pos}")
-            }
-            ArchiveError::LengthOverflow { pos } => {
-                write!(f, "length overflow at {pos}")
-            }
-            ArchiveError::ArithmeticOverflow { pos } => {
-                write!(f, "arithmetic overflow at {pos}")
-            }
-            ArchiveError::InvalidResolver { pos } => {
-                write!(f, "invalid resolver state at {pos}")
-            }
-        }
-    }
-}
-
-impl core::error::Error for ArchiveError {}
-
 /// Errors that can occur during archive header parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseHeaderError {
-    /// Input buffer is smaller than the required header size.
     TooShort { pos: usize },
-    /// Magic bytes do not match the expected value.
     InvalidMagic { pos: usize },
-    /// Archive version is not supported.
     UnsupportedVersion { version: u8, pos: usize },
-    /// Layout offset is zero.
-    InvalidLayoutOffset { pos: usize },
-    /// Root offset is zero.
-    InvalidRootOffset { pos: usize },
 }
 
 impl core::fmt::Display for ParseHeaderError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ParseHeaderError::TooShort { pos } => {
-                write!(f, "header too short at {pos}")
-            }
-            ParseHeaderError::InvalidMagic { pos } => {
-                write!(f, "invalid magic at {pos}")
-            }
+            ParseHeaderError::TooShort { pos } => write!(f, "header too short at {pos}"),
+            ParseHeaderError::InvalidMagic { pos } => write!(f, "invalid magic at {pos}"),
             ParseHeaderError::UnsupportedVersion { version, pos } => {
                 write!(f, "unsupported archive version {version} at {pos}")
-            }
-            ParseHeaderError::InvalidLayoutOffset { pos } => {
-                write!(f, "invalid layout offset at {pos}")
-            }
-            ParseHeaderError::InvalidRootOffset { pos } => {
-                write!(f, "invalid root offset at {pos}")
             }
         }
     }
@@ -82,7 +26,7 @@ impl core::fmt::Display for ParseHeaderError {
 
 impl core::error::Error for ParseHeaderError {}
 
-/// Errors that can occur during validation of archived data.
+/// Errors that can occur during validation or sequential decoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccessError {
     Infallible,
@@ -91,26 +35,31 @@ pub enum AccessError {
         actual: NonZeroUsize,
         pos: usize,
     },
-    InvalidLayout {
+    InvalidFieldTable {
         pos: usize,
     },
     ValidationError {
         message: &'static str,
         pos: usize,
     },
-    MissingLayoutField {
+    MissingField {
         field_id: u16,
         pos: usize,
     },
-    LayoutOffsetMismatch {
+    DuplicateField {
         field_id: u16,
-        expected: u32,
-        actual: u32,
         pos: usize,
     },
-    MissingLayoutRevision {
-        key: u32,
-        revision: u32,
+    UnexpectedFieldEncoding {
+        field_id: u16,
+        expected: FieldEncoding,
+        actual: FieldEncoding,
+        pos: usize,
+    },
+    FieldLengthMismatch {
+        field_id: u16,
+        expected: usize,
+        actual: usize,
         pos: usize,
     },
     FieldOverflow {
@@ -125,7 +74,6 @@ pub enum AccessError {
 }
 
 impl AccessError {
-    /// No-op for backward compatibility.
     pub fn at(self, _segment: ValidationPathSegment) -> Self {
         self
     }
@@ -139,47 +87,41 @@ impl core::fmt::Display for AccessError {
                 expected,
                 actual,
                 pos,
-                ..
-            } => {
-                write!(
-                    f,
-                    "alignment error at {pos}: expected alignment {}, actual remainder {}",
-                    expected, actual
-                )
-            }
-            AccessError::InvalidLayout { pos, .. } => {
-                write!(f, "invalid layout structure at {pos}")
-            }
-            AccessError::ValidationError { message, pos, .. } => {
+            } => write!(
+                f,
+                "alignment error at {pos}: expected alignment {}, actual remainder {}",
+                expected, actual
+            ),
+            AccessError::InvalidFieldTable { pos } => write!(f, "invalid field table at {pos}"),
+            AccessError::ValidationError { message, pos } => {
                 write!(f, "validation error at {pos}: {message}")
             }
-            AccessError::MissingLayoutField { field_id, pos, .. } => {
-                write!(f, "missing layout entry for field {field_id} at {pos}")
+            AccessError::MissingField { field_id, pos } => {
+                write!(f, "missing field {field_id} at {pos}")
             }
-            AccessError::LayoutOffsetMismatch {
+            AccessError::DuplicateField { field_id, pos } => {
+                write!(f, "duplicate field {field_id} at {pos}")
+            }
+            AccessError::UnexpectedFieldEncoding {
                 field_id,
                 expected,
                 actual,
                 pos,
-                ..
-            } => {
-                write!(
-                    f,
-                    "layout offset mismatch for field {field_id} at {pos}: expected {expected}, found {actual}"
-                )
-            }
-            AccessError::MissingLayoutRevision {
-                key, revision, pos, ..
-            } => {
-                write!(
-                    f,
-                    "missing layout entry for stable schema key {key} revision {revision} at {pos}"
-                )
-            }
-            AccessError::FieldOverflow { field, pos, .. } => {
-                write!(f, "{field} overflow at {pos}")
-            }
-            AccessError::FieldOutOfBounds { field, pos, .. } => {
+            } => write!(
+                f,
+                "field {field_id} encoding mismatch at {pos}: expected {expected:?}, found {actual:?}"
+            ),
+            AccessError::FieldLengthMismatch {
+                field_id,
+                expected,
+                actual,
+                pos,
+            } => write!(
+                f,
+                "field {field_id} length mismatch at {pos}: expected {expected}, consumed {actual}"
+            ),
+            AccessError::FieldOverflow { field, pos } => write!(f, "{field} overflow at {pos}"),
+            AccessError::FieldOutOfBounds { field, pos } => {
                 write!(f, "{field} out of bounds at {pos}")
             }
             AccessError::RecursionLimitExceeded => write!(f, "recursion limit exceeded"),
@@ -195,37 +137,56 @@ impl From<core::convert::Infallible> for AccessError {
 
 impl core::error::Error for AccessError {}
 
+/// Errors that can occur during the archiving process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveError {
+    LengthOverflow { pos: usize },
+    ArithmeticOverflow { pos: usize },
+    InvalidResolver { pos: usize },
+}
+
+impl core::fmt::Display for ArchiveError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ArchiveError::LengthOverflow { pos } => write!(f, "length overflow at {pos}"),
+            ArchiveError::ArithmeticOverflow { pos } => write!(f, "arithmetic overflow at {pos}"),
+            ArchiveError::InvalidResolver { pos } => write!(f, "invalid resolver state at {pos}"),
+        }
+    }
+}
+
+impl core::error::Error for ArchiveError {}
+
 /// Unified error type for the Zebin library.
 #[derive(Debug)]
 pub enum ZebinError {
-    /// Arithmetic overflow during serialization or position calculation.
-    ArithmeticOverflow { pos: usize },
-    /// Output buffer is too small for the data being written.
-    BufferTooSmall { pos: usize, required: usize },
-    /// General error during serialization.
-    SerializationError { pos: usize, message: &'static str },
-    /// General error during deserialization/restoration.
-    DeserializeError { message: &'static str },
-    /// Error during layout registration.
-    /// A different layout is already registered for the same stable schema key and revision.
+    ArithmeticOverflow {
+        pos: usize,
+    },
+    BufferTooSmall {
+        pos: usize,
+        required: usize,
+    },
+    SerializationError {
+        pos: usize,
+        message: &'static str,
+    },
+    DeserializeError {
+        message: &'static str,
+    },
     LayoutCollision {
         key: StableSchemaKey,
         revision: SchemaRevision,
     },
-    /// The layout registry has reached its capacity.
     LayoutRegistryFull,
-    /// Error during validation or access of archived data.
     Access(AccessError),
-    /// Error during archive resolution.
     ArchiveError(ArchiveError),
-    /// Error during header parsing.
     HeaderParseError(ParseHeaderError),
     #[cfg(feature = "mmap")]
     ReadOnlyStorage,
 }
 
 impl ZebinError {
-    /// No-op for backward compatibility.
     pub fn at(self, _segment: ValidationPathSegment) -> Self {
         self
     }
@@ -252,18 +213,14 @@ impl From<ParseHeaderError> for ZebinError {
 impl core::fmt::Display for ZebinError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ZebinError::ArithmeticOverflow { pos } => {
-                write!(f, "arithmetic overflow at {pos}")
-            }
+            ZebinError::ArithmeticOverflow { pos } => write!(f, "arithmetic overflow at {pos}"),
             ZebinError::BufferTooSmall { pos, required } => {
                 write!(f, "buffer too small at {pos}: required {required} bytes")
             }
             ZebinError::SerializationError { pos, message } => {
                 write!(f, "serialization error at {pos}: {message}")
             }
-            ZebinError::DeserializeError { message } => {
-                write!(f, "deserialize error: {message}")
-            }
+            ZebinError::DeserializeError { message } => write!(f, "deserialize error: {message}"),
             ZebinError::LayoutCollision { key, revision } => {
                 write!(f, "layout collision for key {key} revision {revision}")
             }

@@ -1,146 +1,103 @@
-use core::{num::NonZeroUsize, str, task::Poll};
+use core::{marker::PhantomData, ops::Deref, str, task::Poll};
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 
 use crate::{
-    core::rel_ptr::RelPtr,
-    error::{AccessError, ArchiveError, ZebinError},
-    read::{Cursor, ResolvedLayout},
-    traits::{
-        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
-        RestoreFromView, Serialize, SerializeState,
-    },
-    utils::{
-        byteops,
-        num::{u32_to_usize, usize_add_signed, usize_to_u32},
-    },
+    core::schema::FieldEncoding,
+    error::{AccessError, ZebinError},
+    read::Cursor,
+    traits::{Archive, ArchivedDefault, ByteSink, Decode, Restore, Serialize, SerializeState},
     validation::context::ValidationContext,
 };
 
-/// An archived string that uses a relative pointer.
-#[repr(C)]
-pub struct ArchivedString {
-    pub(crate) ptr: Option<RelPtr<u8>>,
-    pub(crate) len: u32,
+/// Zero-sized decode marker for archived strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ArchivedString;
+
+/// Borrowed archived string view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ArchivedStringView<'a> {
+    value: &'a str,
 }
 
-impl ArchivedString {
-    /// Access the archived string as a &str.
-    ///
-    /// # Safety
-    /// The caller must ensure the underlying data is valid UTF-8 and the pointer is valid.
-    pub unsafe fn as_str(&self) -> &str {
-        if self.len == 0 {
-            return "";
-        }
-        let len = u32_to_usize(self.len, || AccessError::ValidationError {
-            message: "ArchivedString length exceeds usize range",
-            pos: self as *const _ as usize,
-        })
-        .expect("validated archived string length should fit in usize");
-        let ptr = self
-            .ptr
-            .as_ref()
-            .expect("non-empty archived string must have a pointer");
-        let bytes = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) };
-        unsafe { str::from_utf8_unchecked(bytes) }
+impl<'a> ArchivedStringView<'a> {
+    pub unsafe fn as_str(&self) -> &'a str {
+        self.value
     }
 }
 
-impl Layout for ArchivedString {
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+impl Deref for ArchivedStringView<'_> {
+    type Target = str;
 
-    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        byteops::fill(out, 0);
-        if let Some(ptr) = &archived.ptr {
-            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
-        }
-        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
+    fn deref(&self) -> &Self::Target {
+        self.value
     }
 }
 
-impl<'a> Access<'a> for ArchivedString {
-    type View = &'a Self;
+impl<'a> Decode<'a> for ArchivedString {
+    type View = ArchivedStringView<'a>;
 
-    unsafe fn access<H, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<(Self::View, usize), AccessError>
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
+
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
     where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
+        C: ValidationContext + ?Sized,
     {
-        let mut guard = context.guard()?;
         let pos = cursor.pos();
-        guard.check_alignment(pos, Self::ALIGNMENT)?;
-        guard.check_range(pos, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
-
-        let len = u32_to_usize(archived.len, || {
-            guard.validation_error("ArchivedString length exceeds usize range", pos)
-        })?;
-        if len > 0 {
-            let rel = archived.ptr.as_ref().ok_or_else(|| {
-                guard.validation_error("Null pointer in non-empty ArchivedString", pos)
-            })?;
-            let ptr_pos = pos + crate::memoffset::offset_of!(ArchivedString, ptr);
-            let data_pos = usize_add_signed(ptr_pos, rel.offset(), || {
-                guard.validation_error("ArchivedString pointer overflow", pos)
-            })?;
-            guard.check_range(data_pos, len)?;
-
-            let bytes = &cursor.bytes()[data_pos..data_pos + len];
-            str::from_utf8(bytes)
-                .map_err(|_| guard.validation_error("Invalid UTF-8 sequence", data_pos))?;
-        }
-        Ok((archived, core::mem::size_of::<Self>()))
+        let len = cursor.read_u32(context)? as usize;
+        let bytes = cursor.read_exact(len, context)?;
+        let value = str::from_utf8(bytes)
+            .map_err(|_| context.validation_error("Invalid UTF-8 sequence", pos))?;
+        Ok(ArchivedStringView { value })
     }
 }
 
-impl ArchivedDefault for ArchivedString {
+impl ArchivedDefault for ArchivedStringView<'_> {
     fn archived_default() -> &'static Self {
-        static DEFAULT: ArchivedString = ArchivedString { ptr: None, len: 0 };
-        &DEFAULT
+        static DEFAULT: ArchivedStringView<'static> = ArchivedStringView { value: "" };
+        unsafe { &*(&DEFAULT as *const ArchivedStringView<'static> as *const Self) }
     }
 }
 
-impl Restore<String> for ArchivedString {
+impl Restore<String> for ArchivedStringView<'_> {
     fn restore(&self) -> Result<String, ZebinError> {
-        Ok(unsafe { self.as_str() }.to_string())
+        Ok(self.value.to_string())
     }
 }
 
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, String, H> for ArchivedString {
-    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<String, ZebinError> {
-        self.restore()
-    }
-}
 /// Resumable serialization state for `String` and `str`.
 pub struct StringArchiveState<'a> {
     bytes: &'a [u8],
+    len_prefix: [u8; 4],
+    prefix_cursor: usize,
     cursor: usize,
-    start_pos: Option<usize>,
+    _marker: PhantomData<&'a str>,
 }
 
 impl<'a> StringArchiveState<'a> {
     pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
+        let len = u32::try_from(bytes.len()).map_err(|_| ZebinError::SerializationError {
+            pos: 0,
+            message: "String length exceeds u32 range",
+        })?;
         Ok(Self {
             bytes,
+            len_prefix: len.to_le_bytes(),
+            prefix_cursor: 0,
             cursor: 0,
-            start_pos: None,
+            _marker: PhantomData,
         })
     }
 }
 
 impl<'a> SerializeState<'a> for StringArchiveState<'a> {
-    type Resolver = usize;
-
-    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
-        &mut self,
-        encoder: &mut E,
-    ) -> Result<Poll<Self::Resolver>, ZebinError> {
-        if self.start_pos.is_none() {
-            self.start_pos = Some(encoder.pos());
+    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+        if self.prefix_cursor < self.len_prefix.len() {
+            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
+            self.prefix_cursor += written;
+            if self.prefix_cursor < self.len_prefix.len() {
+                return Ok(Poll::Pending);
+            }
         }
 
         let written = encoder.write(&self.bytes[self.cursor..])?;
@@ -148,32 +105,13 @@ impl<'a> SerializeState<'a> for StringArchiveState<'a> {
         if self.cursor < self.bytes.len() {
             Ok(Poll::Pending)
         } else {
-            Ok(Poll::Ready(self.start_pos.expect("start_pos set above")))
+            Ok(Poll::Ready(()))
         }
     }
 }
 
 impl Archive for String {
     type Archived = ArchivedString;
-    type Resolver = usize;
-
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        let ptr = if self.is_empty() {
-            None
-        } else {
-            Some(RelPtr::new(archive_pos, resolver)?)
-        };
-        Ok(ArchivedString {
-            ptr,
-            len: usize_to_u32(self.len(), || ArchiveError::LengthOverflow {
-                pos: archive_pos,
-            })?,
-        })
-    }
 }
 
 impl Serialize for String {
@@ -189,25 +127,6 @@ impl Serialize for String {
 
 impl Archive for str {
     type Archived = ArchivedString;
-    type Resolver = usize;
-
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        let ptr = if self.is_empty() {
-            None
-        } else {
-            Some(RelPtr::new(archive_pos, resolver)?)
-        };
-        Ok(ArchivedString {
-            ptr,
-            len: usize_to_u32(self.len(), || ArchiveError::LengthOverflow {
-                pos: archive_pos,
-            })?,
-        })
-    }
 }
 
 impl Serialize for str {
@@ -227,20 +146,8 @@ impl Restore<String> for String {
     }
 }
 
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, String, H> for String {
-    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<String, ZebinError> {
-        Ok(self.clone())
-    }
-}
-
 impl Restore<String> for str {
     fn restore(&self) -> Result<String, ZebinError> {
-        Ok(self.to_string())
-    }
-}
-
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, String, H> for str {
-    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<String, ZebinError> {
         Ok(self.to_string())
     }
 }

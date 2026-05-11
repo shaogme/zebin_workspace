@@ -1,13 +1,13 @@
-use core::num::NonZeroUsize;
-
 use crate::{
-    core::rel_ptr::RelPtr,
-    error::{AccessError, ArchiveError},
+    core::schema::FieldEncoding,
+    error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Access, Archive, ArchivedDefault, Layout, Restore},
-    utils::num::{u32_to_usize, usize_add_signed, usize_to_u32},
+    traits::{Archive, ArchivedDefault, Decode, Restore},
     validation::context::ValidationContext,
 };
+
+#[cfg(feature = "alloc")]
+use crate::alloc::vec::Vec;
 
 /// Source of indexed sequence items.
 pub trait SequenceSource<T> {
@@ -39,199 +39,118 @@ impl<T, const N: usize> SequenceSource<T> for [T; N] {
     }
 }
 
-/// An archived vector that uses a relative pointer.
-#[repr(C)]
-pub struct ArchivedVec<T> {
-    pub(crate) ptr: Option<RelPtr<T>>,
-    pub(crate) len: u32,
+/// Decoded archived vector view.
+#[cfg(feature = "alloc")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchivedVec<'a, T> {
+    items: Vec<T>,
+    _marker: core::marker::PhantomData<&'a ()>,
 }
 
-impl<T> ArchivedVec<T> {
-    /// Access the archived vector as a slice.
-    ///
-    /// # Safety
-    /// The caller must ensure the pointer and length are valid.
-    pub unsafe fn as_slice(&self) -> &[T] {
-        if self.len == 0 {
-            return &[];
+#[cfg(feature = "alloc")]
+impl<'a, T> ArchivedVec<'a, T> {
+    pub fn new(items: Vec<T>) -> Self {
+        Self {
+            items,
+            _marker: core::marker::PhantomData,
         }
-        let len = u32_to_usize(self.len, || AccessError::ValidationError {
-            message: "ArchivedVec length exceeds usize range",
-            pos: self as *const _ as usize,
-        })
-        .expect("validated archived vector length should fit in usize");
-        let ptr = self
-            .ptr
-            .as_ref()
-            .expect("non-empty archived vector must have a pointer");
-        unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) }
     }
 
-    /// Get the length of the vector.
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || AccessError::ValidationError {
-            message: "ArchivedVec length exceeds usize range",
-            pos: self as *const _ as usize,
-        })
-        .expect("archived vector length should fit in usize")
+        self.items.len()
     }
 
-    /// Check if the vector is empty.
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.items.is_empty()
+    }
+
+    pub unsafe fn as_slice(&self) -> &[T] {
+        self.items.as_slice()
+    }
+
+    pub fn iter(&self) -> core::slice::Iter<'_, T> {
+        self.items.iter()
     }
 }
 
-impl<T: 'static> ArchivedDefault for ArchivedVec<T> {
+#[cfg(feature = "alloc")]
+impl<'a, T: 'static> ArchivedDefault for ArchivedVec<'a, T> {
     fn archived_default() -> &'static Self {
-        static DEFAULT: ArchivedVec<()> = ArchivedVec { ptr: None, len: 0 };
-        unsafe { &*(&DEFAULT as *const ArchivedVec<()> as *const ArchivedVec<T>) }
+        static DEFAULT: ArchivedVec<'static, ()> = ArchivedVec {
+            items: Vec::new(),
+            _marker: core::marker::PhantomData,
+        };
+        unsafe { &*(&DEFAULT as *const ArchivedVec<'static, ()> as *const Self) }
     }
 }
 
-impl<T> Layout for ArchivedVec<T>
+#[cfg(feature = "alloc")]
+impl<'marker, 'a, A> Decode<'a> for ArchivedVec<'marker, A>
 where
-    T: Layout,
+    A: Decode<'a>,
 {
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+    type View = ArchivedVec<'a, A::View>;
 
-    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        crate::utils::byteops::fill(out, 0);
-        if let Some(ptr) = &archived.ptr {
-            out[0..8].copy_from_slice(&ptr.offset().to_le_bytes());
-        }
-        <u32 as Layout>::write_archived_bytes(&archived.len, &mut out[8..12]);
-    }
-}
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
 
-impl<'a, T: 'a> Access<'a> for ArchivedVec<T>
-where
-    T: Layout + Access<'a>,
-{
-    type View = &'a Self;
-
-    unsafe fn access<H, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<(Self::View, usize), AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
     where
-        H: crate::traits::ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
+        C: ValidationContext + ?Sized,
     {
-        let mut guard = context.guard()?;
-        let pos = cursor.pos();
-        guard.check_alignment(pos, Self::ALIGNMENT)?;
-        guard.check_range(pos, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+        let len = cursor.read_u32(context)? as usize;
+        let mut items = Vec::with_capacity(len);
 
-        let len = u32_to_usize(archived.len, || {
-            guard.validation_error("ArchivedVec length exceeds usize range", pos)
-        })?;
-        if len > 0 {
-            let rel = archived.ptr.as_ref().ok_or_else(|| {
-                guard.validation_error("Null pointer in non-empty ArchivedVec", pos)
-            })?;
-            let ptr_pos = pos + crate::memoffset::offset_of!(ArchivedVec<T>, ptr);
-            let data_pos = usize_add_signed(ptr_pos, rel.offset(), || {
-                guard.validation_error("ArchivedVec pointer overflow", pos)
-            })?;
-            let total_size = len
-                .checked_mul(core::mem::size_of::<T>())
-                .ok_or_else(|| guard.validation_error("ArchivedVec size overflow", pos))?;
-            guard.check_range(data_pos, total_size)?;
-            guard.check_alignment(data_pos, T::ALIGNMENT)?;
-
-            for i in 0..len {
-                let element_pos = data_pos + i * core::mem::size_of::<T>();
-                {
-                    let mut _path_guard = guard.push_index(i);
-                    let mut element_cursor = cursor.with_pos(element_pos);
-                    unsafe {
-                        T::access::<H, _>(&mut element_cursor, &mut *_path_guard)?;
-                    }
-                }
+        if let Some(_fixed_size) = A::FIXED_SIZE {
+            cursor.align(A::ALIGNMENT, context)?;
+            for index in 0..len {
+                let mut guard = context.push_index(index);
+                items.push(A::decode(cursor, &mut *guard)?);
+            }
+        } else {
+            for index in 0..len {
+                let mut guard = context.push_index(index);
+                items.push(A::decode(cursor, &mut *guard)?);
             }
         }
 
-        Ok((archived, core::mem::size_of::<Self>()))
+        Ok(ArchivedVec::new(items))
     }
 }
 
-impl<T, U, const N: usize> Restore<[U; N]> for [T; N]
+#[cfg(feature = "alloc")]
+impl<T, U> Restore<Vec<U>> for ArchivedVec<'_, T>
 where
     T: Restore<U>,
 {
-    fn restore(&self) -> Result<[U; N], crate::error::ZebinError> {
-        let mut out = core::mem::MaybeUninit::<[U; N]>::uninit();
-        let out_ptr = out.as_mut_ptr() as *mut U;
-        for (index, item) in self.iter().enumerate() {
-            unsafe {
-                out_ptr.add(index).write(item.restore()?);
-            }
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.items.len());
+        for item in &self.items {
+            out.push(item.restore()?);
         }
-        Ok(unsafe { out.assume_init() })
+        Ok(out)
     }
 }
 
-impl<'a, T, U, const N: usize, H: crate::traits::ArchiveHeader>
-    crate::traits::RestoreFromView<'a, [U; N], H> for [T; N]
+#[cfg(feature = "alloc")]
+impl<T, U> Restore<Vec<U>> for Vec<T>
 where
-    T: Restore<U> + for<'b> crate::traits::RestoreFromView<'b, U, H> + crate::traits::Layout,
+    T: Restore<U>,
 {
-    fn restore_from_view(
-        &self,
-        layout: &crate::ResolvedLayout<'a, H>,
-    ) -> Result<[U; N], crate::error::ZebinError> {
-        let mut out = core::mem::MaybeUninit::<[U; N]>::uninit();
-        let out_ptr = out.as_mut_ptr() as *mut U;
-        for (index, item) in self.iter().enumerate() {
-            let item_layout = crate::read::get_nested_layout(layout, item)?;
-            unsafe {
-                out_ptr
-                    .add(index)
-                    .write(item.restore_from_view(&item_layout)?);
-            }
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for item in self {
+            out.push(item.restore()?);
         }
-        Ok(unsafe { out.assume_init() })
+        Ok(out)
     }
 }
 
-pub(crate) fn resolve_sequence_archive<S, T>(
-    source: &S,
-    archive_pos: usize,
-    resolver: usize,
-) -> Result<ArchivedVec<T::Archived>, ArchiveError>
-where
-    S: ?Sized + SequenceSource<T>,
-    T: Archive,
-{
-    let ptr = if source.len() == 0 {
-        None
-    } else {
-        Some(RelPtr::new(archive_pos, resolver)?)
-    };
-    Ok(ArchivedVec {
-        ptr,
-        len: usize_to_u32(source.len(), || ArchiveError::LengthOverflow {
-            pos: archive_pos,
-        })?,
-    })
-}
-
+#[cfg(feature = "alloc")]
 impl<T> Archive for [T]
 where
     T: Archive,
 {
-    type Archived = ArchivedVec<T::Archived>;
-    type Resolver = usize;
-
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        resolve_sequence_archive(self, archive_pos, resolver)
-    }
+    type Archived = ArchivedVec<'static, T::Archived>;
 }
 
 impl<T, const N: usize> Archive for [T; N]
@@ -239,30 +158,31 @@ where
     T: Archive,
 {
     type Archived = [T::Archived; N];
-    type Resolver = [T::Resolver; N];
+}
 
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        let elem_size = core::mem::size_of::<T::Archived>();
-        let mut out = core::mem::MaybeUninit::<[T::Archived; N]>::uninit();
-        let out_ptr = out.as_mut_ptr() as *mut T::Archived;
-        let mut resolver_iter = resolver.into_iter();
+impl<T, U, const N: usize> Restore<[U; N]> for [T; N]
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<[U; N], ZebinError> {
+        let mut out = core::mem::MaybeUninit::<[U; N]>::uninit();
+        let out_ptr = out.as_mut_ptr() as *mut U;
+        let mut initialized = 0usize;
 
-        for (index, item) in self.iter().enumerate() {
-            let item_resolver = resolver_iter.next().expect("array resolver length matches");
-            let item_pos = archive_pos
-                .checked_add(
-                    index
-                        .checked_mul(elem_size)
-                        .ok_or(ArchiveError::ArithmeticOverflow { pos: archive_pos })?,
-                )
-                .ok_or(ArchiveError::ArithmeticOverflow { pos: archive_pos })?;
-            let item = item.resolve(item_pos, item_resolver)?;
-            unsafe {
-                out_ptr.add(index).write(item);
+        while initialized < N {
+            match self[initialized].restore() {
+                Ok(value) => unsafe {
+                    out_ptr.add(initialized).write(value);
+                    initialized += 1;
+                },
+                Err(error) => {
+                    for index in 0..initialized {
+                        unsafe {
+                            out_ptr.add(index).drop_in_place();
+                        }
+                    }
+                    return Err(error);
+                }
             }
         }
 

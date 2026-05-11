@@ -1,4 +1,4 @@
-use zebin::{ArchiveHeader, ArchiveHeaderTrait, ZebinArchive, ZebinError, ZebinSerialize};
+use zebin::{ZebinArchive, ZebinError, ZebinSerialize};
 
 #[derive(ZebinArchive, ZebinSerialize)]
 enum UnitMode {
@@ -55,7 +55,7 @@ fn test_tuple_enum_round_trip() {
     assert_eq!(archived.tag(), 1);
 
     // TuplePacket::Data variant has a schema_key, so we can access it directly as a View
-    let data = reader.as_data().unwrap().expect("Should be Data variant");
+    let data = reader.as_data().expect("Should be Data variant");
 
     assert_eq!(*data.field0().unwrap(), 7);
     assert_eq!(unsafe { data.field1().unwrap().as_str() }, "packet");
@@ -75,7 +75,7 @@ fn test_struct_enum_round_trip() {
     assert_eq!(archived.tag(), 1);
 
     // StructPacket::Data variant has a schema_key
-    let data = reader.as_data().unwrap().expect("Should be Data variant");
+    let data = reader.as_data().expect("Should be Data variant");
 
     assert_eq!(*data.code().unwrap(), 42);
     assert_eq!(unsafe { data.label().unwrap().as_str() }, "hello");
@@ -85,8 +85,7 @@ fn test_struct_enum_round_trip() {
 fn test_invalid_enum_discriminant() {
     let value = UnitMode::Idle;
     let mut buf = zebin::encode(&value).unwrap();
-    let header = ArchiveHeader::parse(&buf).unwrap();
-    let root_offset = header.root_offset.get() as usize;
+    let root_offset = 4usize;
     buf[root_offset..root_offset + 4].copy_from_slice(&99u32.to_le_bytes());
 
     let err = zebin::validate::<UnitMode>(&buf).unwrap_err();
@@ -130,26 +129,13 @@ fn test_enum_layout_mismatch_rejected() {
     };
     let mut buf = zebin::encode(&value).unwrap();
 
-    let header = ArchiveHeader::parse(&buf).unwrap();
-    let layout_offset = header.layout_offset.get() as usize;
-    let layout0_offset = u32::from_le_bytes(
-        buf[layout_offset + 4..layout_offset + 8]
-            .try_into()
-            .unwrap(),
-    ) as usize;
-    let layout0_pos = layout_offset + layout0_offset;
-    let field0_offset_pos = layout0_pos + 16 + 2;
-    let field0_offset = u32::from_le_bytes(
-        buf[field0_offset_pos..field0_offset_pos + 4]
-            .try_into()
-            .unwrap(),
-    );
-    buf[field0_offset_pos..field0_offset_pos + 4]
-        .copy_from_slice(&(field0_offset + 1).to_le_bytes());
+    let object_pos = 4 + 4;
+    let label_encoding_pos = object_pos + 12 + 8 + 2;
+    buf[label_encoding_pos] = zebin::FieldEncoding::Fixed as u8;
 
     let err = zebin::validate::<StructPacket>(&buf).unwrap_err();
     assert!(matches!(
         err,
-        ZebinError::Access(zebin::AccessError::LayoutOffsetMismatch { .. })
+        ZebinError::Access(zebin::AccessError::UnexpectedFieldEncoding { .. })
     ));
 }

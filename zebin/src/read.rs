@@ -1,10 +1,8 @@
 use crate::{
-    core::schema::{LayoutDirectory, LayoutView, ObjectEncoding},
     error::{AccessError, ZebinError},
     format::ArchiveHeader,
-    traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Restore, SchemaAware},
-    utils::num::{u32_to_nonzero_usize, u32_to_usize},
-    validation::validator::Validator,
+    traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Decode, Restore},
+    validation::{context::ValidationContext, validator::Validator},
 };
 use core::ops::Deref;
 
@@ -28,244 +26,92 @@ impl<'a> Cursor<'a> {
         self.pos
     }
 
+    pub fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.pos)
+    }
+
     pub fn with_pos(&self, pos: usize) -> Self {
         Self {
             bytes: self.bytes,
             pos,
         }
     }
-}
 
-fn validate_new_layout_header<H: ArchiveHeaderTrait>(header: &H) -> Result<(), AccessError> {
-    let layout_pos = u32_to_usize(header.layout_offset().get(), || {
-        AccessError::ValidationError {
-            message: "Layout offset exceeds usize range",
-            pos: H::LAYOUT_OFFSET_POS,
+    pub fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        context.check_range(self.pos, len)?;
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
+        if end > self.bytes.len() {
+            return Err(context.validation_error("Cursor out of bounds", self.pos));
         }
-    })?;
-    let root_pos = u32_to_usize(header.root_offset().get(), || {
-        AccessError::ValidationError {
-            message: "Root offset exceeds usize range",
-            pos: H::ROOT_OFFSET_POS,
-        }
-    })?;
-    if layout_pos < H::SIZE {
-        return Err(AccessError::ValidationError {
-            message: "Layout overlaps archive header",
-            pos: layout_pos,
-        });
+        self.pos = end;
+        Ok(())
     }
-    if layout_pos >= root_pos {
-        return Err(AccessError::ValidationError {
-            message: "Layout must precede root",
-            pos: layout_pos,
-        });
+
+    pub fn align<C>(
+        &mut self,
+        alignment: core::num::NonZeroUsize,
+        context: &mut C,
+    ) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let padding = (alignment.get() - (self.pos % alignment.get())) % alignment.get();
+        self.advance(padding, context)
     }
-    Ok(())
+
+    pub fn read_exact<C>(&mut self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start = self.pos;
+        self.advance(len, context)?;
+        Ok(&self.bytes[start..start + len])
+    }
+
+    pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Ok(self.read_exact(1, context)?[0])
+    }
+
+    pub fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let bytes: [u8; 2] = self.read_exact(2, context)?.try_into().unwrap();
+        Ok(u16::from_le_bytes(bytes))
+    }
+
+    pub fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let bytes: [u8; 4] = self.read_exact(4, context)?.try_into().unwrap();
+        Ok(u32::from_le_bytes(bytes))
+    }
 }
 
 /// Safe access layer output that keeps the validated byte slice alive.
-///
-/// ZebinReader acts as a Root View of the archive. It implements Deref to the root [View],
-/// providing direct access to schema-aware fields and nested views.
 pub struct ZebinReader<'a, T: Archive, H: ArchiveHeaderTrait = ArchiveHeader>
 where
-    T::Archived: Access<'a>,
-    <T::Archived as Access<'a>>::View: Deref,
+    T::Archived: Decode<'a>,
 {
-    view: View<'a, <T::Archived as Access<'a>>::View, H>,
+    bytes: &'a [u8],
+    header: H,
+    root: <T::Archived as Decode<'a>>::View,
 }
 
 impl<'a, T: Archive, H: ArchiveHeaderTrait> ZebinReader<'a, T, H>
 where
-    T::Archived: Access<'a>,
-    <T::Archived as Access<'a>>::View: Deref,
+    T::Archived: Decode<'a>,
 {
-    pub fn bytes(&self) -> &'a [u8] {
-        self.view.layout().bytes()
-    }
-
-    pub fn header(&self) -> &H {
-        self.view.layout().header()
-    }
-
-    /// Returns the root object view.
-    pub fn root(&self) -> &<T::Archived as Access<'a>>::View {
-        &self.view.data
-    }
-
-    /// Wrap a schema-aware object into a view using this reader's archive context.
-    pub fn view<S: SchemaAware>(&self, obj: &'a S) -> Result<View<'a, &'a S, H>, ZebinError> {
-        self.view.view(obj)
-    }
-
-    /// Restore the original root object from this reader.
-    pub fn restore(&self) -> Result<T, ZebinError>
-    where
-        View<'a, <T::Archived as Access<'a>>::View, H>: Restore<T>,
-    {
-        self.view.restore()
-    }
-
-    /// Create a reader for the archived root object.
-    pub fn new(bytes: &'a [u8]) -> Result<Self, ZebinError>
-    where
-        T::Archived: Layout,
-    {
-        let header = H::parse(bytes)?;
-        validate_new_layout_header(&header)?;
-        let root_pos = u32_to_usize(header.root_offset().get(), || {
-            AccessError::ValidationError {
-                message: "Root offset exceeds usize range",
-                pos: H::ROOT_OFFSET_POS,
-            }
-        })?;
-
-        let layout_dir = LayoutDirectory::new(
-            bytes,
-            u32_to_nonzero_usize(
-                header.layout_offset().get(),
-                || AccessError::ValidationError {
-                    message: "Layout offset exceeds usize range",
-                    pos: H::LAYOUT_OFFSET_POS,
-                },
-                || AccessError::ValidationError {
-                    message: "Layout offset cannot be zero",
-                    pos: H::LAYOUT_OFFSET_POS,
-                },
-            )?,
-        )?;
-        let layout_end = layout_dir.section_end();
-        if layout_end > root_pos {
-            return Err(AccessError::ValidationError {
-                message: "Layout section overlaps root",
-                pos: layout_end,
-            }
-            .into());
-        }
-        let mut validator = Validator::<'a, H>::with_layouts(bytes, header, layout_dir);
-        let mut root_cursor = Cursor::new(bytes, root_pos);
-        let (root_view, root_span) =
-            unsafe { <T::Archived as Access<'a>>::access(&mut root_cursor, &mut validator)? };
-        let root_end = root_pos
-            .checked_add(root_span)
-            .ok_or(AccessError::ValidationError {
-                message: "Root range overflow",
-                pos: root_pos,
-            })?;
-        if root_end > bytes.len() {
-            return Err(AccessError::ValidationError {
-                message: "Root out of bounds",
-                pos: root_pos,
-            }
-            .into());
-        }
-
-        // Automatically resolve root layout if it's schema-aware
-        let layout = if <T::Archived as Layout>::ENCODING == ObjectEncoding::SchemaAware {
-            let key = u32::from_le_bytes(bytes[root_pos..root_pos + 4].try_into().unwrap());
-            let rev = u32::from_le_bytes(bytes[root_pos + 4..root_pos + 8].try_into().unwrap());
-            ResolvedLayout::from_parts(bytes, header, Some(layout_dir.lookup(key, rev)?))
-        } else {
-            ResolvedLayout::context_only(bytes, header)
-        };
-
-        Ok(Self {
-            view: View::new_with_layout(root_view, layout),
-        })
-    }
-
-    /// Decode and validate the archived root object directly into the original type T.
-    pub fn decode(bytes: &'a [u8]) -> Result<T, ZebinError>
-    where
-        T::Archived: Layout,
-        View<'a, <T::Archived as Access<'a>>::View, H>: Restore<T>,
-    {
-        Self::new(bytes)?.restore()
-    }
-
-    /// Validate an archive without exposing the archived view.
-    pub fn validate(bytes: &'a [u8]) -> Result<(), ZebinError>
-    where
-        T::Archived: Layout,
-    {
-        Self::new(bytes).map(|_| ())
-    }
-}
-
-impl<'a, T: Archive, H: ArchiveHeaderTrait> Deref for ZebinReader<'a, T, H>
-where
-    T::Archived: Access<'a>,
-    <T::Archived as Access<'a>>::View: Deref,
-{
-    type Target = View<'a, <T::Archived as Access<'a>>::View, H>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.view
-    }
-}
-
-/// Resolved layout handle for a specific schema key and revision.
-#[derive(Clone, Copy)]
-pub struct ResolvedLayout<'a, H: ArchiveHeaderTrait = ArchiveHeader> {
-    bytes: &'a [u8],
-    header: H,
-    layout: Option<LayoutView<'a>>,
-}
-
-impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
-    pub(crate) fn from_parts(bytes: &'a [u8], header: H, layout: Option<LayoutView<'a>>) -> Self {
-        Self {
-            bytes,
-            header,
-            layout,
-        }
-    }
-
-    /// Create a layout that only provides archive context (no object fields).
-    pub fn context_only(bytes: &'a [u8], header: H) -> Self {
-        Self::from_parts(bytes, header, None)
-    }
-
-    pub fn new(
-        bytes: &'a [u8],
-        stable_schema_key: u32,
-        schema_revision: u32,
-    ) -> Result<Self, ZebinError> {
-        let header = H::parse(bytes)?;
-        validate_new_layout_header(&header)?;
-        let layout_dir = LayoutDirectory::new(
-            bytes,
-            u32_to_nonzero_usize(
-                header.layout_offset().get(),
-                || AccessError::ValidationError {
-                    message: "Layout offset exceeds usize range",
-                    pos: H::LAYOUT_OFFSET_POS,
-                },
-                || AccessError::ValidationError {
-                    message: "Layout offset cannot be zero",
-                    pos: H::LAYOUT_OFFSET_POS,
-                },
-            )?,
-        )?;
-        let root_pos = u32_to_usize(header.root_offset().get(), || {
-            AccessError::ValidationError {
-                message: "Root offset exceeds usize range",
-                pos: H::ROOT_OFFSET_POS,
-            }
-        })?;
-        let layout_end = layout_dir.section_end();
-        if layout_end > root_pos {
-            return Err(AccessError::ValidationError {
-                message: "Layout section overlaps root",
-                pos: layout_end,
-            }
-            .into());
-        }
-        let layout = layout_dir.lookup(stable_schema_key, schema_revision)?;
-        Ok(Self::from_parts(bytes, header, Some(layout)))
-    }
-
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
     }
@@ -274,103 +120,56 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
         &self.header
     }
 
-    pub fn layout(&self) -> Option<LayoutView<'a>> {
-        self.layout
+    pub fn root(&self) -> &<T::Archived as Decode<'a>>::View {
+        &self.root
     }
 
-    pub fn stable_schema_key(&self) -> u32 {
-        self.layout.map(|l| l.stable_schema_key()).unwrap_or(0)
-    }
-
-    pub fn schema_revision(&self) -> u32 {
-        self.layout.map(|l| l.schema_revision()).unwrap_or(0)
-    }
-
-    pub fn field_offset(&self, field_id: u16) -> Option<u32> {
-        self.layout.and_then(|l| l.field_offset(field_id))
-    }
-
-    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), AccessError> {
-        self.layout
-            .ok_or(AccessError::ValidationError {
-                message: "Missing layout for field check",
-                pos: 0,
-            })?
-            .check_field(field_id, expected)
-    }
-
-    /// Resolve a nested layout using the same archive header and byte source.
-    pub fn resolve_nested(
-        &self,
-        stable_schema_key: u32,
-        schema_revision: u32,
-    ) -> Result<Self, ZebinError> {
-        Self::new(self.bytes, stable_schema_key, schema_revision)
-    }
-}
-
-/// Helper for resolving a nested layout from a context layout and an archived field.
-pub fn get_nested_layout<'a, T: Layout, H: ArchiveHeaderTrait>(
-    context: &ResolvedLayout<'a, H>,
-    data: &T,
-) -> Result<ResolvedLayout<'a, H>, ZebinError> {
-    if T::ENCODING == crate::core::schema::ObjectEncoding::SchemaAware {
-        // Safety: Schema-aware objects MUST start with 4-byte key and 4-byte revision.
-        // We know T is SchemaAware because of the ENCODING check.
-        let ptr = data as *const T as *const u32;
-        let key = unsafe { *ptr };
-        let rev = unsafe { *ptr.add(1) };
-        context.resolve_nested(key, rev)
-    } else {
-        Ok(ResolvedLayout::context_only(
-            context.bytes(),
-            *context.header(),
-        ))
-    }
-}
-
-/// A view wrapper that binds an archived object with its resolved layout.
-pub struct View<'a, T, H: ArchiveHeaderTrait = ArchiveHeader> {
-    data: T,
-    layout: ResolvedLayout<'a, H>,
-}
-
-impl<'a, T, H: ArchiveHeaderTrait> View<'a, T, H> {
-    /// Create a new view from archived data and its layout.
-    pub fn new_with_layout(data: T, layout: ResolvedLayout<'a, H>) -> Self {
-        Self { data, layout }
-    }
-
-    /// Returns the raw archived data.
-    pub fn data(&self) -> &T {
-        &self.data
-    }
-
-    /// Returns the resolved layout.
-    pub fn layout(&self) -> &ResolvedLayout<'a, H> {
-        &self.layout
-    }
-
-    /// Resolve a view for a nested schema-aware object using this view's context.
-    pub fn view<U: SchemaAware>(&self, data: &'a U) -> Result<View<'a, &'a U, H>, ZebinError> {
-        let layout = self
-            .layout
-            .resolve_nested(data.stable_schema_key(), data.schema_revision())?;
-        Ok(View::new_with_layout(data, layout))
-    }
-
-    /// Restore the original object from this view.
-    pub fn restore<U>(&self) -> Result<U, ZebinError>
+    pub fn restore(&self) -> Result<T, ZebinError>
     where
-        Self: Restore<U>,
+        <T::Archived as Decode<'a>>::View: Restore<T>,
     {
-        Restore::restore(self)
+        self.root.restore()
+    }
+
+    pub fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
+        let header = H::parse(bytes)?;
+        let mut validator = Validator::new(bytes);
+        let mut cursor = Cursor::new(bytes, H::SIZE);
+        let root = T::Archived::decode(&mut cursor, &mut validator)?;
+        if cursor.pos() != bytes.len() {
+            return Err(AccessError::ValidationError {
+                message: "Trailing bytes after root object",
+                pos: cursor.pos(),
+            }
+            .into());
+        }
+
+        Ok(Self {
+            bytes,
+            header,
+            root,
+        })
+    }
+
+    pub fn decode(bytes: &'a [u8]) -> Result<T, ZebinError>
+    where
+        <T::Archived as Decode<'a>>::View: Restore<T>,
+    {
+        Self::new(bytes)?.restore()
+    }
+
+    pub fn validate(bytes: &'a [u8]) -> Result<(), ZebinError> {
+        Self::new(bytes).map(|_| ())
     }
 }
 
-impl<'a, T: Deref, H: ArchiveHeaderTrait> Deref for View<'a, T, H> {
-    type Target = T::Target;
+impl<'a, T: Archive, H: ArchiveHeaderTrait> Deref for ZebinReader<'a, T, H>
+where
+    T::Archived: Decode<'a>,
+{
+    type Target = <T::Archived as Decode<'a>>::View;
+
     fn deref(&self) -> &Self::Target {
-        self.data.deref()
+        &self.root
     }
 }

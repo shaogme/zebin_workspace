@@ -3,14 +3,8 @@ use core::task::Poll;
 
 use crate::{
     archive::packed::{ArchivedPackedBoolSlice, ArchivedPackedU8Slice},
-    core::rel_ptr::RelPtr,
-    error::{ArchiveError, ZebinError},
-    read::ResolvedLayout,
-    traits::{
-        Archive, ArchiveHeader, ByteSink, LayoutSink, Restore, RestoreFromView, Serialize,
-        SerializeState,
-    },
-    utils::num::usize_to_u32,
+    error::ZebinError,
+    traits::{Archive, ByteSink, Restore, Serialize, SerializeState},
 };
 
 enum PackedData<'a> {
@@ -23,39 +17,40 @@ enum PackedData<'a> {
 pub struct PackedSequenceState<'a> {
     data: PackedData<'a>,
     bits_per_value: u8,
+    len_prefix: [u8; 4],
+    prefix_cursor: usize,
     index: usize,
     len: usize,
-    start_pos: Option<usize>,
     buf: [u8; 64],
     buf_len: usize,
     buf_cursor: usize,
 }
 
 impl<'a> PackedSequenceState<'a> {
-    pub fn new_bool(values: &'a [bool]) -> Self {
-        Self {
-            data: PackedData::Bool(values),
-            bits_per_value: 1,
-            index: 0,
-            len: values.len(),
-            start_pos: None,
-            buf: [0u8; 64],
-            buf_len: 0,
-            buf_cursor: 0,
-        }
+    pub fn new_bool(values: &'a [bool]) -> Result<Self, ZebinError> {
+        Self::new(PackedData::Bool(values), 1, values.len())
     }
 
-    pub fn new_u8(values: &'a [u8], bits_per_value: u8) -> Self {
-        Self {
-            data: PackedData::U8(values),
+    pub fn new_u8(values: &'a [u8], bits_per_value: u8) -> Result<Self, ZebinError> {
+        Self::new(PackedData::U8(values), bits_per_value, values.len())
+    }
+
+    fn new(data: PackedData<'a>, bits_per_value: u8, len: usize) -> Result<Self, ZebinError> {
+        let len_u32 = u32::try_from(len).map_err(|_| ZebinError::SerializationError {
+            pos: 0,
+            message: "Packed length exceeds u32 range",
+        })?;
+        Ok(Self {
+            data,
             bits_per_value,
+            len_prefix: len_u32.to_le_bytes(),
+            prefix_cursor: 0,
             index: 0,
-            len: values.len(),
-            start_pos: None,
+            len,
             buf: [0u8; 64],
             buf_len: 0,
             buf_cursor: 0,
-        }
+        })
     }
 
     fn fill_buf(&mut self) -> Result<(), ZebinError> {
@@ -104,22 +99,19 @@ impl<'a> PackedSequenceState<'a> {
 }
 
 impl<'a> SerializeState<'a> for PackedSequenceState<'a> {
-    type Resolver = usize;
-
-    fn poll<E: ByteSink + LayoutSink<'a> + ?Sized>(
-        &mut self,
-        encoder: &mut E,
-    ) -> Result<Poll<Self::Resolver>, ZebinError> {
-        if self.start_pos.is_none() {
-            self.start_pos = Some(encoder.pos());
+    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+        if self.prefix_cursor < self.len_prefix.len() {
+            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
+            self.prefix_cursor += written;
+            if self.prefix_cursor < self.len_prefix.len() {
+                return Ok(Poll::Pending);
+            }
         }
 
         loop {
             if self.buf_cursor >= self.buf_len {
                 if self.index >= self.len {
-                    return Ok(Poll::Ready(
-                        self.start_pos.expect("start position set above"),
-                    ));
+                    return Ok(Poll::Ready(()));
                 }
                 self.fill_buf()?;
             }
@@ -138,9 +130,7 @@ pub struct PackedVec<T, const BITS: u8> {
     values: Vec<T>,
 }
 
-/// Owned bit-packed booleans.
 pub type PackedBoolVec = PackedVec<bool, 1>;
-/// Owned packed small integers.
 pub type PackedU8Vec<const BITS: u8> = PackedVec<u8, BITS>;
 
 impl<T, const BITS: u8> PackedVec<T, BITS> {
@@ -189,25 +179,6 @@ impl<'a, T, const BITS: u8> IntoIterator for &'a PackedVec<T, BITS> {
 
 impl Archive for PackedVec<bool, 1> {
     type Archived = ArchivedPackedBoolSlice;
-    type Resolver = usize;
-
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        let ptr = if self.values.is_empty() {
-            None
-        } else {
-            Some(RelPtr::new(archive_pos, resolver)?)
-        };
-        Ok(ArchivedPackedBoolSlice {
-            ptr,
-            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
-                pos: archive_pos,
-            })?,
-        })
-    }
 }
 
 impl Serialize for PackedVec<bool, 1> {
@@ -217,31 +188,12 @@ impl Serialize for PackedVec<bool, 1> {
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new_bool(self.values.as_slice()))
+        PackedSequenceState::new_bool(self.values.as_slice())
     }
 }
 
 impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
-    type Resolver = usize;
-
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        let ptr = if self.values.is_empty() {
-            None
-        } else {
-            Some(RelPtr::new(archive_pos, resolver)?)
-        };
-        Ok(ArchivedPackedU8Slice {
-            ptr,
-            len: usize_to_u32(self.values.len(), || ArchiveError::LengthOverflow {
-                pos: archive_pos,
-            })?,
-        })
-    }
 }
 
 impl<const BITS: u8> Serialize for PackedVec<u8, BITS> {
@@ -251,7 +203,7 @@ impl<const BITS: u8> Serialize for PackedVec<u8, BITS> {
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new_u8(self.values.as_slice(), BITS))
+        PackedSequenceState::new_u8(self.values.as_slice(), BITS)
     }
 }
 
@@ -262,7 +214,7 @@ impl Serialize for crate::archive::packed::PackedSlice<'_, bool, 1> {
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new_bool(self.values()))
+        PackedSequenceState::new_bool(self.values())
     }
 }
 
@@ -273,125 +225,15 @@ impl<const BITS: u8> Serialize for crate::archive::packed::PackedSlice<'_, u8, B
         Self: 'a;
 
     fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedSequenceState::new_u8(self.values(), BITS))
+        PackedSequenceState::new_u8(self.values(), BITS)
     }
 }
 
-impl Restore<Vec<bool>> for ArchivedPackedBoolSlice {
-    fn restore(&self) -> Result<Vec<bool>, ZebinError> {
-        let len = self.len();
-        let mut out = Vec::with_capacity(len);
-        for i in 0..len {
-            out.push(self.get(i).unwrap());
-        }
-        Ok(out)
-    }
-}
-
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, Vec<bool>, H> for ArchivedPackedBoolSlice {
-    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<Vec<bool>, ZebinError> {
-        self.restore()
-    }
-}
-
-impl<const BITS: u8> Restore<Vec<u8>> for ArchivedPackedU8Slice<BITS> {
-    fn restore(&self) -> Result<Vec<u8>, ZebinError> {
-        let len = self.len();
-        let mut out = Vec::with_capacity(len);
-        for i in 0..len {
-            out.push(self.get(i).unwrap());
-        }
-        Ok(out)
-    }
-}
-
-impl<'a, const BITS: u8, H: ArchiveHeader> RestoreFromView<'a, Vec<u8>, H>
-    for ArchivedPackedU8Slice<BITS>
-{
-    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<Vec<u8>, ZebinError> {
-        self.restore()
-    }
-}
-
-impl<T, const BITS: u8, U> Restore<Vec<U>> for PackedVec<T, BITS>
+impl<T, const BITS: u8, U> Restore<PackedVec<U, BITS>> for T
 where
-    T: Restore<U>,
-{
-    fn restore(&self) -> Result<Vec<U>, ZebinError> {
-        self.values.restore()
-    }
-}
-
-impl<'a, T, const BITS: u8, U, H: ArchiveHeader> RestoreFromView<'a, Vec<U>, H>
-    for PackedVec<T, BITS>
-where
-    T: RestoreFromView<'a, U, H>,
-{
-    fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Vec<U>, ZebinError> {
-        let mut out = Vec::with_capacity(self.values.len());
-        for item in &self.values {
-            out.push(item.restore_from_view(layout)?);
-        }
-        Ok(out)
-    }
-}
-
-impl<T, const BITS: u8, U> Restore<PackedVec<U, BITS>> for PackedVec<T, BITS>
-where
-    T: Restore<U>,
+    T: Restore<Vec<U>>,
 {
     fn restore(&self) -> Result<PackedVec<U, BITS>, ZebinError> {
-        Ok(PackedVec {
-            values: self.values.restore()?,
-        })
-    }
-}
-
-impl<'a, T, const BITS: u8, U, H: ArchiveHeader> RestoreFromView<'a, PackedVec<U, BITS>, H>
-    for PackedVec<T, BITS>
-where
-    T: RestoreFromView<'a, U, H>,
-{
-    fn restore_from_view(
-        &self,
-        layout: &ResolvedLayout<'a, H>,
-    ) -> Result<PackedVec<U, BITS>, ZebinError> {
-        let mut out = Vec::with_capacity(self.values.len());
-        for item in &self.values {
-            out.push(item.restore_from_view(layout)?);
-        }
-        Ok(PackedVec { values: out })
-    }
-}
-
-impl Restore<PackedVec<bool, 1>> for ArchivedPackedBoolSlice {
-    fn restore(&self) -> Result<PackedVec<bool, 1>, ZebinError> {
         Ok(PackedVec::new(self.restore()?))
-    }
-}
-
-impl<'a, H: ArchiveHeader> RestoreFromView<'a, PackedVec<bool, 1>, H> for ArchivedPackedBoolSlice {
-    fn restore_from_view(
-        &self,
-        layout: &ResolvedLayout<'a, H>,
-    ) -> Result<PackedVec<bool, 1>, ZebinError> {
-        Ok(PackedVec::new(self.restore_from_view(layout)?))
-    }
-}
-
-impl<const BITS: u8> Restore<PackedVec<u8, BITS>> for ArchivedPackedU8Slice<BITS> {
-    fn restore(&self) -> Result<PackedVec<u8, BITS>, ZebinError> {
-        Ok(PackedVec::new(self.restore()?))
-    }
-}
-
-impl<'a, const BITS: u8, H: ArchiveHeader> RestoreFromView<'a, PackedVec<u8, BITS>, H>
-    for ArchivedPackedU8Slice<BITS>
-{
-    fn restore_from_view(
-        &self,
-        layout: &ResolvedLayout<'a, H>,
-    ) -> Result<PackedVec<u8, BITS>, ZebinError> {
-        Ok(PackedVec::new(self.restore_from_view(layout)?))
     }
 }

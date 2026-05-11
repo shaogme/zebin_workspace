@@ -1,138 +1,67 @@
-use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
+use core::task::Poll;
 
 use crate::{
-    error::{AccessError, ArchiveError, ZebinError},
-    read::{Cursor, get_nested_layout},
-    traits::{
-        Access, Archive, ArchiveHeader, ByteSink, Layout, LayoutSink, Restore, RestoreFromView,
-        Serialize, SerializeState,
-    },
-    utils::byteops,
+    error::{AccessError, ZebinError},
+    traits::{Archive, ByteSink, Decode, Restore, Serialize, SerializeState},
     validation::context::ValidationContext,
 };
 
-/// Archived representation for `Result<T, E>`.
-#[repr(C)]
-pub struct ArchivedResult<T, E> {
-    tag: u8,
-    ok: MaybeUninit<T>,
-    err: MaybeUninit<E>,
+/// Decoded representation for `Result<T, E>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArchivedResult<T, E> {
+    Ok(T),
+    Err(E),
 }
 
 impl<T, E> ArchivedResult<T, E> {
     pub fn is_ok(&self) -> bool {
-        self.tag == 0
+        matches!(self, Self::Ok(_))
     }
 
     pub fn is_err(&self) -> bool {
-        self.tag == 1
+        matches!(self, Self::Err(_))
     }
 
-    /// Returns the archived success payload if this result is `Ok`.
-    ///
-    /// # Safety
-    /// The caller must ensure the archived result is valid.
-    pub unsafe fn as_ok(&self) -> Option<&T> {
-        match self.tag {
-            0 => Some(unsafe { self.ok.assume_init_ref() }),
-            1 => None,
-            _ => None,
+    pub fn as_ok(&self) -> Option<&T> {
+        match self {
+            Self::Ok(value) => Some(value),
+            Self::Err(_) => None,
         }
     }
 
-    /// Returns the archived error payload if this result is `Err`.
-    ///
-    /// # Safety
-    /// The caller must ensure the archived result is valid.
-    pub unsafe fn as_err(&self) -> Option<&E> {
-        match self.tag {
-            0 => None,
-            1 => Some(unsafe { self.err.assume_init_ref() }),
-            _ => None,
+    pub fn as_err(&self) -> Option<&E> {
+        match self {
+            Self::Ok(_) => None,
+            Self::Err(value) => Some(value),
         }
     }
 }
 
-impl<T, E> Layout for ArchivedResult<T, E>
+impl<'a, A, B> Decode<'a> for ArchivedResult<A, B>
 where
-    T: Layout,
-    E: Layout,
+    A: Decode<'a>,
+    B: Decode<'a>,
 {
-    const ALIGNMENT: NonZeroUsize = if T::ALIGNMENT.get() >= E::ALIGNMENT.get() {
-        T::ALIGNMENT
-    } else {
-        E::ALIGNMENT
-    };
+    type View = ArchivedResult<A::View, B::View>;
 
-    fn write_archived_bytes(archived: &Self, out: &mut [u8]) {
-        byteops::fill(out, 0);
-        out[0] = archived.tag;
-        if archived.tag == 0 {
-            let value_offset = crate::memoffset::offset_of!(ArchivedResult<T, E>, ok);
-            let value = unsafe { archived.ok.assume_init_ref() };
-            T::write_archived_bytes(
-                value,
-                &mut out[value_offset..value_offset + core::mem::size_of::<T>()],
-            );
-        } else if archived.tag == 1 {
-            let value_offset = crate::memoffset::offset_of!(ArchivedResult<T, E>, err);
-            let value = unsafe { archived.err.assume_init_ref() };
-            E::write_archived_bytes(
-                value,
-                &mut out[value_offset..value_offset + core::mem::size_of::<E>()],
-            );
-        }
-    }
-}
-
-impl<'a, T: 'a, E: 'a> Access<'a> for ArchivedResult<T, E>
-where
-    T: Layout + Access<'a>,
-    E: Layout + Access<'a>,
-{
-    type View = &'a Self;
-
-    unsafe fn access<H, C>(
-        cursor: &mut Cursor<'a>,
+    fn decode<C>(
+        cursor: &mut crate::read::Cursor<'a>,
         context: &mut C,
-    ) -> Result<(Self::View, usize), AccessError>
+    ) -> Result<Self::View, AccessError>
     where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
+        C: ValidationContext + ?Sized,
     {
-        let mut guard = context.guard()?;
         let pos = cursor.pos();
-        guard.check_alignment(pos, Self::ALIGNMENT)?;
-        guard.check_range(pos, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
-        match archived.tag {
+        match cursor.read_u8(context)? {
             0 => {
-                let value_pos = pos + crate::memoffset::offset_of!(ArchivedResult<T, E>, ok);
-                guard.check_alignment(value_pos, T::ALIGNMENT)?;
-                guard.check_range(value_pos, core::mem::size_of::<T>())?;
-                {
-                    let mut _path_guard = guard.push_variant("Ok");
-                    let mut value_cursor = cursor.with_pos(value_pos);
-                    unsafe {
-                        T::access::<H, _>(&mut value_cursor, &mut *_path_guard)?;
-                    }
-                }
-                Ok((archived, core::mem::size_of::<Self>()))
+                let mut guard = context.push_variant("Ok");
+                Ok(ArchivedResult::Ok(A::decode(cursor, &mut *guard)?))
             }
             1 => {
-                let value_pos = pos + crate::memoffset::offset_of!(ArchivedResult<T, E>, err);
-                guard.check_alignment(value_pos, E::ALIGNMENT)?;
-                guard.check_range(value_pos, core::mem::size_of::<E>())?;
-                {
-                    let mut _path_guard = guard.push_variant("Err");
-                    let mut value_cursor = cursor.with_pos(value_pos);
-                    unsafe {
-                        E::access::<H, _>(&mut value_cursor, &mut *_path_guard)?;
-                    }
-                }
-                Ok((archived, core::mem::size_of::<Self>()))
+                let mut guard = context.push_variant("Err");
+                Ok(ArchivedResult::Err(B::decode(cursor, &mut *guard)?))
             }
-            _ => Err(guard.validation_error("Invalid Result discriminant", pos)),
+            _ => Err(context.validation_error("Invalid Result discriminant", pos)),
         }
     }
 }
@@ -143,35 +72,9 @@ where
     E: Restore<V>,
 {
     fn restore(&self) -> Result<Result<U, V>, ZebinError> {
-        match self.tag {
-            0 => Ok(Ok(unsafe { self.as_ok().unwrap().restore()? })),
-            1 => Ok(Err(unsafe { self.as_err().unwrap().restore()? })),
-            _ => unreachable!("validated tag"),
-        }
-    }
-}
-
-impl<'a, T, E, U, V, H: ArchiveHeader> RestoreFromView<'a, Result<U, V>, H> for ArchivedResult<T, E>
-where
-    T: Restore<U> + for<'b> RestoreFromView<'b, U, H> + Layout,
-    E: Restore<V> + for<'b> RestoreFromView<'b, V, H> + Layout,
-{
-    fn restore_from_view(
-        &self,
-        layout: &crate::ResolvedLayout<'a, H>,
-    ) -> Result<Result<U, V>, ZebinError> {
-        match self.tag {
-            0 => {
-                let val = unsafe { self.as_ok().unwrap() };
-                let item_layout = get_nested_layout(layout, val)?;
-                Ok(Ok(val.restore_from_view(&item_layout)?))
-            }
-            1 => {
-                let err = unsafe { self.as_err().unwrap() };
-                let item_layout = get_nested_layout(layout, err)?;
-                Ok(Err(err.restore_from_view(&item_layout)?))
-            }
-            _ => unreachable!("validated tag"),
+        match self {
+            ArchivedResult::Ok(value) => Ok(Ok(value.restore()?)),
+            ArchivedResult::Err(value) => Ok(Err(value.restore()?)),
         }
     }
 }
@@ -183,30 +86,8 @@ where
 {
     fn restore(&self) -> Result<Result<U, V>, ZebinError> {
         match self {
-            Ok(v) => Ok(Ok(v.restore()?)),
-            Err(e) => Ok(Err(e.restore()?)),
-        }
-    }
-}
-
-impl<'a, T, E, U, V, H: ArchiveHeader> RestoreFromView<'a, Result<U, V>, H> for Result<&'a T, &'a E>
-where
-    T: RestoreFromView<'a, U, H> + Layout,
-    E: RestoreFromView<'a, V, H> + Layout,
-{
-    fn restore_from_view(
-        &self,
-        layout: &crate::ResolvedLayout<'a, H>,
-    ) -> Result<Result<U, V>, ZebinError> {
-        match *self {
-            Ok(val) => {
-                let item_layout = get_nested_layout(layout, val)?;
-                Ok(Ok(val.restore_from_view(&item_layout)?))
-            }
-            Err(err) => {
-                let item_layout = get_nested_layout(layout, err)?;
-                Ok(Err(err.restore_from_view(&item_layout)?))
-            }
+            Ok(value) => Ok(Ok(value.restore()?)),
+            Err(value) => Ok(Err(value.restore()?)),
         }
     }
 }
@@ -217,8 +98,14 @@ where
     T: Serialize + Archive + 'a,
     E: Serialize + Archive + 'a,
 {
-    Ok(<T as Serialize>::State<'a>),
-    Err(<E as Serialize>::State<'a>),
+    Ok {
+        prefix_cursor: usize,
+        state: <T as Serialize>::State<'a>,
+    },
+    Err {
+        prefix_cursor: usize,
+        state: <E as Serialize>::State<'a>,
+    },
 }
 
 impl<'a, T, E> ResultArchiveState<'a, T, E>
@@ -228,8 +115,14 @@ where
 {
     pub(crate) fn new(value: Result<&'a T, &'a E>) -> Result<Self, ZebinError> {
         match value {
-            Ok(inner) => Ok(Self::Ok(inner.begin_serialize()?)),
-            Err(inner) => Ok(Self::Err(inner.begin_serialize()?)),
+            Ok(inner) => Ok(Self::Ok {
+                prefix_cursor: 0,
+                state: inner.begin_serialize()?,
+            }),
+            Err(inner) => Ok(Self::Err {
+                prefix_cursor: 0,
+                state: inner.begin_serialize()?,
+            }),
         }
     }
 }
@@ -239,21 +132,34 @@ where
     T: Serialize + Archive + 'a,
     E: Serialize + Archive + 'a,
 {
-    type Resolver = Result<T::Resolver, E::Resolver>;
-
-    fn poll<R: ByteSink + LayoutSink<'a> + ?Sized>(
-        &mut self,
-        encoder: &mut R,
-    ) -> Result<Poll<Self::Resolver>, ZebinError> {
+    fn poll<R: ByteSink + ?Sized>(&mut self, encoder: &mut R) -> Result<Poll<()>, ZebinError> {
         match self {
-            ResultArchiveState::Ok(state) => match state.poll(encoder)? {
-                Poll::Pending => Ok(Poll::Pending),
-                Poll::Ready(resolver) => Ok(Poll::Ready(Ok(resolver))),
-            },
-            ResultArchiveState::Err(state) => match state.poll(encoder)? {
-                Poll::Pending => Ok(Poll::Pending),
-                Poll::Ready(resolver) => Ok(Poll::Ready(Err(resolver))),
-            },
+            ResultArchiveState::Ok {
+                prefix_cursor,
+                state,
+            } => {
+                if *prefix_cursor == 0 {
+                    let written = encoder.write(&[0])?;
+                    *prefix_cursor += written;
+                    if *prefix_cursor == 0 {
+                        return Ok(Poll::Pending);
+                    }
+                }
+                state.poll(encoder)
+            }
+            ResultArchiveState::Err {
+                prefix_cursor,
+                state,
+            } => {
+                if *prefix_cursor == 0 {
+                    let written = encoder.write(&[1])?;
+                    *prefix_cursor += written;
+                    if *prefix_cursor == 0 {
+                        return Ok(Poll::Pending);
+                    }
+                }
+                state.poll(encoder)
+            }
         }
     }
 }
@@ -264,37 +170,6 @@ where
     E: Archive,
 {
     type Archived = ArchivedResult<T::Archived, E::Archived>;
-    type Resolver = Result<T::Resolver, E::Resolver>;
-
-    fn resolve(
-        &self,
-        archive_pos: usize,
-        resolver: Self::Resolver,
-    ) -> Result<Self::Archived, ArchiveError> {
-        match (self, resolver) {
-            (Ok(value), Ok(resolver)) => {
-                let value_offset =
-                    crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, ok);
-                let archived = value.resolve(archive_pos + value_offset, resolver)?;
-                Ok(ArchivedResult {
-                    tag: 0,
-                    ok: MaybeUninit::new(archived),
-                    err: MaybeUninit::uninit(),
-                })
-            }
-            (Err(value), Err(resolver)) => {
-                let value_offset =
-                    crate::memoffset::offset_of!(ArchivedResult<T::Archived, E::Archived>, err);
-                let archived = value.resolve(archive_pos + value_offset, resolver)?;
-                Ok(ArchivedResult {
-                    tag: 1,
-                    ok: MaybeUninit::uninit(),
-                    err: MaybeUninit::new(archived),
-                })
-            }
-            _ => Err(ArchiveError::InvalidResolver { pos: archive_pos }),
-        }
-    }
 }
 
 impl<T, E> Serialize for Result<T, E>
