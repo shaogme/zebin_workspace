@@ -1,11 +1,11 @@
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    read::get_nested_layout,
+    error::{AccessError, ArchiveError, ZebinError},
+    read::{Cursor, get_nested_layout},
     traits::{
         Access, Archive, ArchiveHeader, ByteSink, Layout, LayoutSink, Restore, RestoreFromView,
-        Serialize, SerializeState, Validate,
+        Serialize, SerializeState,
     },
     utils::byteops,
     validation::context::ValidationContext,
@@ -85,70 +85,55 @@ where
     }
 }
 
-impl<T, E> Validate for ArchivedResult<T, E>
-where
-    T: Layout + Validate,
-    E: Layout + Validate,
-{
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let mut guard = context.guard()?;
-        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-        match archived.tag {
-            0 => {
-                let value_ptr = archived.ok.as_ptr();
-                guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
-                {
-                    let mut _path_guard = guard.push_variant("Ok");
-                    unsafe {
-                        T::validate::<H, _>(value_ptr, &mut *_path_guard)?;
-                    }
-                }
-                Ok(())
-            }
-            1 => {
-                let value_ptr = archived.err.as_ptr();
-                guard.check_alignment(value_ptr as *const u8, E::ALIGNMENT)?;
-                guard.check_range(value_ptr as *const u8, core::mem::size_of::<E>())?;
-                {
-                    let mut _path_guard = guard.push_variant("Err");
-                    unsafe {
-                        E::validate::<H, _>(value_ptr, &mut *_path_guard)?;
-                    }
-                }
-                Ok(())
-            }
-            _ => Err(guard.validation_error("Invalid Result discriminant", ptr as usize)),
-        }
-    }
-}
-
 impl<'a, T: 'a, E: 'a> Access<'a> for ArchivedResult<T, E>
 where
-    T: Layout + Validate,
-    E: Layout + Validate,
+    T: Layout + Access<'a>,
+    E: Layout + Access<'a>,
 {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let mut guard = context.guard()?;
+        let pos = cursor.pos();
+        guard.check_alignment(pos, Self::ALIGNMENT)?;
+        guard.check_range(pos, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+        match archived.tag {
+            0 => {
+                let value_pos = pos + crate::memoffset::offset_of!(ArchivedResult<T, E>, ok);
+                guard.check_alignment(value_pos, T::ALIGNMENT)?;
+                guard.check_range(value_pos, core::mem::size_of::<T>())?;
+                {
+                    let mut _path_guard = guard.push_variant("Ok");
+                    let mut value_cursor = cursor.with_pos(value_pos);
+                    unsafe {
+                        T::access::<H, _>(&mut value_cursor, &mut *_path_guard)?;
+                    }
+                }
+                Ok((archived, core::mem::size_of::<Self>()))
+            }
+            1 => {
+                let value_pos = pos + crate::memoffset::offset_of!(ArchivedResult<T, E>, err);
+                guard.check_alignment(value_pos, E::ALIGNMENT)?;
+                guard.check_range(value_pos, core::mem::size_of::<E>())?;
+                {
+                    let mut _path_guard = guard.push_variant("Err");
+                    let mut value_cursor = cursor.with_pos(value_pos);
+                    unsafe {
+                        E::access::<H, _>(&mut value_cursor, &mut *_path_guard)?;
+                    }
+                }
+                Ok((archived, core::mem::size_of::<Self>()))
+            }
+            _ => Err(guard.validation_error("Invalid Result discriminant", pos)),
         }
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 

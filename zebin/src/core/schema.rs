@@ -1,5 +1,5 @@
 use crate::{
-    error::ValidateError,
+    error::AccessError,
     utils::num::{read_fixed, u32_to_usize},
 };
 use core::num::NonZeroUsize;
@@ -56,10 +56,10 @@ impl<'a> LayoutDescriptor<'a> {
         schema_revision: SchemaRevision,
         encoding: ObjectEncoding,
         fields: &'a [LayoutField],
-    ) -> Result<Self, ValidateError> {
+    ) -> Result<Self, AccessError> {
         for pair in fields.windows(2) {
             if pair[0].field_id >= pair[1].field_id {
-                return Err(ValidateError::InvalidLayout { pos: 0 });
+                return Err(AccessError::InvalidLayout { pos: 0 });
             }
         }
         Ok(Self {
@@ -168,15 +168,15 @@ impl<'a> LayoutView<'a> {
         None
     }
 
-    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), ValidateError> {
+    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), AccessError> {
         let actual = self
             .field_offset(field_id)
-            .ok_or(ValidateError::MissingLayoutField {
+            .ok_or(AccessError::MissingLayoutField {
                 field_id,
                 pos: self.entry_pos,
             })?;
         if actual != expected {
-            return Err(ValidateError::LayoutOffsetMismatch {
+            return Err(AccessError::LayoutOffsetMismatch {
                 field_id,
                 expected,
                 actual,
@@ -239,7 +239,7 @@ pub struct LayoutDirectory<'a> {
 }
 
 impl<'a> LayoutDirectory<'a> {
-    pub fn new(bytes: &'a [u8], section_offset: NonZeroUsize) -> Result<Self, ValidateError> {
+    pub fn new(bytes: &'a [u8], section_offset: NonZeroUsize) -> Result<Self, AccessError> {
         let parsed = parse_layout_section(bytes, section_offset)?;
         Ok(Self {
             bytes,
@@ -260,7 +260,7 @@ impl<'a> LayoutDirectory<'a> {
         &self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<LayoutView<'a>, ValidateError> {
+    ) -> Result<LayoutView<'a>, AccessError> {
         self.parsed.lookup(stable_schema_key, schema_revision)
     }
 
@@ -282,7 +282,7 @@ impl<'a> ParsedLayoutSection<'a> {
         &self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<LayoutView<'a>, ValidateError> {
+    ) -> Result<LayoutView<'a>, AccessError> {
         let section_offset = self.section_offset;
         let offsets_pos = section_offset + 4;
 
@@ -295,14 +295,14 @@ impl<'a> ParsedLayoutSection<'a> {
                     offset_pos,
                     "Layout offset entry",
                 )?),
-                || ValidateError::ValidationError {
+                || AccessError::ValidationError {
                     message: "Layout offset entry overflow",
                     pos: offset_pos,
                 },
             )?;
 
             let entry_pos = section_offset.checked_add(layout_rel_offset).ok_or(
-                ValidateError::ValidationError {
+                AccessError::ValidationError {
                     message: "Layout entry overflow",
                     pos: offset_pos,
                 },
@@ -311,12 +311,12 @@ impl<'a> ParsedLayoutSection<'a> {
             let entry_header_end =
                 entry_pos
                     .checked_add(16)
-                    .ok_or(ValidateError::ValidationError {
+                    .ok_or(AccessError::ValidationError {
                         message: "Layout entry overflow",
                         pos: entry_pos,
                     })?;
             if entry_header_end > self.bytes.len() {
-                return Err(ValidateError::ValidationError {
+                return Err(AccessError::ValidationError {
                     message: "Layout entry out of bounds",
                     pos: entry_pos,
                 });
@@ -338,7 +338,7 @@ impl<'a> ParsedLayoutSection<'a> {
             }
         }
 
-        let (entry_pos, _) = found_entry.ok_or(ValidateError::MissingLayoutRevision {
+        let (entry_pos, _) = found_entry.ok_or(AccessError::MissingLayoutRevision {
             key: stable_schema_key,
             revision: schema_revision,
             pos: section_offset,
@@ -352,12 +352,12 @@ impl<'a> ParsedLayoutSection<'a> {
         let entry_end = entry_pos
             .checked_add(16)
             .and_then(|pos| pos.checked_add(field_count.checked_mul(8)?))
-            .ok_or(ValidateError::ValidationError {
+            .ok_or(AccessError::ValidationError {
                 message: "Layout field table overflow",
                 pos: entry_pos,
             })?;
         if entry_end > self.bytes.len() {
-            return Err(ValidateError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "Layout entry payload out of bounds",
                 pos: entry_pos,
             });
@@ -370,17 +370,17 @@ impl<'a> ParsedLayoutSection<'a> {
 fn parse_layout_section<'a>(
     bytes: &'a [u8],
     section_offset: NonZeroUsize,
-) -> Result<ParsedLayoutSection<'a>, ValidateError> {
+) -> Result<ParsedLayoutSection<'a>, AccessError> {
     let section_offset = section_offset.get();
 
     let header_end = section_offset
         .checked_add(4)
-        .ok_or(ValidateError::ValidationError {
+        .ok_or(AccessError::ValidationError {
             message: "Layout section header overflow",
             pos: section_offset,
         })?;
     if header_end > bytes.len() {
-        return Err(ValidateError::ValidationError {
+        return Err(AccessError::ValidationError {
             message: "Layout section header out of bounds",
             pos: section_offset,
         });
@@ -392,7 +392,7 @@ fn parse_layout_section<'a>(
             section_offset,
             "Layout section header",
         )?),
-        || ValidateError::ValidationError {
+        || AccessError::ValidationError {
             message: "Layout section layout count exceeds usize range",
             pos: section_offset,
         },
@@ -401,17 +401,17 @@ fn parse_layout_section<'a>(
     let offsets_pos = header_end;
     let offsets_end = offsets_pos
         .checked_add(num_layouts.checked_mul(4).ok_or({
-            ValidateError::ValidationError {
+            AccessError::ValidationError {
                 message: "Layout offset table overflow",
                 pos: section_offset,
             }
         })?)
-        .ok_or(ValidateError::ValidationError {
+        .ok_or(AccessError::ValidationError {
             message: "Layout offset table overflow",
             pos: section_offset,
         })?;
     if offsets_end > bytes.len() {
-        return Err(ValidateError::ValidationError {
+        return Err(AccessError::ValidationError {
             message: "Layout offset table out of bounds",
             pos: offsets_pos,
         });
@@ -422,27 +422,28 @@ fn parse_layout_section<'a>(
         let offset_pos = offsets_pos + layout_index * 4;
         let layout_rel_offset = u32_to_usize(
             u32::from_le_bytes(read_fixed::<4>(bytes, offset_pos, "Layout offset entry")?),
-            || ValidateError::ValidationError {
+            || AccessError::ValidationError {
                 message: "Layout offset entry overflow",
                 pos: offset_pos,
             },
         )?;
 
-        let entry_pos = section_offset.checked_add(layout_rel_offset).ok_or(
-            ValidateError::ValidationError {
-                message: "Layout entry overflow",
-                pos: offset_pos,
-            },
-        )?;
+        let entry_pos =
+            section_offset
+                .checked_add(layout_rel_offset)
+                .ok_or(AccessError::ValidationError {
+                    message: "Layout entry overflow",
+                    pos: offset_pos,
+                })?;
 
         let entry_header_end = entry_pos
             .checked_add(16)
-            .ok_or(ValidateError::ValidationError {
+            .ok_or(AccessError::ValidationError {
                 message: "Layout entry overflow",
                 pos: entry_pos,
             })?;
         if entry_header_end > bytes.len() {
-            return Err(ValidateError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "Layout entry out of bounds",
                 pos: entry_pos,
             });
@@ -456,12 +457,12 @@ fn parse_layout_section<'a>(
         let entry_end = entry_pos
             .checked_add(16)
             .and_then(|pos| pos.checked_add(field_count.checked_mul(8)?))
-            .ok_or(ValidateError::ValidationError {
+            .ok_or(AccessError::ValidationError {
                 message: "Layout field table overflow",
                 pos: entry_pos,
             })?;
         if entry_end > bytes.len() {
-            return Err(ValidateError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "Layout entry payload out of bounds",
                 pos: entry_pos,
             });

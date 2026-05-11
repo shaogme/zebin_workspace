@@ -2,11 +2,9 @@ use core::{num::NonZeroUsize, ops::Deref};
 
 use crate::{
     core::schema::ObjectEncoding,
-    error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    read::ResolvedLayout,
-    traits::{
-        Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView, Validate,
-    },
+    error::{AccessError, ArchiveError, ZebinError},
+    read::{Cursor, ResolvedLayout},
+    traits::{Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView},
     validation::context::ValidationContext,
 };
 
@@ -57,11 +55,11 @@ impl<T> Deref for VarIntView<T> {
 }
 
 pub trait VarIntNumber: Copy {
-    type Archived: Layout + Validate + Copy + Send + Sync + 'static;
+    type Archived: Layout + Copy + Send + Sync + 'static;
     const MAX_BYTES: usize;
 
     fn to_u64(self) -> u64;
-    fn try_from_u64(value: u64) -> Result<Self, ValidateError>;
+    fn try_from_u64(value: u64) -> Result<Self, AccessError>;
     fn from_archived(archived: Self::Archived) -> Self;
     fn to_archived(self) -> Self::Archived;
 }
@@ -112,33 +110,20 @@ macro_rules! impl_varint_number {
             }
         }
 
-        impl Validate for $archived {
-            unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-            where
-                H: ArchiveHeader,
-                C: ValidationContext<H> + ?Sized,
-            {
-                let mut guard = context.guard()?;
-                guard.check_range(ptr as *const u8, $max_bytes)?;
-                Ok(())
-            }
-        }
-
         impl<'a> Access<'a> for $archived {
             type View = &'a Self;
 
             unsafe fn access<H, C>(
-                ptr: *const u8,
+                cursor: &mut Cursor<'a>,
                 context: &mut C,
             ) -> Result<(Self::View, usize), AccessError>
             where
                 H: ArchiveHeader,
                 C: ValidationContext<H> + ?Sized,
             {
-                let typed_ptr = ptr as *const Self;
-                unsafe {
-                    <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
-                }
+                let pos = cursor.pos();
+                context.check_range(pos, $max_bytes)?;
+                let typed_ptr = unsafe { cursor.bytes().as_ptr().add(pos) as *const Self };
                 Ok((unsafe { &*typed_ptr }, $max_bytes))
             }
         }
@@ -185,8 +170,8 @@ macro_rules! impl_varint_number {
                 self as u64
             }
 
-            fn try_from_u64(value: u64) -> Result<Self, ValidateError> {
-                <$t>::try_from(value).map_err(|_| ValidateError::ValidationError {
+            fn try_from_u64(value: u64) -> Result<Self, AccessError> {
+                <$t>::try_from(value).map_err(|_| AccessError::ValidationError {
                     message: "VarInt value out of range",
                     pos: 0,
                 })
@@ -294,7 +279,11 @@ pub(crate) fn encode_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-fn decode_u64<T, H, C>(bytes: *const u8, context: &mut C) -> Result<(T, usize), ValidateError>
+fn decode_u64<T, H, C>(
+    bytes: &[u8],
+    start_pos: usize,
+    context: &mut C,
+) -> Result<(T, usize), AccessError>
 where
     T: VarIntNumber,
     H: ArchiveHeader,
@@ -306,11 +295,11 @@ where
     let mut consumed = 0usize;
     loop {
         if consumed >= T::MAX_BYTES {
-            return Err(guard.validation_error("VarInt exceeds maximum length", bytes as usize));
+            return Err(guard.validation_error("VarInt exceeds maximum length", start_pos));
         }
-        let byte_ptr = unsafe { bytes.add(consumed) };
-        guard.check_range(byte_ptr, 1)?;
-        let byte = unsafe { *byte_ptr };
+        let pos = start_pos + consumed;
+        guard.check_range(pos, 1)?;
+        let byte = bytes[pos];
         let payload = u64::from(byte & 0x7F);
         value |= payload << shift;
         consumed += 1;
@@ -320,7 +309,7 @@ where
         }
         shift += 7;
         if shift >= 64 {
-            return Err(guard.validation_error("VarInt shift overflow", bytes as usize));
+            return Err(guard.validation_error("VarInt shift overflow", start_pos));
         }
     }
 }
@@ -341,21 +330,6 @@ where
     }
 }
 
-impl<T> Validate for VarInt<T>
-where
-    T: VarIntNumber,
-{
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let (value, _) = decode_u64::<T, H, C>(ptr as *const u8, context)?;
-        let _ = value;
-        Ok(())
-    }
-}
-
 impl<'a, T: VarIntNumber + 'a> Access<'a> for VarInt<T>
 where
     T: VarIntNumber,
@@ -363,14 +337,14 @@ where
     type View = VarIntView<T>;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let (value, consumed) = decode_u64::<T, H, C>(ptr, context)?;
+        let (value, consumed) = decode_u64::<T, H, C>(cursor.bytes(), cursor.pos(), context)?;
         Ok((VarIntView { value }, consumed))
     }
 }

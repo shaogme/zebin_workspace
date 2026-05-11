@@ -84,7 +84,7 @@ impl core::error::Error for ParseHeaderError {}
 
 /// Errors that can occur during validation of archived data.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ValidateError {
+pub enum AccessError {
     Infallible,
     AlignmentError {
         expected: NonZeroUsize,
@@ -124,18 +124,18 @@ pub enum ValidateError {
     RecursionLimitExceeded,
 }
 
-impl ValidateError {
+impl AccessError {
     /// No-op for backward compatibility.
     pub fn at(self, _segment: ValidationPathSegment) -> Self {
         self
     }
 }
 
-impl core::fmt::Display for ValidateError {
+impl core::fmt::Display for AccessError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ValidateError::Infallible => write!(f, "infallible error"),
-            ValidateError::AlignmentError {
+            AccessError::Infallible => write!(f, "infallible error"),
+            AccessError::AlignmentError {
                 expected,
                 actual,
                 pos,
@@ -147,16 +147,16 @@ impl core::fmt::Display for ValidateError {
                     expected, actual
                 )
             }
-            ValidateError::InvalidLayout { pos, .. } => {
+            AccessError::InvalidLayout { pos, .. } => {
                 write!(f, "invalid layout structure at {pos}")
             }
-            ValidateError::ValidationError { message, pos, .. } => {
+            AccessError::ValidationError { message, pos, .. } => {
                 write!(f, "validation error at {pos}: {message}")
             }
-            ValidateError::MissingLayoutField { field_id, pos, .. } => {
+            AccessError::MissingLayoutField { field_id, pos, .. } => {
                 write!(f, "missing layout entry for field {field_id} at {pos}")
             }
-            ValidateError::LayoutOffsetMismatch {
+            AccessError::LayoutOffsetMismatch {
                 field_id,
                 expected,
                 actual,
@@ -168,7 +168,7 @@ impl core::fmt::Display for ValidateError {
                     "layout offset mismatch for field {field_id} at {pos}: expected {expected}, found {actual}"
                 )
             }
-            ValidateError::MissingLayoutRevision {
+            AccessError::MissingLayoutRevision {
                 key, revision, pos, ..
             } => {
                 write!(
@@ -176,26 +176,24 @@ impl core::fmt::Display for ValidateError {
                     "missing layout entry for stable schema key {key} revision {revision} at {pos}"
                 )
             }
-            ValidateError::FieldOverflow { field, pos, .. } => {
+            AccessError::FieldOverflow { field, pos, .. } => {
                 write!(f, "{field} overflow at {pos}")
             }
-            ValidateError::FieldOutOfBounds { field, pos, .. } => {
+            AccessError::FieldOutOfBounds { field, pos, .. } => {
                 write!(f, "{field} out of bounds at {pos}")
             }
-            ValidateError::RecursionLimitExceeded => write!(f, "recursion limit exceeded"),
+            AccessError::RecursionLimitExceeded => write!(f, "recursion limit exceeded"),
         }
     }
 }
 
-impl From<core::convert::Infallible> for ValidateError {
+impl From<core::convert::Infallible> for AccessError {
     fn from(error: core::convert::Infallible) -> Self {
         match error {}
     }
 }
 
-impl core::error::Error for ValidateError {}
-
-pub type AccessError = ValidateError;
+impl core::error::Error for AccessError {}
 
 /// Unified error type for the Zebin library.
 #[derive(Debug)]

@@ -4,7 +4,7 @@ pub mod plan;
 use core::marker::PhantomData;
 
 use crate::{
-    error::{ValidateError, ZebinError},
+    error::{AccessError, ZebinError},
     format::ArchiveHeader,
     traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Layout, Serialize, SerializeState,
@@ -126,7 +126,7 @@ where
                 },
                 EncodePhase::Layout { resolver, cursor } => {
                     if encoder.pos() != self.plan.layout_pos && *cursor == 0 {
-                        return Err(ValidateError::ValidationError {
+                        return Err(AccessError::ValidationError {
                             message: "Layout offset mismatch during emission",
                             pos: encoder.pos(),
                         }
@@ -134,7 +134,7 @@ where
                     }
 
                     if encoder.layouts().count() != self.plan.layouts.count() && *cursor == 0 {
-                        return Err(ValidateError::ValidationError {
+                        return Err(AccessError::ValidationError {
                             message: "Layout registry diverged during emission",
                             pos: encoder.pos(),
                         }
@@ -178,7 +178,7 @@ where
                         break;
                     }
                     if encoder.pos() != self.plan.root_pos {
-                        return Err(ValidateError::ValidationError {
+                        return Err(AccessError::ValidationError {
                             message: "Root offset mismatch during emission",
                             pos: encoder.pos(),
                         }
@@ -196,7 +196,7 @@ where
                 }
                 EncodePhase::Root { archived, cursor } => {
                     if encoder.pos() != self.plan.root_pos && *cursor == 0 {
-                        return Err(ValidateError::ValidationError {
+                        return Err(AccessError::ValidationError {
                             message: "Root offset mismatch during root write",
                             pos: encoder.pos(),
                         }

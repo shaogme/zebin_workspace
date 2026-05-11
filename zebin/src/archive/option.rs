@@ -1,11 +1,11 @@
 use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
-    error::{AccessError, ArchiveError, ValidateError, ZebinError},
+    error::{AccessError, ArchiveError, ZebinError},
     read::{ResolvedLayout, get_nested_layout},
     traits::{
         Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, OptRestorer,
-        OptRestorerOption, Restore, RestoreFromView, Serialize, SerializeState, Validate,
+        OptRestorerOption, Restore, RestoreFromView, Serialize, SerializeState,
     },
     utils::byteops,
     validation::context::ValidationContext,
@@ -60,57 +60,42 @@ where
     }
 }
 
-impl<T> Validate for ArchivedOption<T>
-where
-    T: Layout + Validate,
-{
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let mut guard = context.guard()?;
-        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-        match archived.tag {
-            0 => Ok(()),
-            1 => {
-                let value_ptr = archived.value.as_ptr();
-                guard.check_alignment(value_ptr as *const u8, T::ALIGNMENT)?;
-                guard.check_range(value_ptr as *const u8, core::mem::size_of::<T>())?;
-                {
-                    let mut _path_guard = guard.push_variant("Some");
-                    unsafe {
-                        T::validate::<H, _>(value_ptr, &mut *_path_guard)?;
-                    }
-                }
-                Ok(())
-            }
-            _ => Err(guard.validation_error("Invalid Option discriminant", ptr as usize)),
-        }
-    }
-}
-
 impl<'a, T: 'a> Access<'a> for ArchivedOption<T>
 where
-    T: Layout + Validate,
+    T: Layout + Access<'a>,
 {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut crate::read::Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let mut guard = context.guard()?;
+        let pos = cursor.pos();
+        guard.check_alignment(pos, Self::ALIGNMENT)?;
+        guard.check_range(pos, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+        match archived.tag {
+            0 => Ok((archived, core::mem::size_of::<Self>())),
+            1 => {
+                let value_pos = pos + crate::memoffset::offset_of!(ArchivedOption<T>, value);
+                guard.check_alignment(value_pos, T::ALIGNMENT)?;
+                guard.check_range(value_pos, core::mem::size_of::<T>())?;
+                {
+                    let mut _path_guard = guard.push_variant("Some");
+                    let mut value_cursor = cursor.with_pos(value_pos);
+                    unsafe {
+                        T::access::<H, _>(&mut value_cursor, &mut *_path_guard)?;
+                    }
+                }
+                Ok((archived, core::mem::size_of::<Self>()))
+            }
+            _ => Err(guard.validation_error("Invalid Option discriminant", pos)),
         }
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }
 

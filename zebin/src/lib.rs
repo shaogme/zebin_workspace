@@ -29,19 +29,19 @@ pub mod prelude {
     pub use crate::core::schema::{
         FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
     };
-    pub use crate::error::{AccessError, ArchiveError, ValidateError, ZebinError};
+    pub use crate::error::{AccessError, ArchiveError, ZebinError};
     pub use crate::format::ArchiveHeader;
     #[cfg(feature = "mmap")]
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
         Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
         LayoutSink, OptRestorer, OptRestorerFallback, OptRestorerOption, Restore, RestoreFromView,
-        SchemaAware, Serialize, SerializeState, Validate,
+        SchemaAware, Serialize, SerializeState,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::{
-        ResolvedLayout, Storage, Validator, View, ZebinReader, ZebinWriter, decode, encode_chunked,
-        reader, validate,
+        Cursor, ResolvedLayout, Storage, Validator, View, ZebinReader, ZebinWriter, decode,
+        encode_chunked, reader, validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
@@ -63,16 +63,16 @@ pub use crate::core::schema::{
     FieldEncoding, LayoutDescriptor, LayoutDirectory, LayoutField, LayoutView, ObjectEncoding,
     SchemaRevision, StableSchemaKey,
 };
-pub use crate::error::{AccessError, ArchiveError, ValidateError, ZebinError};
+pub use crate::error::{AccessError, ArchiveError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::io::storage::mmap::Mmap;
-pub use crate::read::{ResolvedLayout, View, ZebinReader, get_nested_layout};
+pub use crate::read::{Cursor, ResolvedLayout, View, ZebinReader, get_nested_layout};
 pub use crate::traits::{
     Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Layout,
     LayoutSink, OptRestorer, OptRestorerFallback, OptRestorerOption, Restore, RestoreFromView,
-    SchemaAware, Serialize, SerializeState, Validate,
+    SchemaAware, Serialize, SerializeState,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::validator::{ValidationPathSegment, ValidationPathStack, Validator};
@@ -87,7 +87,7 @@ use ::core::ops::Deref;
 pub fn reader<'a, T>(bytes: &'a [u8]) -> Result<ZebinReader<'a, T>, ZebinError>
 where
     T: Archive,
-    T::Archived: Layout + Validate + Access<'a>,
+    T::Archived: Layout + Access<'a>,
     <T::Archived as Access<'a>>::View: Deref,
 {
     ZebinReader::new(bytes)
@@ -97,7 +97,7 @@ where
 pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<T, ZebinError>
 where
     T: Archive,
-    T::Archived: Layout + Validate + Access<'a>,
+    T::Archived: Layout + Access<'a>,
     <T::Archived as Access<'a>>::View: Deref,
     View<'a, <T::Archived as Access<'a>>::View, ArchiveHeader>: Restore<T>,
 {
@@ -109,7 +109,7 @@ pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
 where
     T: Archive,
     T::Archived: 'a,
-    T::Archived: Layout + Validate + Access<'a>,
+    T::Archived: Layout + Access<'a>,
     <T::Archived as Access<'a>>::View: Deref,
 {
     ZebinReader::<T>::validate(bytes)

@@ -4,12 +4,13 @@ use core::{marker::PhantomData, num::NonZeroUsize, task::Poll};
 use crate::{
     archive::varint::{VarIntNumber, encode_u64, encoded_len_u64},
     core::rel_ptr::RelPtr,
-    error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    read::ResolvedLayout,
+    error::{AccessError, ArchiveError, ZebinError},
+    read::{Cursor, ResolvedLayout},
     traits::{
         Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
-        RestoreFromView, Serialize, SerializeState, Validate,
+        RestoreFromView, Serialize, SerializeState,
     },
+    utils::num::usize_add_signed,
     validation::context::ValidationContext,
 };
 
@@ -138,64 +139,49 @@ impl<T: VarIntNumber> Layout for ArchivedVarIntVec<T> {
     }
 }
 
-impl<T: VarIntNumber> Validate for ArchivedVarIntVec<T> {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let mut guard = context.guard()?;
-        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-
-        let archived = unsafe { &*ptr };
-        if archived.len > 0 {
-            let data_ptr = archived.data_ptr.as_ref().ok_or_else(|| {
-                guard.validation_error(
-                    "Null data pointer in non-empty ArchivedVarIntVec",
-                    ptr as usize,
-                )
-            })?;
-            let offsets_ptr = archived.offsets_ptr.as_ref().ok_or_else(|| {
-                guard.validation_error(
-                    "Null offsets pointer in non-empty ArchivedVarIntVec",
-                    ptr as usize,
-                )
-            })?;
-
-            unsafe {
-                guard.check_range(
-                    offsets_ptr.as_ptr() as *const u8,
-                    (archived.len as usize + 1) * 4,
-                )?;
-
-                let offsets =
-                    core::slice::from_raw_parts(offsets_ptr.as_ptr(), archived.len as usize + 1);
-                let total_data_len = offsets[archived.len as usize] as usize;
-
-                guard.check_range(data_ptr.as_ptr(), total_data_len)?;
-            }
-        }
-        Ok(())
-    }
-}
-
 impl<'a, T: VarIntNumber + 'a> Access<'a> for ArchivedVarIntVec<T> {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let mut guard = context.guard()?;
+        let pos = cursor.pos();
+        guard.check_alignment(pos, Self::ALIGNMENT)?;
+        guard.check_range(pos, core::mem::size_of::<Self>())?;
+
+        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+        if archived.len > 0 {
+            let data_rel = archived.data_ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null data pointer in non-empty ArchivedVarIntVec", pos)
+            })?;
+            let offsets_rel = archived.offsets_ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null offsets pointer in non-empty ArchivedVarIntVec", pos)
+            })?;
+
+            let data_pos = usize_add_signed(pos, data_rel.offset(), || {
+                guard.validation_error("ArchivedVarIntVec data pointer overflow", pos)
+            })?;
+            let offsets_pos = usize_add_signed(pos + 8, offsets_rel.offset(), || {
+                guard.validation_error("ArchivedVarIntVec offsets pointer overflow", pos)
+            })?;
+
+            let offsets_len = (archived.len as usize + 1) * core::mem::size_of::<u32>();
+            guard.check_range(offsets_pos, offsets_len)?;
+            let offsets = &cursor.bytes()[offsets_pos..offsets_pos + offsets_len];
+            let total_data_len = u32::from_le_bytes(
+                offsets[offsets_len - 4..offsets_len]
+                    .try_into()
+                    .expect("offset table length validated"),
+            ) as usize;
+            guard.check_range(data_pos, total_data_len)?;
         }
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+        Ok((archived, core::mem::size_of::<Self>()))
     }
 }
 

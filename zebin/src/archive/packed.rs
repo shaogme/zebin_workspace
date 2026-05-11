@@ -2,13 +2,12 @@ use core::num::NonZeroUsize;
 
 use crate::{
     core::rel_ptr::RelPtr,
-    error::{AccessError, ArchiveError, ValidateError},
-    traits::{
-        Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView, Validate,
-    },
+    error::{AccessError, ArchiveError},
+    read::Cursor,
+    traits::{Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView},
     utils::{
         byteops,
-        num::{u32_to_usize, usize_to_u32},
+        num::{u32_to_usize, usize_add_signed, usize_to_u32},
     },
     validation::context::ValidationContext,
 };
@@ -19,11 +18,11 @@ use alloc::vec::Vec;
 pub(crate) fn packed_byte_len(
     value_count: usize,
     bits_per_value: usize,
-) -> Result<usize, ValidateError> {
+) -> Result<usize, AccessError> {
     let total_bits =
         value_count
             .checked_mul(bits_per_value)
-            .ok_or(ValidateError::ValidationError {
+            .ok_or(AccessError::ValidationError {
                 message: "Packed length calculation overflow",
                 pos: 0,
             })?;
@@ -50,7 +49,7 @@ pub struct ArchivedPackedBoolSlice {
 
 impl ArchivedPackedBoolSlice {
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || ValidateError::ValidationError {
+        u32_to_usize(self.len, || AccessError::ValidationError {
             message: "Archived packed bool length exceeds usize range",
             pos: self as *const _ as usize,
         })
@@ -106,54 +105,39 @@ impl Layout for ArchivedPackedBoolSlice {
     }
 }
 
-impl Validate for ArchivedPackedBoolSlice {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let mut guard = context.guard()?;
-        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-        let len = u32_to_usize(archived.len, || {
-            guard.validation_error(
-                "Archived packed bool length exceeds usize range",
-                ptr as usize,
-            )
-        })?;
-
-        if len > 0 {
-            let data_ptr = archived.ptr.as_ref().ok_or_else(|| {
-                guard.validation_error("Null pointer in non-empty packed bool slice", ptr as usize)
-            })?;
-            let data_ptr = unsafe { data_ptr.as_ptr() };
-            let packed_len = packed_byte_len(len, 1).map_err(|_| {
-                guard.validation_error("Packed bool byte length overflow", ptr as usize)
-            })?;
-            guard.check_range(data_ptr, packed_len)?;
-        }
-
-        Ok(())
-    }
-}
-
 impl<'a> Access<'a> for ArchivedPackedBoolSlice {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let mut guard = context.guard()?;
+        let pos = cursor.pos();
+        guard.check_alignment(pos, Self::ALIGNMENT)?;
+        guard.check_range(pos, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+        let len = u32_to_usize(archived.len, || {
+            guard.validation_error("Archived packed bool length exceeds usize range", pos)
+        })?;
+
+        if len > 0 {
+            let rel = archived.ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null pointer in non-empty packed bool slice", pos)
+            })?;
+            let ptr_pos = pos + crate::memoffset::offset_of!(ArchivedPackedBoolSlice, ptr);
+            let data_pos = usize_add_signed(ptr_pos, rel.offset(), || {
+                guard.validation_error("Packed bool pointer overflow", pos)
+            })?;
+            let packed_len = packed_byte_len(len, 1)
+                .map_err(|_| guard.validation_error("Packed bool byte length overflow", pos))?;
+            guard.check_range(data_pos, packed_len)?;
         }
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+        Ok((archived, core::mem::size_of::<Self>()))
     }
 }
 
@@ -166,7 +150,7 @@ pub struct ArchivedPackedU8Slice<const BITS: u8> {
 
 impl<const BITS: u8> ArchivedPackedU8Slice<BITS> {
     pub fn len(&self) -> usize {
-        u32_to_usize(self.len, || ValidateError::ValidationError {
+        u32_to_usize(self.len, || AccessError::ValidationError {
             message: "Archived packed integer length exceeds usize range",
             pos: self as *const _ as usize,
         })
@@ -221,73 +205,53 @@ impl<const BITS: u8> Layout for ArchivedPackedU8Slice<BITS> {
     }
 }
 
-impl<const BITS: u8> Validate for ArchivedPackedU8Slice<BITS> {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let mut guard = context.guard()?;
-        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-        let len = u32_to_usize(archived.len, || {
-            guard.validation_error(
-                "Archived packed integer length exceeds usize range",
-                ptr as usize,
-            )
-        })?;
-
-        if len > 0 {
-            let data_ptr = archived.ptr.as_ref().ok_or_else(|| {
-                guard.validation_error(
-                    "Null pointer in non-empty packed integer slice",
-                    ptr as usize,
-                )
-            })?;
-            let data_ptr = unsafe { data_ptr.as_ptr() };
-            let packed_len = packed_byte_len(len, usize::from(BITS)).map_err(|_| {
-                guard.validation_error("Packed integer byte length overflow", ptr as usize)
-            })?;
-            guard.check_range(data_ptr, packed_len)?;
-
-            let max = if BITS == 8 {
-                u8::MAX
-            } else {
-                (1u8 << BITS) - 1
-            };
-            let bytes = unsafe { core::slice::from_raw_parts(data_ptr, packed_len) };
-            for index in 0..len {
-                let bit_offset = index * usize::from(BITS);
-                let value = read_packed_bits(bytes, bit_offset, usize::from(BITS));
-                if value > max {
-                    return Err(
-                        guard.validation_error("Packed integer value out of range", ptr as usize)
-                    );
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
 impl<'a, const BITS: u8> Access<'a> for ArchivedPackedU8Slice<BITS> {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let mut guard = context.guard()?;
+        let pos = cursor.pos();
+        guard.check_alignment(pos, Self::ALIGNMENT)?;
+        guard.check_range(pos, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+        let len = u32_to_usize(archived.len, || {
+            guard.validation_error("Archived packed integer length exceeds usize range", pos)
+        })?;
+
+        if len > 0 {
+            let rel = archived.ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null pointer in non-empty packed integer slice", pos)
+            })?;
+            let ptr_pos = pos + crate::memoffset::offset_of!(ArchivedPackedU8Slice<BITS>, ptr);
+            let data_pos = usize_add_signed(ptr_pos, rel.offset(), || {
+                guard.validation_error("Packed integer pointer overflow", pos)
+            })?;
+            let packed_len = packed_byte_len(len, usize::from(BITS))
+                .map_err(|_| guard.validation_error("Packed integer byte length overflow", pos))?;
+            guard.check_range(data_pos, packed_len)?;
+
+            let max = if BITS == 8 {
+                u8::MAX
+            } else {
+                (1u8 << BITS) - 1
+            };
+            let bytes = &cursor.bytes()[data_pos..data_pos + packed_len];
+            for index in 0..len {
+                let bit_offset = index * usize::from(BITS);
+                let value = read_packed_bits(bytes, bit_offset, usize::from(BITS));
+                if value > max {
+                    return Err(guard.validation_error("Packed integer value out of range", pos));
+                }
+            }
         }
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+        Ok((archived, core::mem::size_of::<Self>()))
     }
 }
 

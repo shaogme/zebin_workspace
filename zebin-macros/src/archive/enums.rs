@@ -1,4 +1,4 @@
-use super::{field_validations, helper_record, record_layout_checks_logic};
+use super::helper_record;
 use crate::shared::{
     RecordStyle, VariantSpec, archived_name, field_user_ident, generate_field_restore_expr,
     has_schema, input_member, packed_wrapper_type_expr, payload_name, user_member,
@@ -14,10 +14,16 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
 
     let mut variant_defs = Vec::new();
     let mut variant_accessors = Vec::new();
-    let mut variant_validate_arms = Vec::new();
+    let mut variant_access_arms = Vec::new();
     let mut variant_write_arms = Vec::new();
     let mut variant_resolve_arms = Vec::new();
     let mut variant_payload_fields = Vec::new();
+    let has_schema_variants = variants.iter().any(|v| has_schema(&v.record));
+    let span_expr = if has_schema_variants {
+        quote! { zebin::memoffset::offset_of!(Self, payload) }
+    } else {
+        quote! { ::core::mem::size_of::<Self>() }
+    };
 
     for (idx, variant) in variants.iter().enumerate() {
         let variant_user_ident = variant.rename.as_ref().unwrap_or(variant.ident);
@@ -63,29 +69,18 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             });
         }
 
-        if has_schema(&variant.record) {
-            variant_validate_arms.push(quote! {
-                #idx_lit => {
-                    let variant_ptr = unsafe {
-                        (ptr as *const u8)
-                            .add(zebin::memoffset::offset_of!(Self, payload))
-                            as *const #helper_name
-                    };
-                    let mut guard = guard.push_variant(stringify!(#variant_ident));
-                    unsafe { <#helper_name as zebin::Validate>::validate::<H, _>(variant_ptr, &mut *guard)?; }
-                }
+        if variant.record.fields.is_empty() {
+            variant_access_arms.push(quote! {
+                #idx_lit => Ok((archived, #span_expr))
             });
         } else {
-            let layout_checks = record_layout_checks_logic(&variant.record, &helper_name);
-            let field_validations = field_validations(&variant.record);
-            variant_validate_arms.push(quote! {
+            variant_access_arms.push(quote! {
                 #idx_lit => {
-                    let ptr = unsafe { &archived.payload.#payload_field_ident as *const _ as *const #helper_name };
-                    {
-                        let mut guard = guard.push_variant(stringify!(#variant_ident));
-                        #layout_checks
-                        #(#field_validations)*
-                    }
+                    let payload_pos = pos + zebin::memoffset::offset_of!(Self, payload);
+                    let mut payload_cursor = cursor.with_pos(payload_pos);
+                    let mut guard = guard.push_variant(stringify!(#variant_ident));
+                    unsafe { <#helper_name as zebin::Access>::access::<H, _>(&mut payload_cursor, &mut *guard)?; }
+                    Ok((archived, #span_expr))
                 }
             });
         }
@@ -332,15 +327,6 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
                     const ALIGNMENT: ::core::num::NonZeroUsize = unsafe { ::core::num::NonZeroUsize::new_unchecked(::core::mem::align_of::<Self>()) };
                     fn write_archived_bytes(_archived: &Self, out: &mut [u8]) { zebin::utils::byteops::fill(out, 0); }
                 }
-                impl zebin::Validate for #archived_name {
-                    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), zebin::ValidateError>
-                    where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
-                        let mut guard = context.guard()?;
-                        guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
-                        guard.check_range(ptr as *const u8, ::core::mem::size_of::<Self>())?;
-                        Ok(())
-                    }
-                }
             },
             quote! {
                 impl zebin::Archive for #name {
@@ -359,23 +345,6 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
                         <u32 as zebin::Layout>::write_archived_bytes(&archived.tag, &mut out[0..::core::mem::size_of::<u32>()]);
                         let payload_offset = zebin::memoffset::offset_of!(#archived_name, payload);
                         match archived.tag { #(#variant_write_arms)* _ => {} }
-                    }
-                }
-                impl zebin::Validate for #archived_name {
-                    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), zebin::ValidateError>
-                    where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
-                        let mut guard = context.guard()?;
-                        guard.check_alignment(ptr as *const u8, <Self as zebin::Layout>::ALIGNMENT)?;
-                        guard.check_range(
-                            ptr as *const u8,
-                            zebin::memoffset::offset_of!(Self, payload),
-                        )?;
-                        let archived = unsafe { &*ptr };
-                        match archived.tag {
-                            #(#variant_validate_arms)*
-                            _ => return Err(zebin::ValidateError::ValidationError { message: "Invalid enum discriminant", pos: ptr as usize }),
-                        }
-                        Ok(())
                     }
                 }
             },
@@ -451,21 +420,20 @@ pub fn enum_impl(name: &Ident, variants: &[VariantSpec<'_>]) -> proc_macro2::Tok
             #(#view_impl_methods)*
         }
     };
-    let has_schema_variants = variants.iter().any(|v| has_schema(&v.record));
-    let span_expr = if has_schema_variants {
-        quote! { zebin::memoffset::offset_of!(Self, payload) }
-    } else {
-        quote! { ::core::mem::size_of::<Self>() }
-    };
-
     let root_decode = quote! {
         impl<'a> zebin::Access<'a> for #archived_name {
             type View = &'a Self;
-            unsafe fn access<H, C>(ptr: *const u8, context: &mut C) -> Result<(Self::View, usize), zebin::AccessError>
+            unsafe fn access<H, C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<(Self::View, usize), zebin::AccessError>
             where H: zebin::ArchiveHeaderTrait, C: zebin::ValidationContext<H> + ?Sized {
-                let typed_ptr = ptr as *const Self;
-                unsafe { <Self as zebin::Validate>::validate::<H, C>(typed_ptr, context)?; }
-                Ok((unsafe { &*typed_ptr }, #span_expr))
+                let mut guard = context.guard()?;
+                let pos = cursor.pos();
+                guard.check_alignment(pos, <Self as zebin::Layout>::ALIGNMENT)?;
+                guard.check_range(pos, zebin::memoffset::offset_of!(Self, payload))?;
+                let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+                match archived.tag {
+                    #(#variant_access_arms,)*
+                    _ => Err(guard.validation_error("Invalid enum discriminant", pos)),
+                }
             }
         }
     };

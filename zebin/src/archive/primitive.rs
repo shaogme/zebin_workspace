@@ -1,10 +1,10 @@
 use crate::{
     ZebinError,
-    error::{AccessError, ArchiveError, ValidateError},
+    error::{AccessError, ArchiveError},
+    read::Cursor,
     traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchiveHeader, ArchivedDefault,
-        ByteSink, Layout, LayoutSink, Restore, RestoreFromView, Serialize, SerializeState,
-        Validate,
+        Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
+        RestoreFromView, Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -68,30 +68,20 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl Validate for $t {
-                unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ValidateError>
-                where
-                    H: ArchiveHeaderTrait,
-                    C: ValidationContext<H> + ?Sized,
-                {
-                    Ok(())
-                }
-            }
-
             impl<'a> Access<'a> for $t {
                 type View = &'a Self;
 
                 unsafe fn access<H, C>(
-                    ptr: *const u8,
+                    cursor: &mut Cursor<'a>,
                     context: &mut C,
                 ) -> Result<(Self::View, usize), AccessError>
                 where
                     H: ArchiveHeader,
                     C: ValidationContext<H> + ?Sized,
                 {
-                    context.check_range(ptr, core::mem::size_of::<Self>())?;
-                    let typed_ptr = ptr as *const Self;
-                    unsafe { <$t as Validate>::validate::<H, C>(typed_ptr, context)?; }
+                    let pos = cursor.pos();
+                    context.check_range(pos, core::mem::size_of::<Self>())?;
+                    let typed_ptr = unsafe { cursor.bytes().as_ptr().add(pos) as *const Self };
                     Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
                 }
             }
@@ -149,20 +139,6 @@ impl Layout for bool {
     }
 }
 
-impl Validate for bool {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let val = unsafe { *(ptr as *const u8) };
-        if val > 1 {
-            return Err(context.validation_error("Invalid bool value", ptr as usize));
-        }
-        Ok(())
-    }
-}
-
 impl ArchivedDefault for bool {
     fn archived_default() -> &'static Self {
         &false
@@ -173,18 +149,20 @@ impl<'a> Access<'a> for bool {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        context.check_range(ptr, core::mem::size_of::<Self>())?;
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let pos = cursor.pos();
+        context.check_range(pos, core::mem::size_of::<Self>())?;
+        let val = cursor.bytes().get(pos).copied().unwrap_or_default();
+        if val > 1 {
+            return Err(context.validation_error("Invalid bool value", pos));
         }
+        let typed_ptr = unsafe { cursor.bytes().as_ptr().add(pos) as *const Self };
         Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
     }
 }

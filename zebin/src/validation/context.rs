@@ -1,6 +1,6 @@
 use crate::{
     core::schema::{SchemaRevision, StableSchemaKey},
-    error::ValidateError,
+    error::AccessError,
     format::ArchiveHeader,
     read::ResolvedLayout,
     traits::ArchiveHeader as ArchiveHeaderTrait,
@@ -13,7 +13,7 @@ pub trait ValidationContext<H = ArchiveHeader>
 where
     H: ArchiveHeaderTrait,
 {
-    fn push_depth(&mut self) -> Result<(), ValidateError>;
+    fn push_depth(&mut self) -> Result<(), AccessError>;
 
     fn pop_depth(&mut self);
 
@@ -23,7 +23,7 @@ where
 
     fn record_error_path(&mut self);
 
-    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self, H>, ValidateError> {
+    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self, H>, AccessError> {
         ArchivedDepthGuard::new(self)
     }
 
@@ -39,24 +39,20 @@ where
         PathGuard::new(self, ValidationPathSegment::Variant(name))
     }
 
-    fn check_range(&mut self, ptr: *const u8, size: usize) -> Result<(), ValidateError>;
+    fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError>;
 
-    fn check_alignment(
-        &mut self,
-        ptr: *const u8,
-        alignment: NonZeroUsize,
-    ) -> Result<(), ValidateError>;
+    fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), AccessError>;
 
-    fn validation_error(&mut self, message: &'static str, pos: usize) -> ValidateError {
+    fn validation_error(&mut self, message: &'static str, pos: usize) -> AccessError {
         self.record_error_path();
-        ValidateError::ValidationError { message, pos }
+        AccessError::ValidationError { message, pos }
     }
 
     fn resolved_layout(
         &mut self,
         stable_schema_key: StableSchemaKey,
         schema_revision: SchemaRevision,
-    ) -> Result<ResolvedLayout<'_, H>, ValidateError>;
+    ) -> Result<ResolvedLayout<'_, H>, AccessError>;
 }
 
 /// RAII guard that restores validation depth when dropped.
@@ -73,7 +69,7 @@ where
     C: ValidationContext<H> + ?Sized,
     H: ArchiveHeaderTrait,
 {
-    pub fn new(context: &'a mut C) -> Result<Self, ValidateError> {
+    pub fn new(context: &'a mut C) -> Result<Self, AccessError> {
         context.push_depth()?;
         Ok(Self {
             context,
@@ -81,16 +77,16 @@ where
         })
     }
 
-    pub fn check_range(&mut self, ptr: *const u8, size: usize) -> Result<(), ValidateError> {
-        self.context.check_range(ptr, size)
+    pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
+        self.context.check_range(pos, size)
     }
 
     pub fn check_alignment(
         &mut self,
-        ptr: *const u8,
+        pos: usize,
         alignment: NonZeroUsize,
-    ) -> Result<(), ValidateError> {
-        self.context.check_alignment(ptr, alignment)
+    ) -> Result<(), AccessError> {
+        self.context.check_alignment(pos, alignment)
     }
 }
 

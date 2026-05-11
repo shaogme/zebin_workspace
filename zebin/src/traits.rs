@@ -1,7 +1,8 @@
 use core::num::NonZeroUsize;
 
 use crate::core::schema::ObjectEncoding;
-use crate::error::{AccessError, ArchiveError, ParseHeaderError, ValidateError};
+use crate::error::{AccessError, ArchiveError, ParseHeaderError};
+use crate::read::Cursor;
 use crate::validation::context::ValidationContext;
 use crate::{LayoutField, ResolvedLayout, SchemaRevision, StableSchemaKey, ZebinError};
 use core::num::NonZeroU32;
@@ -58,30 +59,18 @@ pub trait ArchiveHeader: Layout + Clone + Copy {
     fn root_offset(&self) -> NonZeroU32;
 }
 
-/// Archived-side validation contract.
-pub trait Validate {
-    /// Validate an archived value in-place.
-    ///
-    /// # Safety
-    /// The pointer must point to a valid memory location that can be read.
-    unsafe fn validate<H, C>(_ptr: *const Self, _context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized;
-}
-
 /// Archived-side decode contract for borrowing a validated view from bytes.
 pub trait Access<'a>: Sized {
     type View: 'a;
 
-    /// Decode a borrowed view from a validated archived pointer.
+    /// Decode a borrowed view from a cursor.
     ///
     /// The returned span is the number of bytes consumed by this archived value.
     ///
     /// # Safety
-    /// `ptr` must point to the first byte of a readable archived value at `context`'s current archive.
+    /// `cursor` must point to the first byte of a readable archived value at `context`'s current archive.
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
@@ -92,7 +81,7 @@ pub trait Access<'a>: Sized {
 /// Object model layer: type-level archive/serialize/validate contracts.
 pub trait Archive {
     /// The archived version of this type.
-    type Archived: Layout + Validate;
+    type Archived: Layout;
     /// The resolver used to construct the archived version.
     type Resolver;
 
@@ -201,55 +190,42 @@ impl<T: Layout, const N: usize> Layout for [T; N] {
     }
 }
 
-impl<T: Layout + Validate, const N: usize> Validate for [T; N] {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let mut guard = context.guard()?;
-        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let data_ptr = ptr as *const T;
-        let elem_size = core::mem::size_of::<T>();
-
-        for index in 0..N {
-            let element_ptr = if elem_size == 0 {
-                data_ptr
-            } else {
-                unsafe { data_ptr.add(index) }
-            };
-            {
-                let mut _path_guard = guard.push_index(index);
-                unsafe {
-                    T::validate::<H, _>(element_ptr, &mut *_path_guard)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
 impl<'a, T, const N: usize> Access<'a> for [T; N]
 where
-    T: Layout + Validate + 'a,
+    T: Layout + Access<'a> + 'a,
 {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let mut guard = context.guard()?;
+        let start = cursor.pos();
+        guard.check_alignment(start, Self::ALIGNMENT)?;
+        guard.check_range(start, core::mem::size_of::<Self>())?;
+        let data_ptr = unsafe { cursor.bytes().as_ptr().add(start) as *const T };
+        let elem_size = core::mem::size_of::<T>();
+
+        for index in 0..N {
+            let element_pos = start + index * elem_size;
+            let mut element_cursor = cursor.with_pos(element_pos);
+            {
+                let mut _path_guard = guard.push_index(index);
+                unsafe {
+                    T::access::<H, _>(&mut element_cursor, &mut *_path_guard)?;
+                }
+            }
         }
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+
+        Ok((
+            unsafe { &*(data_ptr as *const Self) },
+            core::mem::size_of::<Self>(),
+        ))
     }
 }
 

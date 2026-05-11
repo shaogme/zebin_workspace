@@ -1,5 +1,5 @@
 use crate::{
-    error::{ValidateError, ZebinError},
+    error::{AccessError, ZebinError},
     format::ArchiveHeader,
     traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Layout, Serialize, SerializeState,
@@ -42,11 +42,11 @@ where
         .ok_or(ZebinError::ArithmeticOverflow { pos: layout_end })?;
     let root_offset = usize_to_nonzero_u32(
         root_pos,
-        || ValidateError::ValidationError {
+        || AccessError::ValidationError {
             message: "Root offset exceeds u32 range",
             pos: root_pos,
         },
-        || ValidateError::ValidationError {
+        || AccessError::ValidationError {
             message: "Root offset cannot be zero",
             pos: root_pos,
         },
@@ -60,11 +60,11 @@ where
 
     let layout_offset = usize_to_nonzero_u32(
         layout_pos,
-        || ValidateError::ValidationError {
+        || AccessError::ValidationError {
             message: "Layout section offset exceeds u32 range",
             pos: layout_pos,
         },
-        || ValidateError::ValidationError {
+        || AccessError::ValidationError {
             message: "Layout section offset cannot be zero",
             pos: layout_pos,
         },

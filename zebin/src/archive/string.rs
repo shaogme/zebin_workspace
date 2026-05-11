@@ -4,15 +4,15 @@ use alloc::string::String;
 
 use crate::{
     core::rel_ptr::RelPtr,
-    error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    read::ResolvedLayout,
+    error::{AccessError, ArchiveError, ZebinError},
+    read::{Cursor, ResolvedLayout},
     traits::{
         Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, Restore,
-        RestoreFromView, Serialize, SerializeState, Validate,
+        RestoreFromView, Serialize, SerializeState,
     },
     utils::{
         byteops,
-        num::{u32_to_usize, usize_to_u32},
+        num::{u32_to_usize, usize_add_signed, usize_to_u32},
     },
     validation::context::ValidationContext,
 };
@@ -33,7 +33,7 @@ impl ArchivedString {
         if self.len == 0 {
             return "";
         }
-        let len = u32_to_usize(self.len, || ValidateError::ValidationError {
+        let len = u32_to_usize(self.len, || AccessError::ValidationError {
             message: "ArchivedString length exceeds usize range",
             pos: self as *const _ as usize,
         })
@@ -59,52 +59,41 @@ impl Layout for ArchivedString {
     }
 }
 
-impl Validate for ArchivedString {
-    unsafe fn validate<H, C>(ptr: *const Self, context: &mut C) -> Result<(), ValidateError>
-    where
-        H: ArchiveHeader,
-        C: ValidationContext<H> + ?Sized,
-    {
-        let mut guard = context.guard()?;
-        guard.check_alignment(ptr as *const u8, Self::ALIGNMENT)?;
-        guard.check_range(ptr as *const u8, core::mem::size_of::<Self>())?;
-        let archived = unsafe { &*ptr };
-
-        let len = u32_to_usize(archived.len, || {
-            guard.validation_error("ArchivedString length exceeds usize range", ptr as usize)
-        })?;
-        if len > 0 {
-            let data_ptr = archived.ptr.as_ref().ok_or_else(|| {
-                guard.validation_error("Null pointer in non-empty ArchivedString", ptr as usize)
-            })?;
-            let data_ptr = unsafe { data_ptr.as_ptr() };
-            guard.check_range(data_ptr, len)?;
-
-            let bytes = unsafe { core::slice::from_raw_parts(data_ptr, len) };
-            str::from_utf8(bytes)
-                .map_err(|_| guard.validation_error("Invalid UTF-8 sequence", data_ptr as usize))?;
-        }
-
-        Ok(())
-    }
-}
-
 impl<'a> Access<'a> for ArchivedString {
     type View = &'a Self;
 
     unsafe fn access<H, C>(
-        ptr: *const u8,
+        cursor: &mut Cursor<'a>,
         context: &mut C,
     ) -> Result<(Self::View, usize), AccessError>
     where
         H: ArchiveHeader,
         C: ValidationContext<H> + ?Sized,
     {
-        let typed_ptr = ptr as *const Self;
-        unsafe {
-            <Self as Validate>::validate::<H, C>(typed_ptr, context)?;
+        let mut guard = context.guard()?;
+        let pos = cursor.pos();
+        guard.check_alignment(pos, Self::ALIGNMENT)?;
+        guard.check_range(pos, core::mem::size_of::<Self>())?;
+        let archived = unsafe { &*(cursor.bytes().as_ptr().add(pos) as *const Self) };
+
+        let len = u32_to_usize(archived.len, || {
+            guard.validation_error("ArchivedString length exceeds usize range", pos)
+        })?;
+        if len > 0 {
+            let rel = archived.ptr.as_ref().ok_or_else(|| {
+                guard.validation_error("Null pointer in non-empty ArchivedString", pos)
+            })?;
+            let ptr_pos = pos + crate::memoffset::offset_of!(ArchivedString, ptr);
+            let data_pos = usize_add_signed(ptr_pos, rel.offset(), || {
+                guard.validation_error("ArchivedString pointer overflow", pos)
+            })?;
+            guard.check_range(data_pos, len)?;
+
+            let bytes = &cursor.bytes()[data_pos..data_pos + len];
+            str::from_utf8(bytes)
+                .map_err(|_| guard.validation_error("Invalid UTF-8 sequence", data_pos))?;
         }
-        Ok((unsafe { &*typed_ptr }, core::mem::size_of::<Self>()))
+        Ok((archived, core::mem::size_of::<Self>()))
     }
 }
 

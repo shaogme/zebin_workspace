@@ -1,38 +1,62 @@
 use crate::{
     core::schema::{LayoutDirectory, LayoutView, ObjectEncoding},
-    error::{ValidateError, ZebinError},
+    error::{AccessError, ZebinError},
     format::ArchiveHeader,
-    traits::{
-        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Restore, SchemaAware,
-        Validate,
-    },
+    traits::{Access, Archive, ArchiveHeader as ArchiveHeaderTrait, Layout, Restore, SchemaAware},
     utils::num::{u32_to_nonzero_usize, u32_to_usize},
     validation::validator::Validator,
 };
-use core::num::NonZeroUsize;
 use core::ops::Deref;
 
-fn validate_new_layout_header<H: ArchiveHeaderTrait>(header: &H) -> Result<(), ValidateError> {
+/// Borrowed cursor into an archive byte slice.
+#[derive(Clone, Copy)]
+pub struct Cursor<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    pub fn new(bytes: &'a [u8], pos: usize) -> Self {
+        Self { bytes, pos }
+    }
+
+    pub fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
+    pub fn with_pos(&self, pos: usize) -> Self {
+        Self {
+            bytes: self.bytes,
+            pos,
+        }
+    }
+}
+
+fn validate_new_layout_header<H: ArchiveHeaderTrait>(header: &H) -> Result<(), AccessError> {
     let layout_pos = u32_to_usize(header.layout_offset().get(), || {
-        ValidateError::ValidationError {
+        AccessError::ValidationError {
             message: "Layout offset exceeds usize range",
             pos: H::LAYOUT_OFFSET_POS,
         }
     })?;
     let root_pos = u32_to_usize(header.root_offset().get(), || {
-        ValidateError::ValidationError {
+        AccessError::ValidationError {
             message: "Root offset exceeds usize range",
             pos: H::ROOT_OFFSET_POS,
         }
     })?;
     if layout_pos < H::SIZE {
-        return Err(ValidateError::ValidationError {
+        return Err(AccessError::ValidationError {
             message: "Layout overlaps archive header",
             pos: layout_pos,
         });
     }
     if layout_pos >= root_pos {
-        return Err(ValidateError::ValidationError {
+        return Err(AccessError::ValidationError {
             message: "Layout must precede root",
             pos: layout_pos,
         });
@@ -86,37 +110,26 @@ where
     /// Create a reader for the archived root object.
     pub fn new(bytes: &'a [u8]) -> Result<Self, ZebinError>
     where
-        T::Archived: Layout + Validate,
+        T::Archived: Layout,
     {
         let header = H::parse(bytes)?;
         validate_new_layout_header(&header)?;
         let root_pos = u32_to_usize(header.root_offset().get(), || {
-            ValidateError::ValidationError {
+            AccessError::ValidationError {
                 message: "Root offset exceeds usize range",
                 pos: H::ROOT_OFFSET_POS,
             }
         })?;
 
-        if root_pos % <T::Archived as Layout>::ALIGNMENT.get() != 0 {
-            return Err(ValidateError::AlignmentError {
-                expected: <T::Archived as Layout>::ALIGNMENT,
-                actual: unsafe {
-                    NonZeroUsize::new_unchecked(root_pos % <T::Archived as Layout>::ALIGNMENT.get())
-                },
-                pos: root_pos,
-            }
-            .into());
-        }
-
         let layout_dir = LayoutDirectory::new(
             bytes,
             u32_to_nonzero_usize(
                 header.layout_offset().get(),
-                || ValidateError::ValidationError {
+                || AccessError::ValidationError {
                     message: "Layout offset exceeds usize range",
                     pos: H::LAYOUT_OFFSET_POS,
                 },
-                || ValidateError::ValidationError {
+                || AccessError::ValidationError {
                     message: "Layout offset cannot be zero",
                     pos: H::LAYOUT_OFFSET_POS,
                 },
@@ -124,24 +137,24 @@ where
         )?;
         let layout_end = layout_dir.section_end();
         if layout_end > root_pos {
-            return Err(ValidateError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "Layout section overlaps root",
                 pos: layout_end,
             }
             .into());
         }
         let mut validator = Validator::<'a, H>::with_layouts(bytes, header, layout_dir);
-        let root_ptr = unsafe { bytes.as_ptr().add(root_pos) };
+        let mut root_cursor = Cursor::new(bytes, root_pos);
         let (root_view, root_span) =
-            unsafe { <T::Archived as Access<'a>>::access(root_ptr, &mut validator)? };
+            unsafe { <T::Archived as Access<'a>>::access(&mut root_cursor, &mut validator)? };
         let root_end = root_pos
             .checked_add(root_span)
-            .ok_or(ValidateError::ValidationError {
+            .ok_or(AccessError::ValidationError {
                 message: "Root range overflow",
                 pos: root_pos,
             })?;
         if root_end > bytes.len() {
-            return Err(ValidateError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "Root out of bounds",
                 pos: root_pos,
             }
@@ -150,9 +163,8 @@ where
 
         // Automatically resolve root layout if it's schema-aware
         let layout = if <T::Archived as Layout>::ENCODING == ObjectEncoding::SchemaAware {
-            // Safety: Schema-aware objects MUST start with 4-byte key and 4-byte revision
-            let key = unsafe { *(root_ptr as *const u32) };
-            let rev = unsafe { *(root_ptr as *const u32).add(1) };
+            let key = u32::from_le_bytes(bytes[root_pos..root_pos + 4].try_into().unwrap());
+            let rev = u32::from_le_bytes(bytes[root_pos + 4..root_pos + 8].try_into().unwrap());
             ResolvedLayout::from_parts(bytes, header, Some(layout_dir.lookup(key, rev)?))
         } else {
             ResolvedLayout::context_only(bytes, header)
@@ -166,7 +178,7 @@ where
     /// Decode and validate the archived root object directly into the original type T.
     pub fn decode(bytes: &'a [u8]) -> Result<T, ZebinError>
     where
-        T::Archived: Layout + Validate,
+        T::Archived: Layout,
         View<'a, <T::Archived as Access<'a>>::View, H>: Restore<T>,
     {
         Self::new(bytes)?.restore()
@@ -175,7 +187,7 @@ where
     /// Validate an archive without exposing the archived view.
     pub fn validate(bytes: &'a [u8]) -> Result<(), ZebinError>
     where
-        T::Archived: Layout + Validate,
+        T::Archived: Layout,
     {
         Self::new(bytes).map(|_| ())
     }
@@ -226,25 +238,25 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
             bytes,
             u32_to_nonzero_usize(
                 header.layout_offset().get(),
-                || ValidateError::ValidationError {
+                || AccessError::ValidationError {
                     message: "Layout offset exceeds usize range",
                     pos: H::LAYOUT_OFFSET_POS,
                 },
-                || ValidateError::ValidationError {
+                || AccessError::ValidationError {
                     message: "Layout offset cannot be zero",
                     pos: H::LAYOUT_OFFSET_POS,
                 },
             )?,
         )?;
         let root_pos = u32_to_usize(header.root_offset().get(), || {
-            ValidateError::ValidationError {
+            AccessError::ValidationError {
                 message: "Root offset exceeds usize range",
                 pos: H::ROOT_OFFSET_POS,
             }
         })?;
         let layout_end = layout_dir.section_end();
         if layout_end > root_pos {
-            return Err(ValidateError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "Layout section overlaps root",
                 pos: layout_end,
             }
@@ -278,9 +290,9 @@ impl<'a, H: ArchiveHeaderTrait> ResolvedLayout<'a, H> {
         self.layout.and_then(|l| l.field_offset(field_id))
     }
 
-    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), ValidateError> {
+    pub fn check_field(&self, field_id: u16, expected: u32) -> Result<(), AccessError> {
         self.layout
-            .ok_or(ValidateError::ValidationError {
+            .ok_or(AccessError::ValidationError {
                 message: "Missing layout for field check",
                 pos: 0,
             })?
