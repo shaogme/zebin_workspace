@@ -1,10 +1,10 @@
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
-use crate::ResolvedLayout;
 use crate::{
     archive::slice::{ArchivedVec, SequenceSource, resolve_sequence_archive},
     error::ZebinError,
+    read::{ResolvedLayout, get_nested_layout},
     traits::{
         Archive, ArchiveHeader, ByteSink, Layout, LayoutSink, Restore, RestoreFromView, Serialize,
         SerializeState,
@@ -494,7 +494,7 @@ where
         let slice = unsafe { self.as_slice() };
         let mut vec = Vec::with_capacity(slice.len());
         for item in slice {
-            let item_layout = crate::read::get_nested_layout(layout, item)?;
+            let item_layout = get_nested_layout(layout, item)?;
             vec.push(item.restore_from_view(&item_layout)?);
         }
         Ok(vec)
@@ -523,7 +523,7 @@ where
         let slice = unsafe { self.as_slice() };
         let mut queue = VecDeque::with_capacity(slice.len());
         for item in slice {
-            let item_layout = crate::read::get_nested_layout(layout, item)?;
+            let item_layout = get_nested_layout(layout, item)?;
             queue.push_back(item.restore_from_view(&item_layout)?);
         }
         Ok(queue)
@@ -550,7 +550,7 @@ where
     fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len());
         for item in self {
-            let item_layout = crate::read::get_nested_layout(layout, *item)?;
+            let item_layout = get_nested_layout(layout, *item)?;
             out.push(item.restore_from_view(&item_layout)?);
         }
         Ok(out)
@@ -577,7 +577,7 @@ where
     fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<VecDeque<U>, ZebinError> {
         let mut out = VecDeque::with_capacity(self.len());
         for item in self {
-            let item_layout = crate::read::get_nested_layout(layout, *item)?;
+            let item_layout = get_nested_layout(layout, *item)?;
             out.push_back(item.restore_from_view(&item_layout)?);
         }
         Ok(out)
@@ -604,7 +604,7 @@ where
     fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len());
         for item in *self {
-            let item_layout = crate::read::get_nested_layout(layout, item)?;
+            let item_layout = get_nested_layout(layout, item)?;
             out.push(item.restore_from_view(&item_layout)?);
         }
         Ok(out)

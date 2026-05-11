@@ -2,7 +2,7 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
-    read::ResolvedLayout,
+    read::{ResolvedLayout, get_nested_layout},
     traits::{
         Access, Archive, ArchiveHeader, ArchivedDefault, ByteSink, Layout, LayoutSink, OptRestorer,
         OptRestorerOption, Restore, RestoreFromView, Serialize, SerializeState, Validate,
@@ -143,7 +143,7 @@ where
     fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Option<U>, ZebinError> {
         match unsafe { self.as_ref() } {
             Some(value) => {
-                let item_layout = crate::read::get_nested_layout(layout, value)?;
+                let item_layout = get_nested_layout(layout, value)?;
                 Ok(Some(value.restore_from_view(&item_layout)?))
             }
             None => Ok(None),
@@ -170,7 +170,7 @@ where
     fn restore_from_view(&self, layout: &ResolvedLayout<'a, H>) -> Result<Option<U>, ZebinError> {
         match *self {
             Some(val) => {
-                let item_layout = crate::read::get_nested_layout(layout, val)?;
+                let item_layout = get_nested_layout(layout, val)?;
                 Ok(Some(val.restore_from_view(&item_layout)?))
             }
             None => Ok(None),
@@ -281,7 +281,7 @@ where
     fn restore(self) -> Result<Option<T>, ZebinError> {
         match self.data {
             Some(archived) => {
-                let nested = crate::read::get_nested_layout(self.layout, archived)?;
+                let nested = get_nested_layout(self.layout, archived)?;
                 archived.restore_from_view(&nested)
             }
             None => Ok(None),

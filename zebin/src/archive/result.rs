@@ -2,6 +2,7 @@ use core::{mem::MaybeUninit, num::NonZeroUsize, task::Poll};
 
 use crate::{
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
+    read::get_nested_layout,
     traits::{
         Access, Archive, ArchiveHeader, ByteSink, Layout, LayoutSink, Restore, RestoreFromView,
         Serialize, SerializeState, Validate,
@@ -177,12 +178,12 @@ where
         match self.tag {
             0 => {
                 let val = unsafe { self.as_ok().unwrap() };
-                let item_layout = crate::read::get_nested_layout(layout, val)?;
+                let item_layout = get_nested_layout(layout, val)?;
                 Ok(Ok(val.restore_from_view(&item_layout)?))
             }
             1 => {
                 let err = unsafe { self.as_err().unwrap() };
-                let item_layout = crate::read::get_nested_layout(layout, err)?;
+                let item_layout = get_nested_layout(layout, err)?;
                 Ok(Err(err.restore_from_view(&item_layout)?))
             }
             _ => unreachable!("validated tag"),
@@ -214,11 +215,11 @@ where
     ) -> Result<Result<U, V>, ZebinError> {
         match *self {
             Ok(val) => {
-                let item_layout = crate::read::get_nested_layout(layout, val)?;
+                let item_layout = get_nested_layout(layout, val)?;
                 Ok(Ok(val.restore_from_view(&item_layout)?))
             }
             Err(err) => {
-                let item_layout = crate::read::get_nested_layout(layout, err)?;
+                let item_layout = get_nested_layout(layout, err)?;
                 Ok(Err(err.restore_from_view(&item_layout)?))
             }
         }

@@ -3,6 +3,7 @@ use core::{num::NonZeroUsize, ops::Deref};
 use crate::{
     core::schema::ObjectEncoding,
     error::{AccessError, ArchiveError, ValidateError, ZebinError},
+    read::ResolvedLayout,
     traits::{
         Access, Archive, ArchiveHeader, ArchivedDefault, Layout, Restore, RestoreFromView, Validate,
     },
@@ -151,7 +152,7 @@ macro_rules! impl_varint_number {
         impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for $archived {
             fn restore_from_view(
                 &self,
-                _layout: &crate::read::ResolvedLayout<'a, H>,
+                _layout: &ResolvedLayout<'a, H>,
             ) -> Result<$t, crate::error::ZebinError> {
                 Ok(self.get())
             }
@@ -170,7 +171,7 @@ macro_rules! impl_varint_number {
         {
             fn restore_from_view(
                 &self,
-                _layout: &crate::read::ResolvedLayout<'a, H>,
+                _layout: &ResolvedLayout<'a, H>,
             ) -> Result<crate::archive::varint::VarInt<$t>, crate::error::ZebinError> {
                 self.restore()
             }
@@ -209,10 +210,7 @@ macro_rules! impl_varint_number {
         }
 
         impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for VarInt<$t> {
-            fn restore_from_view(
-                &self,
-                _layout: &crate::read::ResolvedLayout<'a, H>,
-            ) -> Result<$t, ZebinError> {
+            fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<$t, ZebinError> {
                 Ok(self.value)
             }
         }
@@ -226,7 +224,7 @@ macro_rules! impl_varint_number {
         impl<'a, H: ArchiveHeader> RestoreFromView<'a, VarInt<$t>, H> for VarInt<$t> {
             fn restore_from_view(
                 &self,
-                _layout: &crate::read::ResolvedLayout<'a, H>,
+                _layout: &ResolvedLayout<'a, H>,
             ) -> Result<VarInt<$t>, ZebinError> {
                 Ok(*self)
             }
@@ -239,10 +237,7 @@ macro_rules! impl_varint_number {
         }
 
         impl<'a, H: ArchiveHeader> RestoreFromView<'a, $t, H> for VarIntView<$t> {
-            fn restore_from_view(
-                &self,
-                _layout: &crate::read::ResolvedLayout<'a, H>,
-            ) -> Result<$t, ZebinError> {
+            fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<$t, ZebinError> {
                 Ok(self.value)
             }
         }
@@ -256,7 +251,7 @@ macro_rules! impl_varint_number {
         impl<'a, H: ArchiveHeader> RestoreFromView<'a, VarInt<$t>, H> for VarIntView<$t> {
             fn restore_from_view(
                 &self,
-                _layout: &crate::read::ResolvedLayout<'a, H>,
+                _layout: &ResolvedLayout<'a, H>,
             ) -> Result<VarInt<$t>, ZebinError> {
                 Ok(VarInt { value: self.value })
             }

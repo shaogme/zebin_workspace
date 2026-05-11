@@ -449,10 +449,7 @@ impl<T: VarIntNumber> Restore<Vec<T>> for ArchivedVarIntVec<T> {
 impl<'a, T: VarIntNumber, H: ArchiveHeader> RestoreFromView<'a, Vec<T>, H>
     for ArchivedVarIntVec<T>
 {
-    fn restore_from_view(
-        &self,
-        _layout: &crate::read::ResolvedLayout<'a, H>,
-    ) -> Result<Vec<T>, ZebinError> {
+    fn restore_from_view(&self, _layout: &ResolvedLayout<'a, H>) -> Result<Vec<T>, ZebinError> {
         self.restore()
     }
 }
@@ -470,7 +467,7 @@ impl<'a, T: VarIntNumber, H: ArchiveHeader> RestoreFromView<'a, VarIntVec<T>, H>
 {
     fn restore_from_view(
         &self,
-        layout: &crate::read::ResolvedLayout<'a, H>,
+        layout: &ResolvedLayout<'a, H>,
     ) -> Result<VarIntVec<T>, ZebinError> {
         Ok(VarIntVec {
             values: self.restore_from_view(layout)?,
