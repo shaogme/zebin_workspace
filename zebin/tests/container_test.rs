@@ -36,7 +36,7 @@ fn test_native_container_round_trip_some() {
     };
 
     let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::decode::<NativeContainers>(&buf).unwrap();
+    let archived = zebin::reader::<NativeContainers>(&buf).unwrap();
 
     assert!(archived.maybe_name.is_some());
     assert_eq!(
@@ -74,7 +74,7 @@ fn test_native_container_round_trip_none() {
     };
 
     let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::decode::<NativeContainers>(&buf).unwrap();
+    let archived = zebin::reader::<NativeContainers>(&buf).unwrap();
 
     assert!(archived.maybe_name.is_none());
     assert_eq!(unsafe { archived.boxed_name.as_str() }, "root");
@@ -102,7 +102,7 @@ fn test_borrowed_container_round_trip() {
     };
 
     let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::decode::<BorrowedContainers>(&buf).unwrap();
+    let archived = zebin::reader::<BorrowedContainers>(&buf).unwrap();
 
     assert_eq!(unsafe { archived.borrowed_text.as_str() }, "borrowed");
     assert_eq!(unsafe { archived.owned_text.as_str() }, "owned");

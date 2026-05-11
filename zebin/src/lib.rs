@@ -41,7 +41,7 @@ pub mod prelude {
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::{
         ResolvedLayout, Storage, Validator, View, ZebinReader, ZebinWriter, decode, encode_chunked,
-        validate,
+        reader, validate,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
@@ -83,14 +83,25 @@ pub use zebin_macros::*;
 
 use ::core::ops::Deref;
 
-/// Decode and validate the archived root object using the default header.
-pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<ZebinReader<'a, T>, ZebinError>
+/// Create a reader for the archived root object using the default header.
+pub fn reader<'a, T>(bytes: &'a [u8]) -> Result<ZebinReader<'a, T>, ZebinError>
 where
     T: Archive,
     T::Archived: Layout + Validate + Access<'a>,
     <T::Archived as Access<'a>>::View: Deref,
 {
-    ZebinReader::decode(bytes)
+    ZebinReader::new(bytes)
+}
+
+/// Decode and validate the archived root object using the default header directly into T.
+pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<T, ZebinError>
+where
+    T: Archive,
+    T::Archived: Layout + Validate + Access<'a>,
+    <T::Archived as Access<'a>>::View: Deref,
+    View<'a, <T::Archived as Access<'a>>::View, ArchiveHeader>: Restore<T>,
+{
+    ZebinReader::<T>::decode(bytes)
 }
 
 /// Validate an archive without exposing the archived view using the default header.

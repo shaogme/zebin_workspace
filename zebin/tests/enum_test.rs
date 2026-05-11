@@ -37,7 +37,7 @@ fn test_unit_enum_round_trip() {
     assert!(matches!(idle, UnitMode::Idle));
     let value = UnitMode::Busy;
     let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::decode::<UnitMode>(&buf).unwrap();
+    let archived = zebin::reader::<UnitMode>(&buf).unwrap();
     assert!(archived.is_busy());
     assert!(!archived.is_idle());
     assert_eq!(archived.tag(), 1);
@@ -49,7 +49,7 @@ fn test_tuple_enum_round_trip() {
     assert!(matches!(empty, TuplePacket::Empty));
     let value = TuplePacket::Data(7, "packet".to_string());
     let buf = zebin::encode(&value).unwrap();
-    let reader = zebin::decode::<TuplePacket>(&buf).unwrap();
+    let reader = zebin::reader::<TuplePacket>(&buf).unwrap();
     let archived = reader.root();
     assert!(!archived.is_empty());
     assert_eq!(archived.tag(), 1);
@@ -70,7 +70,7 @@ fn test_struct_enum_round_trip() {
         label: "hello".to_string(),
     };
     let buf = zebin::encode(&value).unwrap();
-    let reader = zebin::decode::<StructPacket>(&buf).unwrap();
+    let reader = zebin::reader::<StructPacket>(&buf).unwrap();
     let archived = reader.root();
     assert_eq!(archived.tag(), 1);
 

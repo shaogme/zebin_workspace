@@ -41,7 +41,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(mmap.len(), buf.len());
     assert_eq!(mmap.as_slice(), buf.as_slice());
 
-    let archived = zebin::decode::<MmapUser>(mmap.as_slice())?;
+    let archived = zebin::reader::<MmapUser>(mmap.as_slice())?;
     assert_eq!(archived.id, 7);
     unsafe {
         assert_eq!(archived.name.as_str(), "Mika");

@@ -89,7 +89,7 @@ fn test_safe_access() {
     };
     let buf = zebin::encode(&user).unwrap();
 
-    let reader = zebin::decode::<VersionedUser>(&buf).expect("Failed to validate archive");
+    let reader = zebin::reader::<VersionedUser>(&buf).expect("Failed to validate archive");
     assert_eq!(reader.stable_schema_key(), 324478056);
     assert_eq!(reader.id().unwrap(), &101);
     assert_eq!(reader.age().unwrap(), &30);

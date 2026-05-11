@@ -55,8 +55,8 @@ where
         self.view.restore()
     }
 
-    /// Decode and validate the archived root object.
-    pub fn decode(bytes: &'a [u8]) -> Result<Self, ZebinError>
+    /// Create a reader for the archived root object.
+    pub fn new(bytes: &'a [u8]) -> Result<Self, ZebinError>
     where
         T::Archived: Layout + Validate,
     {
@@ -146,12 +146,21 @@ where
         })
     }
 
+    /// Decode and validate the archived root object directly into the original type T.
+    pub fn decode(bytes: &'a [u8]) -> Result<T, ZebinError>
+    where
+        T::Archived: Layout + Validate,
+        View<'a, <T::Archived as Access<'a>>::View, H>: Restore<T>,
+    {
+        Self::new(bytes)?.restore()
+    }
+
     /// Validate an archive without exposing the archived view.
     pub fn validate(bytes: &'a [u8]) -> Result<(), ZebinError>
     where
         T::Archived: Layout + Validate,
     {
-        Self::decode(bytes).map(|_| ())
+        Self::new(bytes).map(|_| ())
     }
 }
 

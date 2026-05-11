@@ -13,7 +13,7 @@ fn test_basic_archive() {
         username: "Alice".to_string(),
     };
     let buf = zebin::encode(&user).unwrap();
-    let archived = zebin::decode::<UserProfile>(&buf).unwrap();
+    let archived = zebin::reader::<UserProfile>(&buf).unwrap();
     assert_eq!(archived.id, 42);
     assert_eq!(unsafe { archived.username.as_str() }, "Alice");
 }

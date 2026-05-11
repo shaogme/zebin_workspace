@@ -36,7 +36,7 @@ fn test_vtable_deduplication() {
     );
 
     // Verify we can access fields via View
-    let reader = zebin::decode::<Parent>(&buf).unwrap();
+    let reader = zebin::reader::<Parent>(&buf).unwrap();
     let archived = reader.root();
     for child_raw in unsafe { archived.children.as_slice() }.iter() {
         let child = reader.view(child_raw).unwrap();
