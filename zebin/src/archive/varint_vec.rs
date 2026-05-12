@@ -6,7 +6,9 @@ use crate::{
     core::schema::FieldEncoding,
     error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Archive, ArchivedDefault, ByteSink, Decode, Restore, Serialize, SerializeState},
+    traits::{
+        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+    },
     validation::context::ValidationContext,
 };
 
@@ -61,6 +63,16 @@ impl<T: VarIntNumber> ArchivedVarIntVec<T> {
     }
 }
 
+impl<T> SchemaAware for ArchivedVarIntVec<T> {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
+
 impl<T: 'static> ArchivedDefault for ArchivedVarIntVec<T> {
     fn archived_default() -> &'static Self {
         static DEFAULT: ArchivedVarIntVec<()> = ArchivedVarIntVec { values: Vec::new() };
@@ -89,6 +101,10 @@ impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
 
 impl<T: VarIntNumber> Archive for VarIntVec<T> {
     type Archived = ArchivedVarIntVec<T>;
+}
+
+impl<T> Archive for ArchivedVarIntVec<T> {
+    type Archived = Self;
 }
 
 pub struct VarIntVecBuilderState<'a, T: VarIntNumber> {
@@ -153,6 +169,17 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<'a, T> {
 }
 
 impl<T: VarIntNumber> Serialize for VarIntVec<T> {
+    type State<'a>
+        = VarIntVecBuilderState<'a, T>
+    where
+        Self: 'a;
+
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        VarIntVecBuilderState::new(&self.values)
+    }
+}
+
+impl<T: VarIntNumber> Serialize for ArchivedVarIntVec<T> {
     type State<'a>
         = VarIntVecBuilderState<'a, T>
     where

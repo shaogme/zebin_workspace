@@ -4,7 +4,9 @@ use crate::{
     core::schema::FieldEncoding,
     error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Archive, ByteSink, Decode, Restore, Serialize, SerializeState},
+    traits::{
+        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+    },
     validation::context::ValidationContext,
 };
 
@@ -51,6 +53,27 @@ impl<T> Deref for VarIntView<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+impl<T: VarIntNumber> Archive for VarIntView<T> {
+    type Archived = ArchivedVarInt<T>;
+}
+
+impl<T> SchemaAware for VarIntView<T> {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
+
+impl<T: Default + 'static> ArchivedDefault for VarIntView<T> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: VarIntView<()> = VarIntView { value: () };
+        unsafe { &*(&DEFAULT as *const VarIntView<()> as *const VarIntView<T>) }
     }
 }
 
@@ -112,6 +135,10 @@ impl_varint_number!(u8 => 2, u16 => 3, u32 => 5, u64 => 10, usize => 10);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ArchivedVarInt<T> {
     _marker: PhantomData<T>,
+}
+
+impl<T> Archive for ArchivedVarInt<T> {
+    type Archived = Self;
 }
 
 pub(crate) fn encoded_len_u64(value: u64) -> usize {
@@ -226,6 +253,20 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntArchiveState<T> {
 }
 
 impl<T> Serialize for VarInt<T>
+where
+    T: VarIntNumber,
+{
+    type State<'a>
+        = VarIntArchiveState<T>
+    where
+        Self: 'a;
+
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        Ok(VarIntArchiveState::new(self.get()))
+    }
+}
+
+impl<T> Serialize for VarIntView<T>
 where
     T: VarIntNumber,
 {

@@ -2,9 +2,12 @@ use crate::{
     core::schema::FieldEncoding,
     error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Archive, ArchivedDefault, Decode, Restore, SchemaAware},
+    traits::{
+        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+    },
     validation::context::ValidationContext,
 };
+use core::task::Poll;
 
 impl SchemaAware for ArchivedPackedBoolSliceView<'_> {
     fn stable_schema_key(&self) -> u32 {
@@ -16,6 +19,10 @@ impl SchemaAware for ArchivedPackedBoolSliceView<'_> {
     }
 }
 
+impl Archive for ArchivedPackedBoolSliceView<'_> {
+    type Archived = ArchivedPackedBoolSlice;
+}
+
 impl<const BITS: u8> SchemaAware for ArchivedPackedU8SliceView<'_, BITS> {
     fn stable_schema_key(&self) -> u32 {
         0
@@ -24,6 +31,10 @@ impl<const BITS: u8> SchemaAware for ArchivedPackedU8SliceView<'_, BITS> {
     fn schema_revision(&self) -> u32 {
         0
     }
+}
+
+impl<const BITS: u8> Archive for ArchivedPackedU8SliceView<'_, BITS> {
+    type Archived = ArchivedPackedU8Slice<BITS>;
 }
 
 #[cfg(feature = "alloc")]
@@ -57,6 +68,10 @@ pub(crate) fn read_packed_bits(bytes: &[u8], bit_offset: usize, bits_per_value: 
 /// Zero-sized decode marker for archived packed boolean slices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArchivedPackedBoolSlice;
+
+impl Archive for ArchivedPackedBoolSlice {
+    type Archived = Self;
+}
 
 /// Archived packed boolean slice view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +127,10 @@ impl ArchivedDefault for ArchivedPackedBoolSliceView<'_> {
 /// Zero-sized decode marker for archived packed u8 slices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArchivedPackedU8Slice<const BITS: u8 = 8>;
+
+impl<const BITS: u8> Archive for ArchivedPackedU8Slice<BITS> {
+    type Archived = Self;
+}
 
 /// Archived packed small-integer slice view. Values are stored using `BITS` bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,6 +242,69 @@ impl Archive for PackedSlice<'_, bool, 1> {
 
 impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
+}
+
+impl Serialize for ArchivedPackedBoolSliceView<'_> {
+    type State<'a>
+        = PackedViewSerializeState<'a>
+    where
+        Self: 'a;
+
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        Ok(PackedViewSerializeState::new(self.len, self.bytes))
+    }
+}
+
+impl<const BITS: u8> Serialize for ArchivedPackedU8SliceView<'_, BITS> {
+    type State<'a>
+        = PackedViewSerializeState<'a>
+    where
+        Self: 'a;
+
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        Ok(PackedViewSerializeState::new(self.len, self.bytes))
+    }
+}
+
+/// State for serializing an already-packed view.
+pub struct PackedViewSerializeState<'a> {
+    len_prefix: [u8; 4],
+    prefix_cursor: usize,
+    bytes: &'a [u8],
+    bytes_cursor: usize,
+}
+
+impl<'a> PackedViewSerializeState<'a> {
+    pub fn new(len: usize, bytes: &'a [u8]) -> Self {
+        Self {
+            len_prefix: (len as u32).to_le_bytes(),
+            prefix_cursor: 0,
+            bytes,
+            bytes_cursor: 0,
+        }
+    }
+}
+
+impl<'a> SerializeState<'a> for PackedViewSerializeState<'a> {
+    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+        if self.prefix_cursor < 4 {
+            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
+            self.prefix_cursor += written;
+            if self.prefix_cursor < 4 {
+                return Ok(Poll::Pending);
+            }
+        }
+
+        if self.bytes_cursor < self.bytes.len() {
+            let written = encoder.write(&self.bytes[self.bytes_cursor..])?;
+            self.bytes_cursor += written;
+            if self.bytes_cursor < self.bytes.len() {
+                return Ok(Poll::Pending);
+            }
+        }
+
+        Ok(Poll::Ready(()))
+    }
 }
 
 #[cfg(feature = "alloc")]
