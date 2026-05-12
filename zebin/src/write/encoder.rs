@@ -70,6 +70,27 @@ impl<'a> SliceEncoder<'a> {
     pub fn written(&self) -> usize {
         self.written
     }
+
+    fn prepare_range(&mut self, len: usize) -> Result<(usize, usize), ZebinError> {
+        let remaining = self.buf.len().saturating_sub(self.written);
+        let written = remaining.min(len);
+        if written == 0 && len > 0 {
+            return Ok((0, 0));
+        }
+
+        let start = self.written;
+        let end = self.written + written;
+
+        self.archive_pos =
+            self.archive_pos
+                .checked_add(written)
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
+
+        self.written = end;
+        Ok((start, end))
+    }
 }
 
 impl ByteSink for SliceEncoder<'_> {
@@ -78,23 +99,12 @@ impl ByteSink for SliceEncoder<'_> {
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
-        let remaining = self.buf.len().saturating_sub(self.written);
-        let written = remaining.min(bytes.len());
-        if written == 0 {
-            return Ok(0);
+        let (start, end) = self.prepare_range(bytes.len())?;
+        let len = end - start;
+        if len > 0 {
+            self.buf[start..end].copy_from_slice(&bytes[..len]);
         }
-
-        let next_pos =
-            self.archive_pos
-                .checked_add(written)
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
-
-        self.buf[self.written..self.written + written].copy_from_slice(&bytes[..written]);
-        self.written += written;
-        self.archive_pos = next_pos;
-        Ok(written)
+        Ok(len)
     }
 
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
@@ -103,24 +113,11 @@ impl ByteSink for SliceEncoder<'_> {
     }
 
     fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
-        let remaining = self.buf.len().saturating_sub(self.written);
-        let written = remaining.min(len);
-        if written == 0 && len > 0 {
-            return Ok(0);
-        }
-
-        let next_pos =
-            self.archive_pos
-                .checked_add(written)
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
-
+        let (start, end) = self.prepare_range(len)?;
+        let written = end - start;
         if written > 0 {
-            byteops::fill(&mut self.buf[self.written..self.written + written], 0);
-            self.written += written;
+            byteops::fill(&mut self.buf[start..end], 0);
         }
-        self.archive_pos = next_pos;
         Ok(written)
     }
 }

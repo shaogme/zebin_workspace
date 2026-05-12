@@ -69,11 +69,18 @@ pub trait ArchivedDefault {
 
 /// Contract for schema-aware decoded views.
 pub trait SchemaAware {
+    fn pos(&self) -> usize {
+        0
+    }
     fn stable_schema_key(&self) -> u32;
     fn schema_revision(&self) -> u32;
 }
 
 impl<T: SchemaAware + ?Sized> SchemaAware for &T {
+    fn pos(&self) -> usize {
+        (**self).pos()
+    }
+
     fn stable_schema_key(&self) -> u32 {
         (**self).stable_schema_key()
     }

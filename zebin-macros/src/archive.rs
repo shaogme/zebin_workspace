@@ -43,7 +43,7 @@ fn record_view_definition(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2:
                 }
             });
             let schema_fields = if has_schema(record) {
-                quote! { stable_schema_key: u32, schema_revision: u32, }
+                quote! { pos: usize, stable_schema_key: u32, schema_revision: u32, }
             } else {
                 quote! {}
             };
@@ -58,6 +58,7 @@ fn record_view_definition(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2:
                 });
                 quote! {
                     pub struct #view<'a> {
+                        pos: usize,
                         stable_schema_key: u32,
                         schema_revision: u32,
                         #(#fields,)*
@@ -110,7 +111,7 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
                     self.#method.as_ref().ok_or_else(|| {
                         zebin::DecodeError::MissingField {
                             field_id: #field_id,
-                            pos: 0,
+                            pos: self.pos,
                         }.into()
                     })
                 }
@@ -120,12 +121,14 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
 
     quote! {
         impl<'a> #view<'a> {
+            pub fn pos(&self) -> usize { self.pos }
             pub fn stable_schema_key(&self) -> u32 { self.stable_schema_key }
             pub fn schema_revision(&self) -> u32 { self.schema_revision }
             #(#accessors)*
         }
 
         impl<'a> zebin::SchemaAware for #view<'a> {
+            fn pos(&self) -> usize { self.pos }
             fn stable_schema_key(&self) -> u32 { self.stable_schema_key }
             fn schema_revision(&self) -> u32 { self.schema_revision }
         }
@@ -342,6 +345,7 @@ fn record_decode_impl(
                     #(#missing_checks)*
 
                     Ok(#view {
+                        pos: __object_start,
                         stable_schema_key: __stable_schema_key,
                         schema_revision: __schema_revision,
                         #(#construct_fields,)*

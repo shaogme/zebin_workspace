@@ -92,12 +92,11 @@ impl FieldEntry {
         C: ValidationContext + ?Sized,
     {
         let entry_pos = cursor.pos();
-        let bytes = cursor.read_exact(Self::SIZE, context)?;
 
-        let field_id = u16::from_le_bytes(bytes[0..2].try_into().unwrap());
-        let encoding_byte = bytes[2];
-        let reserved = bytes[3];
-        let payload_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        let field_id = cursor.read_u16(context)?;
+        let encoding_byte = cursor.read_u8(context)?;
+        let reserved = cursor.read_u8(context)?;
+        let payload_len = cursor.read_u32(context)?;
 
         let encoding = FieldEncoding::from_byte(encoding_byte)
             .ok_or_else(|| context.validation_error("Unknown field encoding", entry_pos + 2))?;

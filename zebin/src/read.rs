@@ -77,6 +77,14 @@ impl<'a> Cursor<'a> {
         Ok(&self.bytes[start..start + len])
     }
 
+    pub fn peek_exact<C>(&self, len: usize, context: &mut C) -> Result<&'a [u8], DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        context.check_range(self.pos, len)?;
+        Ok(&self.bytes[self.pos..self.pos + len])
+    }
+
     pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, DecodeError>
     where
         C: ValidationContext + ?Sized,
