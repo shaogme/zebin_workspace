@@ -54,11 +54,7 @@ pub trait Decode<'a>: ArchivedLayout + Sized {
 
     fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
-        C: ValidationContext + ?Sized,
-    {
-        let _ = Self::decode(cursor, context)?;
-        Ok(())
-    }
+        C: ValidationContext + ?Sized;
 }
 
 /// Object model layer: type-level archive and decode contracts.
@@ -99,12 +95,26 @@ pub trait Restore<T> {
 /// own cursor state and return `Poll::Pending` when more output space is
 /// needed.
 pub trait ByteSink {
+    /// Returns the current absolute position in the archive being written.
     fn pos(&self) -> usize;
 
+    /// Attempts to write the provided bytes into the sink.
+    ///
+    /// Returns the number of bytes actually accepted. Implementations MAY perform
+    /// short writes if space is limited. Callers MUST handle the returned length
+    /// and resume the write in subsequent calls to ensure progress.
     fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError>;
 
+    /// Attempts to align the current archive position to the specified alignment.
+    ///
+    /// Returns the number of padding bytes actually accepted. If the returned
+    /// value is less than what is required to reach the alignment, the caller
+    /// MUST handle this as a short write and retry.
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError>;
 
+    /// Attempts to skip (fill with zeros) the specified number of bytes.
+    ///
+    /// Returns the number of bytes actually skipped.
     fn skip(&mut self, len: usize) -> Result<usize, ZebinError>;
 }
 

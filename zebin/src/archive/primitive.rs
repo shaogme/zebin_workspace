@@ -69,6 +69,16 @@ macro_rules! impl_archive_for_primitive {
                     fixed.copy_from_slice(bytes);
                     Ok(<$t>::from_le_bytes(fixed))
                 }
+
+                fn validate<C>(
+                    cursor: &mut Cursor<'a>,
+                    context: &mut C,
+                ) -> Result<(), DecodeError>
+                where
+                    C: ValidationContext + ?Sized,
+                {
+                    cursor.advance(core::mem::size_of::<Self>(), context)
+                }
             }
 
             impl Archive for $t {
@@ -140,6 +150,13 @@ impl<'a> Decode<'a> for bool {
             _ => Err(context.validation_error("Invalid bool value", pos)),
         }
     }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Self::decode(cursor, context).map(|_| ())
+    }
 }
 
 impl Archive for bool {
@@ -203,6 +220,13 @@ impl<'a> Decode<'a> for () {
     type View = ();
 
     fn decode<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<Self::View, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Ok(())
+    }
+
+    fn validate<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

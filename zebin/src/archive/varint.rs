@@ -213,6 +213,13 @@ where
         let value = decode_u64::<T, C>(cursor, context)?;
         Ok(VarIntView { value })
     }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        decode_u64::<T, C>(cursor, context).map(|_| ())
+    }
 }
 
 impl<T> Archive for VarInt<T>

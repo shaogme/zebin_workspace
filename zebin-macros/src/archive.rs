@@ -334,15 +334,13 @@ fn record_decode_impl(
                     if __field_count > zebin::MAX_SCHEMA_FIELDS {
                         return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __object_start }));
                     }
-                    let mut __entries = [zebin::FieldEntry::EMPTY; zebin::MAX_SCHEMA_FIELDS];
-                    for __index in 0..__field_count {
-                        __entries[__index] = zebin::FieldEntry::decode(cursor, &mut *__guard)?;
-                    }
+                    let mut __table_cursor = *cursor;
+                    cursor.advance(__field_count * zebin::FieldEntry::SIZE, &mut *__guard)?;
 
                     #(#var_decls)*
 
-                    for __index in 0..__field_count {
-                        let __entry = __entries[__index];
+                    for _ in 0..__field_count {
+                        let __entry = zebin::FieldEntry::decode(&mut __table_cursor, &mut *__guard)?;
                         let __payload = cursor.read_exact(__entry.payload_len as usize, &mut *__guard)?;
                         match __entry.field_id {
                             #(#field_arms,)*
@@ -380,15 +378,13 @@ fn record_decode_impl(
                     if __field_count > zebin::MAX_SCHEMA_FIELDS {
                         return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __object_start }));
                     }
-                    let mut __entries = [zebin::FieldEntry::EMPTY; zebin::MAX_SCHEMA_FIELDS];
-                    for __index in 0..__field_count {
-                        __entries[__index] = zebin::FieldEntry::decode(cursor, &mut *__guard)?;
-                    }
+                    let mut __table_cursor = *cursor;
+                    cursor.advance(__field_count * zebin::FieldEntry::SIZE, &mut *__guard)?;
 
                     #(#seen_var_decls)*
 
-                    for __index in 0..__field_count {
-                        let __entry = __entries[__index];
+                    for _ in 0..__field_count {
+                        let __entry = zebin::FieldEntry::decode(&mut __table_cursor, &mut *__guard)?;
                         let __payload = cursor.read_exact(__entry.payload_len as usize, &mut *__guard)?;
                         match __entry.field_id {
                             #(#validate_field_arms,)*
