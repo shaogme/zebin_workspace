@@ -10,6 +10,10 @@ use crate::{
 };
 
 impl<T, E> SchemaAware for ArchivedResult<T, E> {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }

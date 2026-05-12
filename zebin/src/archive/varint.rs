@@ -62,6 +62,10 @@ impl<T: VarIntNumber> Archive for VarIntView<T> {
 }
 
 impl<T> SchemaAware for VarIntView<T> {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }

@@ -11,6 +11,10 @@ use crate::{
 };
 
 impl<T> SchemaAware for ArchivedOption<T> {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }

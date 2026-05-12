@@ -72,22 +72,23 @@ impl<'a> SliceEncoder<'a> {
     }
 
     fn prepare_range(&mut self, len: usize) -> Result<(usize, usize), ZebinError> {
-        let remaining = self.buf.len().saturating_sub(self.written);
-        let written = remaining.min(len);
-        if written == 0 && len > 0 {
+        let start = self.written;
+        let remaining = self.buf.len().saturating_sub(start);
+        let count = remaining.min(len);
+
+        if count == 0 && len > 0 {
             return Ok((0, 0));
         }
 
-        let start = self.written;
-        let end = self.written + written;
-
-        self.archive_pos =
+        let next_archive_pos =
             self.archive_pos
-                .checked_add(written)
+                .checked_add(count)
                 .ok_or(ZebinError::ArithmeticOverflow {
                     pos: self.archive_pos,
                 })?;
 
+        let end = start + count;
+        self.archive_pos = next_archive_pos;
         self.written = end;
         Ok((start, end))
     }

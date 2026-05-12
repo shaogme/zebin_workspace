@@ -65,6 +65,10 @@ impl<T: VarIntNumber> ArchivedVarIntVec<T> {
 }
 
 impl<T> SchemaAware for ArchivedVarIntVec<T> {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }

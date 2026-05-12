@@ -96,9 +96,10 @@ impl<'a, 'p> Validator<'a, 'p> {
         alignment: NonZeroUsize,
     ) -> Result<(), DecodeError> {
         let alignment_value = alignment.get();
-        if !pos.is_multiple_of(alignment_value) {
-            let actual = NonZeroUsize::new(pos % alignment_value)
-                .expect("misaligned position has non-zero remainder");
+        let remainder = pos % alignment_value;
+        if remainder != 0 {
+            let actual =
+                NonZeroUsize::new(remainder).expect("misaligned position has non-zero remainder");
             return Err(self.error(DecodeError::AlignmentError {
                 expected: alignment,
                 actual,
@@ -143,8 +144,10 @@ impl<'a, 'p> Validator<'a, 'p> {
     }
 
     pub fn record_error_path(&mut self) {
-        if self.last_error_path.is_none() && self.path.is_some() {
-            self.last_error_path = self.path.as_ref().map(|p| (*p).clone());
+        if self.last_error_path.is_none() {
+            if let Some(path) = self.path.as_ref() {
+                self.last_error_path = Some((*path).clone());
+            }
         }
     }
 

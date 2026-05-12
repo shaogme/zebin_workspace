@@ -327,20 +327,17 @@ fn record_decode_impl(
                     let __stable_schema_key = __header.stable_schema_key;
                     let __schema_revision = __header.schema_revision;
                     let __field_count = __header.field_count as usize;
-                    let mut __table_cursor = *cursor;
-                    cursor.advance(__field_count * zebin::FieldEntry::SIZE, &mut *__guard)?;
+                    let mut __reader = zebin::FieldTableReader::new(cursor, __field_count, &mut *__guard)?;
 
                     #(#var_decls)*
 
-                    for _ in 0..__field_count {
-                        let __entry_pos = __table_cursor.pos();
-                        let __entry = zebin::FieldEntry::decode(&mut __table_cursor, &mut *__guard)?;
-                        let __payload = cursor.read_exact(__entry.payload_len as usize, &mut *__guard)?;
+                    while let Some((__entry, __entry_pos, __payload)) = __reader.next(&mut *__guard)? {
                         match __entry.field_id {
                             #(#field_arms,)*
                             _ => {}
                         }
                     }
+                    *cursor = __reader.payload_cursor;
 
                     #(#missing_checks)*
 
@@ -362,20 +359,17 @@ fn record_decode_impl(
                     let __header = zebin::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
                     let _schema_revision = __header.schema_revision;
                     let __field_count = __header.field_count as usize;
-                    let mut __table_cursor = *cursor;
-                    cursor.advance(__field_count * zebin::FieldEntry::SIZE, &mut *__guard)?;
+                    let mut __reader = zebin::FieldTableReader::new(cursor, __field_count, &mut *__guard)?;
 
                     #(#seen_var_decls)*
 
-                    for _ in 0..__field_count {
-                        let __entry_pos = __table_cursor.pos();
-                        let __entry = zebin::FieldEntry::decode(&mut __table_cursor, &mut *__guard)?;
-                        let __payload = cursor.read_exact(__entry.payload_len as usize, &mut *__guard)?;
+                    while let Some((__entry, __entry_pos, __payload)) = __reader.next(&mut *__guard)? {
                         match __entry.field_id {
                             #(#validate_field_arms,)*
                             _ => {}
                         }
                     }
+                    *cursor = __reader.payload_cursor;
 
                     #(#validate_missing_checks)*
 

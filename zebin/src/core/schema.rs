@@ -158,3 +158,49 @@ impl SchemaObjectHeader {
         })
     }
 }
+
+/// Helper for iterating over schema-aware object field tables and their payloads.
+pub struct FieldTableReader<'a> {
+    table_cursor: Cursor<'a>,
+    pub payload_cursor: Cursor<'a>,
+    remaining: usize,
+}
+
+impl<'a> FieldTableReader<'a> {
+    pub fn new<C>(
+        cursor: &mut Cursor<'a>,
+        field_count: usize,
+        context: &mut C,
+    ) -> Result<Self, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let table_cursor = *cursor;
+        cursor.advance(field_count * FieldEntry::SIZE, context)?;
+        let payload_cursor = *cursor;
+        Ok(Self {
+            table_cursor,
+            payload_cursor,
+            remaining: field_count,
+        })
+    }
+
+    pub fn next<C>(
+        &mut self,
+        context: &mut C,
+    ) -> Result<Option<(FieldEntry, usize, &'a [u8])>, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        if self.remaining == 0 {
+            return Ok(None);
+        }
+        let entry_pos = self.table_cursor.pos();
+        let entry = FieldEntry::decode(&mut self.table_cursor, context)?;
+        let payload = self
+            .payload_cursor
+            .read_exact(entry.payload_len as usize, context)?;
+        self.remaining -= 1;
+        Ok(Some((entry, entry_pos, payload)))
+    }
+}

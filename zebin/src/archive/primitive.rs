@@ -107,6 +107,10 @@ macro_rules! impl_archive_for_primitive {
             }
 
             impl SchemaAware for $t {
+                fn pos(&self) -> usize {
+                    0
+                }
+
                 fn stable_schema_key(&self) -> u32 {
                     0
                 }
@@ -187,6 +191,10 @@ impl Restore<bool> for bool {
 }
 
 impl SchemaAware for bool {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }
@@ -259,6 +267,10 @@ impl Restore<()> for () {
 }
 
 impl SchemaAware for () {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }

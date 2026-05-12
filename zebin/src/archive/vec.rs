@@ -12,6 +12,9 @@ use crate::{
 };
 
 impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
+    fn pos(&self) -> usize {
+        0
+    }
     fn stable_schema_key(&self) -> u32 {
         0
     }

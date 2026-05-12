@@ -11,6 +11,10 @@ use crate::{
 use core::task::Poll;
 
 impl SchemaAware for ArchivedPackedBoolSliceView<'_> {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }
@@ -25,6 +29,10 @@ impl Archive for ArchivedPackedBoolSliceView<'_> {
 }
 
 impl<const BITS: u8> SchemaAware for ArchivedPackedU8SliceView<'_, BITS> {
+    fn pos(&self) -> usize {
+        0
+    }
+
     fn stable_schema_key(&self) -> u32 {
         0
     }
