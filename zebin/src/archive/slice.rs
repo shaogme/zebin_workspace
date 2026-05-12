@@ -2,9 +2,9 @@ use core::num::NonZeroUsize;
 
 use crate::{
     core::schema::FieldEncoding,
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     read::Cursor,
-    traits::{Archive, Decode, FixedLayout, Restore},
+    traits::{Archive, ArchivedLayout, Decode, FixedLayout, Restore},
     validation::context::ValidationContext,
 };
 
@@ -89,20 +89,25 @@ where
     }
 }
 
-impl<'a, A, const N: usize> Decode<'a> for [A; N]
+impl<A, const N: usize> ArchivedLayout for [A; N]
 where
-    A: Decode<'a>,
+    A: ArchivedLayout,
 {
-    type View = [A::View; N];
-
     const FIXED_SIZE: Option<usize> = match A::FIXED_SIZE {
         Some(size) => Some(size * N),
         None => None,
     };
     const ALIGNMENT: NonZeroUsize = A::ALIGNMENT;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
+}
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+impl<'a, A, const N: usize> Decode<'a> for [A; N]
+where
+    A: Decode<'a>,
+{
+    type View = [A::View; N];
+
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -129,5 +134,17 @@ where
         }
 
         Ok(unsafe { out.assume_init() })
+    }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        for index in 0..N {
+            let mut guard = context.push_index(index);
+            A::validate(cursor, &mut *guard)?;
+        }
+
+        Ok(())
     }
 }

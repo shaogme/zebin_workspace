@@ -1,10 +1,10 @@
 use crate::{
     ZebinError,
-    error::AccessError,
+    error::DecodeError,
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, FixedLayout, Restore, SchemaAware, Serialize,
-        SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, FixedLayout, Restore,
+        SchemaAware, Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -47,18 +47,20 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl<'a> Decode<'a> for $t {
-                type View = Self;
-
+            impl ArchivedLayout for $t {
                 const FIXED_SIZE: Option<usize> = Some(core::mem::size_of::<Self>());
                 const ALIGNMENT: NonZeroUsize = unsafe {
                     NonZeroUsize::new_unchecked(core::mem::size_of::<Self>())
                 };
+            }
+
+            impl<'a> Decode<'a> for $t {
+                type View = Self;
 
                 fn decode<C>(
                     cursor: &mut Cursor<'a>,
                     context: &mut C,
-                ) -> Result<Self::View, AccessError>
+                ) -> Result<Self::View, DecodeError>
                 where
                     C: ValidationContext + ?Sized,
                 {
@@ -118,13 +120,15 @@ impl FixedLayout for bool {
     }
 }
 
+impl ArchivedLayout for bool {
+    const FIXED_SIZE: Option<usize> = Some(1);
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+}
+
 impl<'a> Decode<'a> for bool {
     type View = bool;
 
-    const FIXED_SIZE: Option<usize> = Some(1);
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -190,13 +194,15 @@ impl FixedLayout for () {
     fn write_fixed(_archived: &Self, _out: &mut [u8]) {}
 }
 
+impl ArchivedLayout for () {
+    const FIXED_SIZE: Option<usize> = Some(0);
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+}
+
 impl<'a> Decode<'a> for () {
     type View = ();
 
-    const FIXED_SIZE: Option<usize> = Some(0);
-    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-
-    fn decode<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

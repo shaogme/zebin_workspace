@@ -4,10 +4,11 @@ use core::task::Poll;
 use crate::{
     archive::varint::{VarIntNumber, decode_u64, encode_u64, encoded_len_u64},
     core::schema::{FieldEncoding, ObjectEncoding},
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
+        Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -80,13 +81,15 @@ impl<T: 'static> ArchivedDefault for ArchivedVarIntVec<T> {
     }
 }
 
+impl<T> ArchivedLayout for ArchivedVarIntVec<T> {
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
+}
+
 impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
     type View = ArchivedVarIntVec<T>;
 
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -97,6 +100,18 @@ impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
             values.push(decode_u64::<T, _>(cursor, &mut *guard)?);
         }
         Ok(ArchivedVarIntVec { values })
+    }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let len = cursor.read_u32(context)? as usize;
+        for index in 0..len {
+            let mut guard = context.push_index(index);
+            let _ = decode_u64::<T, _>(cursor, &mut *guard)?;
+        }
+        Ok(())
     }
 }
 

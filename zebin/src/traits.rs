@@ -2,7 +2,7 @@ use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
     core::schema::{FieldEncoding, ObjectEncoding},
-    error::{AccessError, ParseHeaderError, ZebinError},
+    error::{DecodeError, ParseHeaderError, ZebinError},
     read::Cursor,
     validation::context::ValidationContext,
 };
@@ -36,18 +36,29 @@ pub trait ArchiveHeader: Clone + Copy {
     fn create(flags: u8) -> Self;
 }
 
-/// Read-side decode contract for consuming a value from a sequential cursor.
-pub trait Decode<'a>: Sized {
-    type View: 'a;
-
+/// Static archived layout metadata shared by read and write paths.
+pub trait ArchivedLayout {
     const FIXED_SIZE: Option<usize> = None;
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Fixed;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::Fixed;
+}
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+/// Read-side decode contract for consuming a value from a sequential cursor.
+pub trait Decode<'a>: ArchivedLayout + Sized {
+    type View: 'a;
+
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized;
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let _ = Self::decode(cursor, context)?;
+        Ok(())
+    }
 }
 
 /// Object model layer: type-level archive and decode contracts.

@@ -2,9 +2,10 @@ use core::task::Poll;
 
 use crate::{
     core::schema::ObjectEncoding,
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
+        Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -43,17 +44,23 @@ impl<T> ArchivedOption<T> {
     }
 }
 
+impl<A> ArchivedLayout for ArchivedOption<A>
+where
+    A: ArchivedLayout,
+{
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
+}
+
 impl<'a, A> Decode<'a> for ArchivedOption<A>
 where
     A: Decode<'a>,
 {
     type View = ArchivedOption<A::View>;
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 
     fn decode<C>(
         cursor: &mut crate::read::Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View, AccessError>
+    ) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -63,6 +70,21 @@ where
             1 => {
                 let mut guard = context.push_variant("Some");
                 Ok(ArchivedOption::Some(A::decode(cursor, &mut *guard)?))
+            }
+            _ => Err(context.validation_error("Invalid Option discriminant", pos)),
+        }
+    }
+
+    fn validate<C>(cursor: &mut crate::read::Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let pos = cursor.pos();
+        match cursor.read_u8(context)? {
+            0 => Ok(()),
+            1 => {
+                let mut guard = context.push_variant("Some");
+                A::validate(cursor, &mut *guard)
             }
             _ => Err(context.validation_error("Invalid Option discriminant", pos)),
         }

@@ -2,8 +2,10 @@ use core::task::Poll;
 
 use crate::{
     core::schema::ObjectEncoding,
-    error::{AccessError, ZebinError},
-    traits::{Archive, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState},
+    error::{DecodeError, ZebinError},
+    traits::{
+        Archive, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+    },
     validation::context::ValidationContext,
 };
 
@@ -48,18 +50,25 @@ impl<T, E> ArchivedResult<T, E> {
     }
 }
 
+impl<A, B> ArchivedLayout for ArchivedResult<A, B>
+where
+    A: ArchivedLayout,
+    B: ArchivedLayout,
+{
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
+}
+
 impl<'a, A, B> Decode<'a> for ArchivedResult<A, B>
 where
     A: Decode<'a>,
     B: Decode<'a>,
 {
     type View = ArchivedResult<A::View, B::View>;
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 
     fn decode<C>(
         cursor: &mut crate::read::Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View, AccessError>
+    ) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -72,6 +81,24 @@ where
             1 => {
                 let mut guard = context.push_variant("Err");
                 Ok(ArchivedResult::Err(B::decode(cursor, &mut *guard)?))
+            }
+            _ => Err(context.validation_error("Invalid Result discriminant", pos)),
+        }
+    }
+
+    fn validate<C>(cursor: &mut crate::read::Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let pos = cursor.pos();
+        match cursor.read_u8(context)? {
+            0 => {
+                let mut guard = context.push_variant("Ok");
+                A::validate(cursor, &mut *guard)
+            }
+            1 => {
+                let mut guard = context.push_variant("Err");
+                B::validate(cursor, &mut *guard)
             }
             _ => Err(context.validation_error("Invalid Result discriminant", pos)),
         }

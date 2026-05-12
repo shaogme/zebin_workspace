@@ -68,6 +68,19 @@ impl ValidationPathStack {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0 && {
+            #[cfg(feature = "alloc")]
+            {
+                self.extra.as_ref().is_none_or(Vec::is_empty)
+            }
+            #[cfg(not(feature = "alloc"))]
+            {
+                true
+            }
+        }
+    }
+
     pub fn format(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut first = true;
 
@@ -103,5 +116,21 @@ impl ValidationPathStack {
         }
         *first = false;
         Ok(())
+    }
+}
+
+impl core::fmt::Display for ValidationPathStack {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.is_empty() {
+            return write!(f, "<root>");
+        }
+
+        self.format(f)
+    }
+}
+
+impl core::fmt::Debug for ValidationPathStack {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(self, f)
     }
 }

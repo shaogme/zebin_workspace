@@ -1,9 +1,10 @@
 use crate::{
     core::schema::{FieldEncoding, ObjectEncoding},
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
+        Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -43,11 +44,11 @@ use alloc::vec::Vec;
 pub(crate) fn packed_byte_len(
     value_count: usize,
     bits_per_value: usize,
-) -> Result<usize, AccessError> {
+) -> Result<usize, DecodeError> {
     let total_bits =
         value_count
             .checked_mul(bits_per_value)
-            .ok_or(AccessError::ValidationError {
+            .ok_or(DecodeError::ValidationError {
                 message: "Packed length calculation overflow",
                 pos: 0,
             })?;
@@ -100,13 +101,15 @@ impl<'a> ArchivedPackedBoolSliceView<'a> {
     }
 }
 
+impl ArchivedLayout for ArchivedPackedBoolSlice {
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Packed;
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
+}
+
 impl<'a> Decode<'a> for ArchivedPackedBoolSlice {
     type View = ArchivedPackedBoolSliceView<'a>;
 
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Packed;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -115,13 +118,23 @@ impl<'a> Decode<'a> for ArchivedPackedBoolSlice {
         let bytes = cursor.read_exact(byte_len, context)?;
         Ok(ArchivedPackedBoolSliceView { len, bytes })
     }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let len = cursor.read_u32(context)? as usize;
+        let byte_len = packed_byte_len(len, 1)?;
+        let _ = cursor.read_exact(byte_len, context)?;
+        Ok(())
+    }
 }
 
 impl ArchivedDefault for ArchivedPackedBoolSliceView<'_> {
     fn archived_default() -> &'static Self {
         static DEFAULT: ArchivedPackedBoolSliceView<'static> =
             ArchivedPackedBoolSliceView { len: 0, bytes: &[] };
-        unsafe { &*(&DEFAULT as *const ArchivedPackedBoolSliceView<'static> as *const Self) }
+        &DEFAULT
     }
 }
 
@@ -158,13 +171,15 @@ impl<'a, const BITS: u8> ArchivedPackedU8SliceView<'a, BITS> {
     }
 }
 
+impl<const BITS: u8> ArchivedLayout for ArchivedPackedU8Slice<BITS> {
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Packed;
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
+}
+
 impl<'a, const BITS: u8> Decode<'a> for ArchivedPackedU8Slice<BITS> {
     type View = ArchivedPackedU8SliceView<'a, BITS>;
 
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Packed;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -187,6 +202,31 @@ impl<'a, const BITS: u8> Decode<'a> for ArchivedPackedU8Slice<BITS> {
         }
 
         Ok(ArchivedPackedU8SliceView { len, bytes })
+    }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let pos = cursor.pos();
+        let len = cursor.read_u32(context)? as usize;
+        let byte_len = packed_byte_len(len, usize::from(BITS))?;
+        let bytes = cursor.read_exact(byte_len, context)?;
+
+        let max = if BITS == 8 {
+            u8::MAX
+        } else {
+            (1u8 << BITS) - 1
+        };
+        for index in 0..len {
+            let bit_offset = index * usize::from(BITS);
+            let value = read_packed_bits(bytes, bit_offset, usize::from(BITS));
+            if value > max {
+                return Err(context.validation_error("Packed integer value out of range", pos));
+            }
+        }
+
+        Ok(())
     }
 }
 

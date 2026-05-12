@@ -4,9 +4,10 @@ use core::task::Poll;
 use crate::{Cursor, FieldEncoding, ObjectEncoding, ValidationContext};
 use crate::{
     archive::slice::SequenceSource,
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
+        Serialize, SerializeState,
     },
 };
 
@@ -72,16 +73,21 @@ impl<'a, T: 'static> ArchivedDefault for ArchivedVec<'a, T> {
     }
 }
 
+impl<A> ArchivedLayout for ArchivedVec<'_, A>
+where
+    A: ArchivedLayout,
+{
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
+}
+
 impl<'marker, 'a, A> Decode<'a> for ArchivedVec<'marker, A>
 where
     A: Decode<'a>,
 {
     type View = ArchivedVec<'a, A::View>;
 
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -102,6 +108,24 @@ where
         }
 
         Ok(ArchivedVec::new(items))
+    }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let len = cursor.read_u32(context)? as usize;
+
+        if A::FIXED_SIZE.is_some() {
+            cursor.align(A::ALIGNMENT, context)?;
+        }
+
+        for index in 0..len {
+            let mut guard = context.push_index(index);
+            A::validate(cursor, &mut *guard)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -175,7 +199,7 @@ where
     where
         T::Archived: for<'b> Decode<'b>,
     {
-        <T::Archived as Decode<'static>>::FIXED_SIZE.is_some()
+        <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some()
     }
 
     fn ensure_current_state(&mut self) -> Result<(), ZebinError>
@@ -207,10 +231,10 @@ where
         }
 
         if Self::fixed_width() && !self.aligned {
-            encoder.align(<T::Archived as Decode<'static>>::ALIGNMENT)?;
+            encoder.align(<T::Archived as ArchivedLayout>::ALIGNMENT)?;
             if !encoder
                 .pos()
-                .is_multiple_of(<T::Archived as Decode<'static>>::ALIGNMENT.get())
+                .is_multiple_of(<T::Archived as ArchivedLayout>::ALIGNMENT.get())
             {
                 return Ok(Poll::Pending);
             }

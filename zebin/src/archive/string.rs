@@ -5,10 +5,11 @@ use alloc::string::{String, ToString};
 use crate::{
     core::schema::FieldEncoding,
     core::schema::ObjectEncoding,
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
+        Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -47,13 +48,15 @@ impl Deref for ArchivedStringView<'_> {
     }
 }
 
+impl ArchivedLayout for ArchivedString {
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
+}
+
 impl<'a> Decode<'a> for ArchivedString {
     type View = ArchivedStringView<'a>;
 
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -64,12 +67,24 @@ impl<'a> Decode<'a> for ArchivedString {
             .map_err(|_| context.validation_error("Invalid UTF-8 sequence", pos))?;
         Ok(ArchivedStringView { value })
     }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let pos = cursor.pos();
+        let len = cursor.read_u32(context)? as usize;
+        let bytes = cursor.read_exact(len, context)?;
+        str::from_utf8(bytes)
+            .map_err(|_| context.validation_error("Invalid UTF-8 sequence", pos))?;
+        Ok(())
+    }
 }
 
 impl ArchivedDefault for ArchivedStringView<'_> {
     fn archived_default() -> &'static Self {
         static DEFAULT: ArchivedStringView<'static> = ArchivedStringView { value: "" };
-        unsafe { &*(&DEFAULT as *const ArchivedStringView<'static> as *const Self) }
+        &DEFAULT
     }
 }
 

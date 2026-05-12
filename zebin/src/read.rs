@@ -1,9 +1,13 @@
 use crate::{
+    ValidationPathStack,
     core::schema::ObjectEncoding,
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     format::ArchiveHeader,
-    traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Decode, Restore},
-    validation::{context::ValidationContext, validator::Validator},
+    traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, Decode, Restore},
+    validation::{
+        context::ValidationContext,
+        validator::{ValidationConfig, Validator},
+    },
 };
 use core::ops::Deref;
 
@@ -38,18 +42,15 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    pub fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        context.check_range(self.pos, len)?;
         let end = self
             .pos
             .checked_add(len)
             .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
-        if end > self.bytes.len() {
-            return Err(context.validation_error("Cursor out of bounds", self.pos));
-        }
+        context.check_range(self.pos, len)?;
         self.pos = end;
         Ok(())
     }
@@ -58,7 +59,7 @@ impl<'a> Cursor<'a> {
         &mut self,
         alignment: core::num::NonZeroUsize,
         context: &mut C,
-    ) -> Result<(), AccessError>
+    ) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -66,7 +67,7 @@ impl<'a> Cursor<'a> {
         self.advance(padding, context)
     }
 
-    pub fn read_exact<C>(&mut self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
+    pub fn read_exact<C>(&mut self, len: usize, context: &mut C) -> Result<&'a [u8], DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -75,14 +76,14 @@ impl<'a> Cursor<'a> {
         Ok(&self.bytes[start..start + len])
     }
 
-    pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, AccessError>
+    pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
         Ok(self.read_exact(1, context)?[0])
     }
 
-    pub fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, AccessError>
+    pub fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -90,7 +91,7 @@ impl<'a> Cursor<'a> {
         Ok(u16::from_le_bytes(bytes))
     }
 
-    pub fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, AccessError>
+    pub fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -137,14 +138,14 @@ where
         self.root.restore()
     }
 
-    pub fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
+    pub fn new(bytes: &'a [u8], config: ValidationConfig) -> Result<Self, ZebinError> {
         let header = H::parse(bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
-        let mut validator = Validator::new(bytes);
+        let mut validator = Validator::with_config(bytes, config, None);
         let mut cursor = Cursor::new(bytes, H::SIZE);
         let root = T::Archived::decode(&mut cursor, &mut validator)?;
         if cursor.pos() != bytes.len() {
-            return Err(AccessError::ValidationError {
+            return Err(DecodeError::ValidationError {
                 message: "Trailing bytes after root object",
                 pos: cursor.pos(),
             }
@@ -162,11 +163,39 @@ where
     where
         <T::Archived as Decode<'a>>::View: Restore<T>,
     {
-        Self::new(bytes)?.restore()
+        Self::new(bytes, ValidationConfig::default())?.restore()
     }
 
-    pub fn validate(bytes: &'a [u8]) -> Result<(), ZebinError> {
-        Self::new(bytes).map(|_| ())
+    pub fn validate(
+        bytes: &'a [u8],
+        config: ValidationConfig,
+        mut stack: Option<&mut ValidationPathStack>,
+    ) -> Result<(), ZebinError> {
+        let header = H::parse(bytes)?;
+        validate_root_object_encoding::<T, H>(&header)?;
+
+        let mut cursor = Cursor::new(bytes, H::SIZE);
+        let (result, error_path) = {
+            let mut validator = Validator::with_config(bytes, config, stack.as_deref_mut());
+            let res = T::Archived::validate(&mut cursor, &mut validator);
+            (res, validator.last_error_path().cloned())
+        };
+
+        if let (Some(s), Some(ep)) = (stack, error_path) {
+            *s = ep;
+        }
+
+        result?;
+
+        if cursor.pos() != bytes.len() {
+            return Err(DecodeError::ValidationError {
+                message: "Trailing bytes after root object",
+                pos: cursor.pos(),
+            }
+            .into());
+        }
+
+        Ok(())
     }
 }
 
@@ -182,9 +211,9 @@ where
             pos: H::SIZE.saturating_sub(1),
         },
     )?;
-    let expected = <T::Archived as Decode<'a>>::OBJECT_ENCODING;
+    let expected = <T::Archived as ArchivedLayout>::OBJECT_ENCODING;
     if actual != expected {
-        return Err(AccessError::UnexpectedObjectEncoding {
+        return Err(DecodeError::UnexpectedObjectEncoding {
             expected,
             actual,
             pos: H::SIZE.saturating_sub(1),

@@ -1,4 +1,4 @@
-use crate::{error::AccessError, read::Cursor, validation::context::ValidationContext};
+use crate::{error::DecodeError, read::Cursor, validation::context::ValidationContext};
 
 /// Stable identifier used to refer to a schema across archive revisions.
 pub type StableSchemaKey = u32;
@@ -87,7 +87,7 @@ impl FieldEntry {
         bytes
     }
 
-    pub fn decode<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self, AccessError>
+    pub fn decode<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -99,7 +99,7 @@ impl FieldEntry {
         let reserved_pos = cursor.pos();
         let reserved = cursor.read_u8(context)?;
         if reserved != Self::RESERVED {
-            return Err(AccessError::InvalidFieldTable { pos: reserved_pos });
+            return Err(DecodeError::InvalidFieldTable { pos: reserved_pos });
         }
         let payload_len = cursor.read_u32(context)?;
         Ok(Self {

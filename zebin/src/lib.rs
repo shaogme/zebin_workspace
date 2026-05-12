@@ -29,18 +29,19 @@ pub mod prelude {
         FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaRevision,
         StableSchemaKey,
     };
-    pub use crate::error::{AccessError, ArchiveError, ZebinError};
+    pub use crate::error::{ArchiveError, DecodeError, ZebinError};
     pub use crate::format::ArchiveHeader;
     #[cfg(feature = "mmap")]
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Decode,
-        FixedLayout, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
+        Decode, FixedLayout, Restore, SchemaAware, Serialize, SerializeState,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
+    pub use crate::validation::validator::ValidationConfig;
     pub use crate::{
         Cursor, Storage, Validator, ZebinReader, ZebinWriter, decode, encode_chunked, reader,
-        validate,
+        validate, validate_detailed, validate_with_config,
     };
     pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
@@ -60,20 +61,20 @@ pub use crate::archive::{
 pub use crate::core::schema::{
     FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaRevision, StableSchemaKey,
 };
-pub use crate::error::{AccessError, ArchiveError, ZebinError};
+pub use crate::error::{ArchiveError, DecodeError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::io::storage::mmap::Mmap;
 pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
-    Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ByteSink, Decode, FixedLayout,
-    Restore, SchemaAware, Serialize, SerializeState,
+    Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
+    Decode, FixedLayout, Restore, SchemaAware, Serialize, SerializeState,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::{
     path::{ValidationPathSegment, ValidationPathStack},
-    validator::Validator,
+    validator::{ValidationConfig, Validator},
 };
 pub use crate::write::{ArchiveWriter, ZebinWriter};
 
@@ -94,7 +95,7 @@ where
     T: Archive,
     T::Archived: Decode<'a>,
 {
-    ZebinReader::new(bytes)
+    ZebinReader::new(bytes, ValidationConfig::default())
 }
 
 /// Decode and validate the archived root object using the default header directly into T.
@@ -113,7 +114,32 @@ where
     T: Archive,
     T::Archived: Decode<'a>,
 {
-    ZebinReader::<T>::validate(bytes)
+    ZebinReader::<T>::validate(bytes, ValidationConfig::default(), None)
+}
+
+/// Validate an archive with explicit runtime validation limits.
+pub fn validate_with_config<'a, T>(
+    bytes: &'a [u8],
+    config: ValidationConfig,
+    stack: Option<&mut ValidationPathStack>,
+) -> Result<(), ZebinError>
+where
+    T: Archive,
+    T::Archived: Decode<'a>,
+{
+    ZebinReader::<T>::validate(bytes, config, stack)
+}
+
+/// Validate an archive and capture the logical field/index path on failure.
+pub fn validate_detailed<'a, T>(
+    bytes: &'a [u8],
+    stack: &mut ValidationPathStack,
+) -> Result<(), ZebinError>
+where
+    T: Archive,
+    T::Archived: Decode<'a>,
+{
+    ZebinReader::<T>::validate(bytes, ValidationConfig::default(), Some(stack))
 }
 
 /// Create a chunked archive writer that can be resumed with caller-provided buffers.

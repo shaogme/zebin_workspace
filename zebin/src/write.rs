@@ -6,7 +6,8 @@ use crate::{
     error::ZebinError,
     format::ArchiveHeader,
     traits::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ByteSink, Decode, Serialize, SerializeState,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, ByteSink, Decode, Serialize,
+        SerializeState,
     },
     write::encoder::{MeasureEncoder, SliceEncoder},
 };
@@ -53,7 +54,7 @@ where
 {
     pub fn new(value: &'a T) -> Result<Self, ZebinError> {
         let total_len = measure_total_len::<T, H>(value)?;
-        let header = H::create(<T::Archived as Decode<'static>>::OBJECT_ENCODING as u8);
+        let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         Ok(Self {
             phase: EncodePhase::Header {
                 bytes: header.encode(),

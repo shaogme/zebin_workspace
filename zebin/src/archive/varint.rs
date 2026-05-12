@@ -2,10 +2,11 @@ use core::{marker::PhantomData, ops::Deref, task::Poll};
 
 use crate::{
     core::schema::{FieldEncoding, ObjectEncoding},
-    error::{AccessError, ZebinError},
+    error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
+        Serialize, SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -81,7 +82,7 @@ pub trait VarIntNumber: Copy {
     const MAX_BYTES: usize;
 
     fn to_u64(self) -> u64;
-    fn try_from_u64(value: u64) -> Result<Self, AccessError>;
+    fn try_from_u64(value: u64) -> Result<Self, DecodeError>;
 }
 
 macro_rules! impl_varint_number {
@@ -94,8 +95,8 @@ macro_rules! impl_varint_number {
                     self as u64
                 }
 
-                fn try_from_u64(value: u64) -> Result<Self, AccessError> {
-                    <$t>::try_from(value).map_err(|_| AccessError::ValidationError {
+                fn try_from_u64(value: u64) -> Result<Self, DecodeError> {
+                    <$t>::try_from(value).map_err(|_| DecodeError::ValidationError {
                         message: "VarInt value out of range",
                         pos: 0,
                     })
@@ -137,6 +138,11 @@ pub struct ArchivedVarInt<T> {
     _marker: PhantomData<T>,
 }
 
+impl<T> ArchivedLayout for ArchivedVarInt<T> {
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::VarInt;
+}
+
 impl<T> Archive for ArchivedVarInt<T> {
     type Archived = Self;
 }
@@ -167,7 +173,7 @@ pub(crate) fn encode_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-pub(crate) fn decode_u64<T, C>(cursor: &mut Cursor<'_>, context: &mut C) -> Result<T, AccessError>
+pub(crate) fn decode_u64<T, C>(cursor: &mut Cursor<'_>, context: &mut C) -> Result<T, DecodeError>
 where
     T: VarIntNumber,
     C: ValidationContext + ?Sized,
@@ -200,10 +206,7 @@ where
 {
     type View = VarIntView<T>;
 
-    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::VarInt;
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
