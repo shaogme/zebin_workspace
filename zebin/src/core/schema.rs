@@ -92,11 +92,12 @@ impl FieldEntry {
         C: ValidationContext + ?Sized,
     {
         let entry_pos = cursor.pos();
+        let bytes = cursor.read_array::<{ Self::SIZE }, C>(context)?;
 
-        let field_id = cursor.read_u16(context)?;
-        let encoding_byte = cursor.read_u8(context)?;
-        let reserved = cursor.read_u8(context)?;
-        let payload_len = cursor.read_u32(context)?;
+        let field_id = u16::from_le_bytes([bytes[0], bytes[1]]);
+        let encoding_byte = bytes[2];
+        let reserved = bytes[3];
+        let payload_len = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
 
         let encoding = FieldEncoding::from_byte(encoding_byte)
             .ok_or_else(|| context.validation_error("Unknown field encoding", entry_pos + 2))?;
@@ -180,18 +181,21 @@ impl SchemaObjectHeader {
         C: ValidationContext + ?Sized,
     {
         let object_start = cursor.pos();
-        let stable_schema_key = cursor.read_u32(context)?;
+        let bytes = cursor.read_array::<12, C>(context)?;
+
+        let stable_schema_key = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         if stable_schema_key != expected_key {
             return Err(context.validation_error("Stable schema key mismatch", object_start));
         }
 
-        let schema_revision = cursor.read_u32(context)?;
-        let field_count = cursor.read_u16(context)?;
-        let reserved_pos = cursor.pos();
-        let reserved = cursor.read_u16(context)?;
+        let schema_revision = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        let field_count = u16::from_le_bytes([bytes[8], bytes[9]]);
+        let reserved = u16::from_le_bytes([bytes[10], bytes[11]]);
 
         if reserved != 0 {
-            return Err(context.error(DecodeError::InvalidFieldTable { pos: reserved_pos }));
+            return Err(context.error(DecodeError::InvalidFieldTable {
+                pos: object_start + 10,
+            }));
         }
 
         if field_count as usize > MAX_SCHEMA_FIELDS {
@@ -250,4 +254,24 @@ impl<'a> FieldTableReader<'a> {
         self.remaining -= 1;
         Ok(Some((entry, entry_pos, payload)))
     }
+}
+
+/// Helper for processing schema-aware object field tables.
+#[doc(hidden)]
+pub fn process_field_table<'a, C, F>(
+    cursor: &mut Cursor<'a>,
+    field_count: usize,
+    context: &mut C,
+    mut handler: F,
+) -> Result<(), DecodeError>
+where
+    C: ValidationContext + ?Sized,
+    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), DecodeError>,
+{
+    let mut reader = FieldTableReader::new(cursor, field_count, context)?;
+    while let Some((entry, entry_pos, payload)) = reader.next(context)? {
+        handler(entry, entry_pos, payload, context)?;
+    }
+    *cursor = reader.payload_cursor;
+    Ok(())
 }

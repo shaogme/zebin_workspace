@@ -153,6 +153,7 @@ fn decode_known_field(
             let __value = <#archived_ty as zebin::Decode<'a>>::decode(&mut __field_cursor, &mut *__field_guard)?;
             __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #field_var = ::core::option::Option::Some(__value);
+            Ok(())
         }
     }
 }
@@ -175,6 +176,7 @@ fn validate_known_field(
             <#archived_ty as zebin::Decode<'a>>::validate(&mut __field_cursor, &mut *__field_guard)?;
             __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #seen_var = true;
+            Ok(())
         }
     }
 }
@@ -287,17 +289,15 @@ fn record_decode_impl(
                     let __stable_schema_key = __header.stable_schema_key;
                     let __schema_revision = __header.schema_revision;
                     let __field_count = __header.field_count as usize;
-                    let mut __reader = zebin::FieldTableReader::new(cursor, __field_count, &mut *__guard)?;
 
                     #(#var_decls)*
 
-                    while let Some((__entry, __entry_pos, __payload)) = __reader.next(&mut *__guard)? {
+                    zebin::process_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
                         match __entry.field_id {
                             #(#field_arms,)*
-                            _ => {}
+                            _ => Ok(()),
                         }
-                    }
-                    *cursor = __reader.payload_cursor;
+                    })?;
 
                     #(#missing_checks)*
 
@@ -319,17 +319,15 @@ fn record_decode_impl(
                     let __header = zebin::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
                     let _schema_revision = __header.schema_revision;
                     let __field_count = __header.field_count as usize;
-                    let mut __reader = zebin::FieldTableReader::new(cursor, __field_count, &mut *__guard)?;
 
                     #(#seen_var_decls)*
 
-                    while let Some((__entry, __entry_pos, __payload)) = __reader.next(&mut *__guard)? {
+                    zebin::process_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
                         match __entry.field_id {
                             #(#validate_field_arms,)*
-                            _ => {}
+                            _ => Ok(()),
                         }
-                    }
-                    *cursor = __reader.payload_cursor;
+                    })?;
 
                     #(#validate_missing_checks)*
 

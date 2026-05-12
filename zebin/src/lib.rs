@@ -60,7 +60,7 @@ pub use crate::archive::{
 };
 pub use crate::core::schema::{
     FieldEncoding, FieldEntry, FieldTableReader, MAX_SCHEMA_FIELDS, ObjectEncoding,
-    SchemaObjectHeader, SchemaRevision, StableSchemaKey,
+    SchemaObjectHeader, SchemaRevision, StableSchemaKey, process_field_table,
 };
 pub use crate::error::{ArchiveError, DecodeError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};

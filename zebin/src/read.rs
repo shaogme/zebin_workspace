@@ -85,33 +85,45 @@ impl<'a> Cursor<'a> {
         Ok(&self.bytes[self.pos..self.pos + len])
     }
 
+    fn read_fixed<const N: usize, C>(&mut self, context: &mut C) -> Result<&'a [u8; N], DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start = self.pos;
+        let end = start
+            .checked_add(N)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", start))?;
+        context.check_range(start, N)?;
+        self.pos = end;
+        Ok(self.bytes[start..end].try_into().unwrap())
+    }
+
     pub fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        let bytes = self.read_exact(N, context)?;
-        Ok(bytes.try_into().unwrap())
+        Ok(*self.read_fixed::<N, C>(context)?)
     }
 
     pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(self.read_array::<1, C>(context)?[0])
+        Ok(self.read_fixed::<1, C>(context)?[0])
     }
 
     pub fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(u16::from_le_bytes(self.read_array(context)?))
+        Ok(u16::from_le_bytes(*self.read_fixed::<2, C>(context)?))
     }
 
     pub fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(u32::from_le_bytes(self.read_array(context)?))
+        Ok(u32::from_le_bytes(*self.read_fixed::<4, C>(context)?))
     }
 
     pub fn read_i8<C>(&mut self, context: &mut C) -> Result<i8, DecodeError>
@@ -125,28 +137,28 @@ impl<'a> Cursor<'a> {
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(i16::from_le_bytes(self.read_array(context)?))
+        Ok(i16::from_le_bytes(*self.read_fixed::<2, C>(context)?))
     }
 
     pub fn read_i32<C>(&mut self, context: &mut C) -> Result<i32, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(i32::from_le_bytes(self.read_array(context)?))
+        Ok(i32::from_le_bytes(*self.read_fixed::<4, C>(context)?))
     }
 
     pub fn read_u64<C>(&mut self, context: &mut C) -> Result<u64, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(u64::from_le_bytes(self.read_array(context)?))
+        Ok(u64::from_le_bytes(*self.read_fixed::<8, C>(context)?))
     }
 
     pub fn read_i64<C>(&mut self, context: &mut C) -> Result<i64, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(i64::from_le_bytes(self.read_array(context)?))
+        Ok(i64::from_le_bytes(*self.read_fixed::<8, C>(context)?))
     }
 }
 

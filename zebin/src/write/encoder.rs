@@ -73,8 +73,7 @@ impl<'a> SliceEncoder<'a> {
 
     fn prepare_range(&mut self, len: usize) -> Result<(usize, usize), ZebinError> {
         let start = self.written;
-        let remaining = self.buf.len().saturating_sub(start);
-        let count = remaining.min(len);
+        let count = (self.buf.len().saturating_sub(start)).min(len);
 
         if count == 0 && len > 0 {
             return Ok((0, 0));
