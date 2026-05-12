@@ -227,7 +227,10 @@ impl<'a> FieldTableReader<'a> {
         C: ValidationContext + ?Sized,
     {
         let table_cursor = *cursor;
-        cursor.advance(field_count * FieldEntry::SIZE, context)?;
+        let table_len = field_count
+            .checked_mul(FieldEntry::SIZE)
+            .ok_or_else(|| DecodeError::InvalidFieldTable { pos: cursor.pos() })?;
+        cursor.advance(table_len, context)?;
         let payload_cursor = *cursor;
         Ok(Self {
             table_cursor,

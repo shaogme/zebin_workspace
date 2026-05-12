@@ -126,20 +126,20 @@ impl<'a> StringArchiveState<'a> {
 impl<'a> EncodeState<'a> for StringArchiveState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
-            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
-            self.prefix_cursor += written;
-            if self.prefix_cursor < self.len_prefix.len() {
+            let remaining = self.len_prefix.len() - self.prefix_cursor;
+            if encoder
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }
 
-        let written = encoder.write(&self.bytes[self.cursor..])?;
-        self.cursor += written;
-        if self.cursor < self.bytes.len() {
-            Ok(Poll::Pending)
-        } else {
-            Ok(Poll::Ready(()))
-        }
+        let remaining = self.bytes.len() - self.cursor;
+        Ok(encoder
+            .write(&self.bytes[self.cursor..])?
+            .advance_cursor(&mut self.cursor, remaining))
     }
 }
 

@@ -2,7 +2,7 @@ use core::num::NonZeroUsize;
 
 use crate::{
     ZebinError,
-    traits::ByteSink,
+    traits::{ByteSink, SinkProgress},
     utils::{byteops, padding_for_alignment},
 };
 
@@ -22,17 +22,17 @@ impl ByteSink for MeasureEncoder {
         self.pos
     }
 
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         let len = bytes.len();
         self.pos = self
             .pos
             .checked_add(len)
             .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
         debug_assert!(len <= core::isize::MAX as usize);
-        Ok(len)
+        Ok(SinkProgress::Complete)
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
         let align_val = alignment.get();
         debug_assert!(align_val.is_power_of_two());
         let padding = padding_for_alignment(self.pos, alignment);
@@ -41,15 +41,15 @@ impl ByteSink for MeasureEncoder {
             .checked_add(padding)
             .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
         debug_assert!(self.pos % alignment.get() == 0);
-        Ok(padding)
+        Ok(SinkProgress::Complete)
     }
 
-    fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
         self.pos = self
             .pos
             .checked_add(len)
             .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
-        Ok(len)
+        Ok(SinkProgress::Complete)
     }
 }
 
@@ -102,33 +102,33 @@ impl ByteSink for SliceEncoder<'_> {
         self.archive_pos
     }
 
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         if bytes.is_empty() {
-            return Ok(0);
+            return Ok(SinkProgress::Complete);
         }
         let (start, end) = self.prepare_range(bytes.len())?;
         let len = end - start;
         if len > 0 {
             self.buf[start..end].copy_from_slice(&bytes[..len]);
         }
-        Ok(len)
+        Ok(SinkProgress::from_accepted(bytes.len(), len))
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
         let padding = padding_for_alignment(self.archive_pos, alignment);
         self.skip(padding)
     }
 
-    fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
         if len == 0 {
-            return Ok(0);
+            return Ok(SinkProgress::Complete);
         }
         let (start, end) = self.prepare_range(len)?;
         let written = end - start;
         if written > 0 {
             byteops::fill(&mut self.buf[start..end], 0);
         }
-        Ok(written)
+        Ok(SinkProgress::from_accepted(len, written))
     }
 }
 
@@ -167,7 +167,7 @@ impl ByteSink for VecEncoder {
         self.archive_pos
     }
 
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         let next_pos =
             self.archive_pos
                 .checked_add(bytes.len())
@@ -176,15 +176,15 @@ impl ByteSink for VecEncoder {
                 })?;
         self.buf.extend_from_slice(bytes);
         self.archive_pos = next_pos;
-        Ok(bytes.len())
+        Ok(SinkProgress::Complete)
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
         let padding = padding_for_alignment(self.archive_pos, alignment);
         self.skip(padding)
     }
 
-    fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
         let next_pos = self
             .archive_pos
             .checked_add(len)
@@ -193,6 +193,6 @@ impl ByteSink for VecEncoder {
             })?;
         self.buf.resize(self.buf.len() + len, 0);
         self.archive_pos = next_pos;
-        Ok(len)
+        Ok(SinkProgress::Complete)
     }
 }

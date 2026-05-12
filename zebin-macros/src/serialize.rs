@@ -140,9 +140,11 @@ fn schema_header_poll(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
             __zebin_header[8..10].copy_from_slice(&(#field_count as u16).to_le_bytes());
             __zebin_header[10..12].copy_from_slice(&0u16.to_le_bytes());
             #(#entries)*
-            let written = encoder.write(&__zebin_header[self.__zebin_header_cursor..])?;
-            self.__zebin_header_cursor += written;
-            if self.__zebin_header_cursor < #header_len {
+            let __zebin_remaining = #header_len - self.__zebin_header_cursor;
+            if encoder.write(&__zebin_header[self.__zebin_header_cursor..])?
+                .advance_cursor(&mut self.__zebin_header_cursor, __zebin_remaining)
+                .is_pending()
+            {
                 return Ok(::core::task::Poll::Pending);
             }
         }
@@ -372,9 +374,11 @@ fn enum_impl(
         impl<'a> zebin::EncodeState<'a> for #enum_state<'a> {
             fn poll<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 if self.tag_cursor < self.tag.len() {
-                    let written = encoder.write(&self.tag[self.tag_cursor..])?;
-                    self.tag_cursor += written;
-                    if self.tag_cursor < self.tag.len() {
+                    let __zebin_remaining = self.tag.len() - self.tag_cursor;
+                    if encoder.write(&self.tag[self.tag_cursor..])?
+                        .advance_cursor(&mut self.tag_cursor, __zebin_remaining)
+                        .is_pending()
+                    {
                         return Ok(::core::task::Poll::Pending);
                     }
                 }

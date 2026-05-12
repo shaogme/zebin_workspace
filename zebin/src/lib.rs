@@ -35,7 +35,7 @@ pub mod prelude {
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-        Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware,
+        Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware, SinkProgress,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::validation::validator::ValidationConfig;
@@ -70,7 +70,7 @@ pub use crate::io::storage::mmap::Mmap;
 pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
     Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-    Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware,
+    Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware, SinkProgress,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::{

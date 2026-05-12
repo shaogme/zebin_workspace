@@ -158,9 +158,12 @@ impl<'a, T: VarIntNumber> VarIntVecBuilderState<'a, T> {
 impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntVecBuilderState<'a, T> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
-            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
-            self.prefix_cursor += written;
-            if self.prefix_cursor < self.len_prefix.len() {
+            let remaining = self.len_prefix.len() - self.prefix_cursor;
+            if encoder
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }
@@ -173,10 +176,12 @@ impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntVecBuilderState<'a, T> {
                 self.cursor = 0;
             }
 
-            let written =
-                encoder.write(&self.current_val_buf[self.cursor..self.current_val_len])?;
-            self.cursor += written;
-            if self.cursor < self.current_val_len {
+            let remaining = self.current_val_len - self.cursor;
+            if encoder
+                .write(&self.current_val_buf[self.cursor..self.current_val_len])?
+                .advance_cursor(&mut self.cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
 

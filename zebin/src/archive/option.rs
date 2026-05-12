@@ -162,9 +162,12 @@ where
 {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.prefix.len() {
-            let written = encoder.write(&self.prefix[self.prefix_cursor..])?;
-            self.prefix_cursor += written;
-            if self.prefix_cursor < self.prefix.len() {
+            let remaining = self.prefix.len() - self.prefix_cursor;
+            if encoder
+                .write(&self.prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }

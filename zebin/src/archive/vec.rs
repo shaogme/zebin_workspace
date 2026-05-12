@@ -226,22 +226,25 @@ where
 {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
-            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
-            self.prefix_cursor += written;
-            if self.prefix_cursor < self.len_prefix.len() {
+            let remaining = self.len_prefix.len() - self.prefix_cursor;
+            if encoder
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }
 
         if Self::fixed_width() && !self.aligned {
-            encoder.align(<T::Archived as ArchivedLayout>::ALIGNMENT)?;
-            if !encoder
-                .pos()
-                .is_multiple_of(<T::Archived as ArchivedLayout>::ALIGNMENT.get())
+            if encoder
+                .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
+                .is_complete()
             {
+                self.aligned = true;
+            } else {
                 return Ok(Poll::Pending);
             }
-            self.aligned = true;
         }
 
         while self.index < self.source.len() {

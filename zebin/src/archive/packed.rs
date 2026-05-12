@@ -338,17 +338,23 @@ impl<'a> PackedViewEncodeState<'a> {
 impl<'a> EncodeState<'a> for PackedViewEncodeState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
-            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
-            self.prefix_cursor += written;
-            if self.prefix_cursor < 4 {
+            let remaining = 4 - self.prefix_cursor;
+            if encoder
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }
 
         if self.bytes_cursor < self.bytes.len() {
-            let written = encoder.write(&self.bytes[self.bytes_cursor..])?;
-            self.bytes_cursor += written;
-            if self.bytes_cursor < self.bytes.len() {
+            let remaining = self.bytes.len() - self.bytes_cursor;
+            if encoder
+                .write(&self.bytes[self.bytes_cursor..])?
+                .advance_cursor(&mut self.bytes_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }

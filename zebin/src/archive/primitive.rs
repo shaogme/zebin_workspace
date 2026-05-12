@@ -24,13 +24,10 @@ impl<const N: usize> ByteState<N> {
 
 impl<'a, const N: usize> EncodeState<'a> for ByteState<N> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
-        let written = encoder.write(&self.bytes[self.cursor..])?;
-        self.cursor += written;
-        if self.cursor < N {
-            Ok(Poll::Pending)
-        } else {
-            Ok(Poll::Ready(()))
-        }
+        let remaining = N - self.cursor;
+        Ok(encoder
+            .write(&self.bytes[self.cursor..])?
+            .advance_cursor(&mut self.cursor, remaining))
     }
 }
 

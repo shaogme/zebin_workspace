@@ -101,9 +101,12 @@ impl<'a> PackedSequenceState<'a> {
 impl<'a> EncodeState<'a> for PackedSequenceState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
-            let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
-            self.prefix_cursor += written;
-            if self.prefix_cursor < self.len_prefix.len() {
+            let remaining = self.len_prefix.len() - self.prefix_cursor;
+            if encoder
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }
@@ -116,9 +119,12 @@ impl<'a> EncodeState<'a> for PackedSequenceState<'a> {
                 self.fill_buf()?;
             }
 
-            let written = encoder.write(&self.buf[self.buf_cursor..self.buf_len])?;
-            self.buf_cursor += written;
-            if self.buf_cursor < self.buf_len {
+            let remaining = self.buf_len - self.buf_cursor;
+            if encoder
+                .write(&self.buf[self.buf_cursor..self.buf_len])?
+                .advance_cursor(&mut self.buf_cursor, remaining)
+                .is_pending()
+            {
                 return Ok(Poll::Pending);
             }
         }

@@ -257,13 +257,14 @@ impl<T: VarIntNumber> VarIntArchiveState<T> {
 
 impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntArchiveState<T> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
-        let written = encoder.write(&self.bytes[self.cursor as usize..self.len as usize])?;
-        self.cursor += written as u8;
-        if self.cursor < self.len {
-            Ok(Poll::Pending)
-        } else {
-            Ok(Poll::Ready(()))
-        }
+        let mut cursor = self.cursor as usize;
+        let len = self.len as usize;
+        let remaining = len - cursor;
+        let progress = encoder
+            .write(&self.bytes[cursor..len])?
+            .advance_cursor(&mut cursor, remaining);
+        self.cursor = cursor as u8;
+        Ok(progress)
     }
 }
 

@@ -93,9 +93,12 @@ where
                     cursor,
                     next_state,
                 } => {
-                    let written = encoder.write(&bytes.as_ref()[*cursor..])?;
-                    *cursor += written;
-                    if *cursor < bytes.as_ref().len() {
+                    let remaining = bytes.as_ref().len() - *cursor;
+                    if encoder
+                        .write(&bytes.as_ref()[*cursor..])?
+                        .advance_cursor(cursor, remaining)
+                        .is_pending()
+                    {
                         break;
                     }
                     let state = next_state.take().ok_or(ZebinError::SerializationError {

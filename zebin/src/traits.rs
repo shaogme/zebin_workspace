@@ -93,34 +93,60 @@ pub trait Restore<T> {
     fn restore(&self) -> Result<T, ZebinError>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SinkProgress {
+    Complete,
+    Partial(NonZeroUsize),
+    Blocked,
+}
+
+impl SinkProgress {
+    pub fn from_accepted(requested: usize, accepted: usize) -> Self {
+        debug_assert!(accepted <= requested);
+        if accepted == requested {
+            Self::Complete
+        } else if let Some(accepted) = NonZeroUsize::new(accepted) {
+            Self::Partial(accepted)
+        } else {
+            Self::Blocked
+        }
+    }
+
+    pub fn accepted_for(self, requested: usize) -> usize {
+        match self {
+            Self::Complete => requested,
+            Self::Partial(accepted) => accepted.get(),
+            Self::Blocked => 0,
+        }
+    }
+
+    pub fn is_complete(self) -> bool {
+        matches!(self, Self::Complete)
+    }
+
+    pub fn advance_cursor(self, cursor: &mut usize, requested: usize) -> Poll<()> {
+        *cursor += self.accepted_for(requested);
+        if self.is_complete() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
 /// Byte-stream sink used by archive state machines.
-///
-/// Implementations may perform short writes. `write`, `align`, and `skip`
-/// return the number of bytes actually accepted; callers must preserve their
-/// own cursor state and return `Poll::Pending` when more output space is
-/// needed.
 pub trait ByteSink {
     /// Returns the current absolute position in the archive being written.
     fn pos(&self) -> usize;
 
     /// Attempts to write the provided bytes into the sink.
-    ///
-    /// Returns the number of bytes actually accepted. Implementations MAY perform
-    /// short writes if space is limited. Callers MUST handle the returned length
-    /// and resume the write in subsequent calls to ensure progress.
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError>;
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
 
     /// Attempts to align the current archive position to the specified alignment.
-    ///
-    /// Returns the number of padding bytes actually accepted. If the returned
-    /// value is less than what is required to reach the alignment, the caller
-    /// MUST handle this as a short write and retry.
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError>;
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError>;
 
     /// Attempts to skip (fill with zeros) the specified number of bytes.
-    ///
-    /// Returns the number of bytes actually skipped.
-    fn skip(&mut self, len: usize) -> Result<usize, ZebinError>;
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
 }
 
 /// Trait for resumable sequential archive construction states.

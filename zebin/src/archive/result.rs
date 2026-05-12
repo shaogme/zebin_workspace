@@ -182,9 +182,11 @@ where
                 state,
             } => {
                 if *prefix_cursor == 0 {
-                    let written = encoder.write(&[0])?;
-                    *prefix_cursor += written;
-                    if *prefix_cursor == 0 {
+                    if encoder
+                        .write(&[0])?
+                        .advance_cursor(prefix_cursor, 1)
+                        .is_pending()
+                    {
                         return Ok(Poll::Pending);
                     }
                 }
@@ -195,9 +197,11 @@ where
                 state,
             } => {
                 if *prefix_cursor == 0 {
-                    let written = encoder.write(&[1])?;
-                    *prefix_cursor += written;
-                    if *prefix_cursor == 0 {
+                    if encoder
+                        .write(&[1])?
+                        .advance_cursor(prefix_cursor, 1)
+                        .is_pending()
+                    {
                         return Ok(Poll::Pending);
                     }
                 }
