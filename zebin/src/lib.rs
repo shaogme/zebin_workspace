@@ -35,7 +35,7 @@ pub mod prelude {
     pub use crate::io::storage::mmap::Mmap;
     pub use crate::traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-        Decode, FixedLayout, Restore, SchemaAware, Serialize, SerializeState,
+        Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::validation::validator::ValidationConfig;
@@ -43,7 +43,7 @@ pub mod prelude {
         Cursor, Storage, Validator, ZebinReader, ZebinWriter, decode, encode_chunked, reader,
         validate, validate_detailed, validate_with_config,
     };
-    pub use zebin_macros::{ZebinArchive, ZebinSerialize};
+    pub use zebin_macros::{ZebinArchive, ZebinEncode};
 }
 
 pub use crate::archive::{
@@ -70,7 +70,7 @@ pub use crate::io::storage::mmap::Mmap;
 pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
     Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-    Decode, FixedLayout, Restore, SchemaAware, Serialize, SerializeState,
+    Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::{
@@ -85,7 +85,7 @@ pub use zebin_macros::*;
 /// Measure the body length a value will occupy when serialized without the archive header.
 pub fn measure_serialized_len<T>(value: &T) -> Result<usize, ZebinError>
 where
-    T: Serialize + Archive + ?Sized,
+    T: Encode + Archive + ?Sized,
 {
     crate::write::measure_body_len(value)
 }
@@ -146,7 +146,7 @@ where
 /// Create a chunked archive writer that can be resumed with caller-provided buffers.
 pub fn encode_chunked<T>(value: &T) -> Result<ZebinWriter<'_, T>, ZebinError>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
     ZebinWriter::encode_chunked(value)
@@ -159,7 +159,7 @@ use alloc::vec::Vec;
 #[cfg(feature = "alloc")]
 pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
     ZebinWriter::encode(value)
@@ -169,7 +169,7 @@ where
 #[cfg(feature = "alloc")]
 pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
     ZebinWriter::encode_into(value, buf)

@@ -4,7 +4,7 @@ use crate::{
     core::schema::ObjectEncoding,
     error::{DecodeError, ZebinError},
     traits::{
-        Archive, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore, SchemaAware,
     },
     validation::context::ValidationContext,
 };
@@ -138,42 +138,42 @@ where
 /// Resumable serialization state for `Result<T, E>`.
 pub enum ResultArchiveState<'a, T, E>
 where
-    T: Serialize + Archive + 'a,
-    E: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
+    E: Encode + Archive + 'a,
 {
     Ok {
         prefix_cursor: usize,
-        state: <T as Serialize>::State<'a>,
+        state: <T as Encode>::State<'a>,
     },
     Err {
         prefix_cursor: usize,
-        state: <E as Serialize>::State<'a>,
+        state: <E as Encode>::State<'a>,
     },
 }
 
 impl<'a, T, E> ResultArchiveState<'a, T, E>
 where
-    T: Serialize + Archive + 'a,
-    E: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
+    E: Encode + Archive + 'a,
 {
     pub(crate) fn new(value: Result<&'a T, &'a E>) -> Result<Self, ZebinError> {
         match value {
             Ok(inner) => Ok(Self::Ok {
                 prefix_cursor: 0,
-                state: inner.begin_serialize()?,
+                state: inner.begin_encode()?,
             }),
             Err(inner) => Ok(Self::Err {
                 prefix_cursor: 0,
-                state: inner.begin_serialize()?,
+                state: inner.begin_encode()?,
             }),
         }
     }
 }
 
-impl<'a, T, E> SerializeState<'a> for ResultArchiveState<'a, T, E>
+impl<'a, T, E> EncodeState<'a> for ResultArchiveState<'a, T, E>
 where
-    T: Serialize + Archive + 'a,
-    E: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
+    E: Encode + Archive + 'a,
 {
     fn poll<R: ByteSink + ?Sized>(&mut self, encoder: &mut R) -> Result<Poll<()>, ZebinError> {
         match self {
@@ -215,17 +215,17 @@ where
     type Archived = ArchivedResult<T::Archived, E::Archived>;
 }
 
-impl<T, E> Serialize for Result<T, E>
+impl<T, E> Encode for Result<T, E>
 where
-    T: Serialize + Archive,
-    E: Serialize + Archive,
+    T: Encode + Archive,
+    E: Encode + Archive,
 {
     type State<'a>
         = ResultArchiveState<'a, T, E>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         ResultArchiveState::new(self.as_ref())
     }
 }

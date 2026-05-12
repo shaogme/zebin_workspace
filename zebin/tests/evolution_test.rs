@@ -1,6 +1,6 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinArchive, ZebinEncode};
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 #[zebin(schema_key = 0x100)]
 pub struct Version1 {
     #[zebin(id = 1)]
@@ -9,7 +9,7 @@ pub struct Version1 {
     pub name: String,
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 #[zebin(schema_key = 0x100)]
 pub struct Version2 {
     #[zebin(id = 1)]
@@ -75,7 +75,7 @@ fn test_version2_with_all_fields() {
     assert_eq!(reader.score().unwrap(), &95);
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub enum MessageV1 {
     #[zebin(schema_key = 0x201)]
     Login {
@@ -84,7 +84,7 @@ pub enum MessageV1 {
     },
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub enum MessageV2 {
     #[zebin(schema_key = 0x201)]
     Login {

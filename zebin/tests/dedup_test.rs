@@ -1,13 +1,13 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinArchive, ZebinEncode};
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 #[zebin(schema_key = 860116326)]
 pub struct Child {
     #[zebin(id = 0)]
     pub value: u32,
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 pub struct Parent {
     pub children: Vec<Child>,
 }

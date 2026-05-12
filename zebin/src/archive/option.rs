@@ -4,8 +4,8 @@ use crate::{
     core::schema::ObjectEncoding,
     error::{DecodeError, ZebinError},
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
-        Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        SchemaAware,
     },
     validation::context::ValidationContext,
 };
@@ -129,23 +129,23 @@ where
 /// Resumable serialization state for `Option<T>`.
 pub struct OptionArchiveState<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     prefix: [u8; 1],
     prefix_cursor: usize,
-    inner: Option<<T as Serialize>::State<'a>>,
+    inner: Option<<T as Encode>::State<'a>>,
 }
 
 impl<'a, T> OptionArchiveState<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     fn new(value: Option<&'a T>) -> Result<Self, ZebinError> {
         match value {
             Some(inner) => Ok(Self {
                 prefix: [1],
                 prefix_cursor: 0,
-                inner: Some(inner.begin_serialize()?),
+                inner: Some(inner.begin_encode()?),
             }),
             None => Ok(Self {
                 prefix: [0],
@@ -156,9 +156,9 @@ where
     }
 }
 
-impl<'a, T> SerializeState<'a> for OptionArchiveState<'a, T>
+impl<'a, T> EncodeState<'a> for OptionArchiveState<'a, T>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.prefix.len() {
@@ -190,16 +190,16 @@ where
     type Archived = ArchivedOption<T::Archived>;
 }
 
-impl<T> Serialize for Option<T>
+impl<T> Encode for Option<T>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
 {
     type State<'a>
         = OptionArchiveState<'a, T>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         OptionArchiveState::new(self.as_ref())
     }
 }

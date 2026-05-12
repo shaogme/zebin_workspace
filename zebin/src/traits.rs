@@ -128,15 +128,15 @@ pub trait ByteSink {
 /// A state should make as much progress as the provided [`ByteSink`] allows.
 /// When a sink accepts only part of the requested bytes, the state must retain
 /// enough progress to resume the next call without rewriting bytes.
-pub trait SerializeState<'a> {
+pub trait EncodeState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError>;
 }
 
 /// Trait for types that can create resumable archive states.
-pub trait Serialize: Archive {
-    type State<'a>: SerializeState<'a>
+pub trait Encode: Archive {
+    type State<'a>: EncodeState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError>;
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError>;
 }

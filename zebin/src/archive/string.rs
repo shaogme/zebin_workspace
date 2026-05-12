@@ -8,8 +8,8 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
-        Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        SchemaAware,
     },
     validation::context::ValidationContext,
 };
@@ -123,7 +123,7 @@ impl<'a> StringArchiveState<'a> {
     }
 }
 
-impl<'a> SerializeState<'a> for StringArchiveState<'a> {
+impl<'a> EncodeState<'a> for StringArchiveState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
@@ -147,13 +147,13 @@ impl Archive for String {
     type Archived = ArchivedString;
 }
 
-impl Serialize for String {
+impl Encode for String {
     type State<'a>
         = StringArchiveState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         StringArchiveState::new(self.as_bytes())
     }
 }
@@ -162,13 +162,13 @@ impl Archive for str {
     type Archived = ArchivedString;
 }
 
-impl Serialize for str {
+impl Encode for str {
     type State<'a>
         = StringArchiveState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         StringArchiveState::new(self.as_bytes())
     }
 }

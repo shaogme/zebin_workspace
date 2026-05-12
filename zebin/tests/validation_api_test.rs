@@ -1,24 +1,24 @@
 use zebin::{
-    DecodeError, ValidationConfig, ValidationPathStack, ZebinArchive, ZebinError, ZebinSerialize,
+    DecodeError, ValidationConfig, ValidationPathStack, ZebinArchive, ZebinEncode, ZebinError,
     validate_detailed, validate_with_config,
 };
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 struct Child {
     flag: bool,
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 struct Parent {
     children: Vec<Child>,
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 struct Node {
     children: Vec<Node>,
 }
 
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 #[zebin(schema_key = 0x5151)]
 struct SchemaRecord {
     #[zebin(id = 1)]

@@ -4,7 +4,7 @@ use core::task::Poll;
 use crate::{
     archive::packed::{ArchivedPackedBoolSlice, ArchivedPackedU8Slice},
     error::ZebinError,
-    traits::{Archive, ByteSink, Restore, Serialize, SerializeState},
+    traits::{Archive, ByteSink, Encode, EncodeState, Restore},
 };
 
 enum PackedData<'a> {
@@ -98,7 +98,7 @@ impl<'a> PackedSequenceState<'a> {
     }
 }
 
-impl<'a> SerializeState<'a> for PackedSequenceState<'a> {
+impl<'a> EncodeState<'a> for PackedSequenceState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
@@ -181,13 +181,13 @@ impl Archive for PackedVec<bool, 1> {
     type Archived = ArchivedPackedBoolSlice;
 }
 
-impl Serialize for PackedVec<bool, 1> {
+impl Encode for PackedVec<bool, 1> {
     type State<'a>
         = PackedSequenceState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         PackedSequenceState::new_bool(self.values.as_slice())
     }
 }
@@ -196,35 +196,35 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
 }
 
-impl<const BITS: u8> Serialize for PackedVec<u8, BITS> {
+impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
     type State<'a>
         = PackedSequenceState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         PackedSequenceState::new_u8(self.values.as_slice(), BITS)
     }
 }
 
-impl Serialize for crate::archive::packed::PackedSlice<'_, bool, 1> {
+impl Encode for crate::archive::packed::PackedSlice<'_, bool, 1> {
     type State<'a>
         = PackedSequenceState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         PackedSequenceState::new_bool(self.values())
     }
 }
 
-impl<const BITS: u8> Serialize for crate::archive::packed::PackedSlice<'_, u8, BITS> {
+impl<const BITS: u8> Encode for crate::archive::packed::PackedSlice<'_, u8, BITS> {
     type State<'a>
         = PackedSequenceState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         PackedSequenceState::new_u8(self.values(), BITS)
     }
 }

@@ -1,7 +1,7 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinArchive, ZebinEncode};
 
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub struct AttributeTest {
     pub id: u64,
 
@@ -33,7 +33,7 @@ fn test_rename_and_skip() {
 }
 
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 pub struct TupleTest(u32, #[zebin(skip)] String, u64);
 
 #[test]
@@ -48,7 +48,7 @@ fn test_tuple_skip() {
 }
 
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinSerialize)]
+#[derive(ZebinArchive, ZebinEncode)]
 pub enum EnumTest {
     Variant1 {
         id: u32,

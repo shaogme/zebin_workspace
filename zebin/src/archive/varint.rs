@@ -5,8 +5,8 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
-        Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        SchemaAware,
     },
     validation::context::ValidationContext,
 };
@@ -255,7 +255,7 @@ impl<T: VarIntNumber> VarIntArchiveState<T> {
     }
 }
 
-impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntArchiveState<T> {
+impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntArchiveState<T> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         let written = encoder.write(&self.bytes[self.cursor as usize..self.len as usize])?;
         self.cursor += written as u8;
@@ -267,7 +267,7 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntArchiveState<T> {
     }
 }
 
-impl<T> Serialize for VarInt<T>
+impl<T> Encode for VarInt<T>
 where
     T: VarIntNumber,
 {
@@ -276,12 +276,12 @@ where
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntArchiveState::new(self.get()))
     }
 }
 
-impl<T> Serialize for VarIntView<T>
+impl<T> Encode for VarIntView<T>
 where
     T: VarIntNumber,
 {
@@ -290,7 +290,7 @@ where
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(VarIntArchiveState::new(self.get()))
     }
 }

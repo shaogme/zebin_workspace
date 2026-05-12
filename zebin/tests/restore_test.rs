@@ -1,6 +1,6 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinArchive, ZebinEncode};
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 #[zebin(schema_key = 1)]
 pub struct UserProfile {
     #[zebin(id = 0)]
@@ -11,7 +11,7 @@ pub struct UserProfile {
     pub tags: Vec<String>,
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub enum Packet {
     Ping,
     #[zebin(schema_key = 2)]
@@ -54,7 +54,7 @@ fn test_enum_restore() {
 
 #[test]
 fn test_nested_restore() {
-    #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
     #[zebin(schema_key = 3)]
     struct Container {
         #[zebin(id = 0)]
@@ -75,7 +75,7 @@ fn test_nested_restore() {
 
 #[test]
 fn test_optional_option_restore() {
-    #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
     #[zebin(schema_key = 4)]
     struct OptionalStruct {
         #[zebin(id = 0, optional)]

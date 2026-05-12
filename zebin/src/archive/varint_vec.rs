@@ -7,8 +7,8 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
-        Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        SchemaAware,
     },
     validation::context::ValidationContext,
 };
@@ -155,7 +155,7 @@ impl<'a, T: VarIntNumber> VarIntVecBuilderState<'a, T> {
     }
 }
 
-impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<'a, T> {
+impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntVecBuilderState<'a, T> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;
@@ -188,24 +188,24 @@ impl<'a, T: VarIntNumber> SerializeState<'a> for VarIntVecBuilderState<'a, T> {
     }
 }
 
-impl<T: VarIntNumber> Serialize for VarIntVec<T> {
+impl<T: VarIntNumber> Encode for VarIntVec<T> {
     type State<'a>
         = VarIntVecBuilderState<'a, T>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         VarIntVecBuilderState::new(&self.values)
     }
 }
 
-impl<T: VarIntNumber> Serialize for ArchivedVarIntVec<T> {
+impl<T: VarIntNumber> Encode for ArchivedVarIntVec<T> {
     type State<'a>
         = VarIntVecBuilderState<'a, T>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         VarIntVecBuilderState::new(&self.values)
     }
 }
@@ -214,13 +214,13 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
     type Archived = ArchivedVarIntVec<T>;
 }
 
-impl<'a, T: VarIntNumber> Serialize for PackedVarIntSlice<'a, T> {
+impl<'a, T: VarIntNumber> Encode for PackedVarIntSlice<'a, T> {
     type State<'b>
         = VarIntVecBuilderState<'b, T>
     where
         Self: 'b;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         VarIntVecBuilderState::new(self.values)
     }
 }

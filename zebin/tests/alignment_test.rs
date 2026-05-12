@@ -1,6 +1,6 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinArchive, ZebinEncode};
 
-#[derive(Debug, PartialEq, Eq, ZebinArchive, ZebinSerialize)]
+#[derive(Debug, PartialEq, Eq, ZebinArchive, ZebinEncode)]
 struct AlignedContainers {
     values: Vec<u64>,
     fixed: [u64; 3],

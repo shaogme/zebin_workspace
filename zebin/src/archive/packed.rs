@@ -3,8 +3,8 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
-        Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        SchemaAware,
     },
     validation::context::ValidationContext,
 };
@@ -294,37 +294,37 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
 }
 
-impl Serialize for ArchivedPackedBoolSliceView<'_> {
+impl Encode for ArchivedPackedBoolSliceView<'_> {
     type State<'a>
-        = PackedViewSerializeState<'a>
+        = PackedViewEncodeState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedViewSerializeState::new(self.len, self.bytes))
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+        Ok(PackedViewEncodeState::new(self.len, self.bytes))
     }
 }
 
-impl<const BITS: u8> Serialize for ArchivedPackedU8SliceView<'_, BITS> {
+impl<const BITS: u8> Encode for ArchivedPackedU8SliceView<'_, BITS> {
     type State<'a>
-        = PackedViewSerializeState<'a>
+        = PackedViewEncodeState<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedViewSerializeState::new(self.len, self.bytes))
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+        Ok(PackedViewEncodeState::new(self.len, self.bytes))
     }
 }
 
 /// State for serializing an already-packed view.
-pub struct PackedViewSerializeState<'a> {
+pub struct PackedViewEncodeState<'a> {
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     bytes: &'a [u8],
     bytes_cursor: usize,
 }
 
-impl<'a> PackedViewSerializeState<'a> {
+impl<'a> PackedViewEncodeState<'a> {
     pub fn new(len: usize, bytes: &'a [u8]) -> Self {
         Self {
             len_prefix: (len as u32).to_le_bytes(),
@@ -335,7 +335,7 @@ impl<'a> PackedViewSerializeState<'a> {
     }
 }
 
-impl<'a> SerializeState<'a> for PackedViewSerializeState<'a> {
+impl<'a> EncodeState<'a> for PackedViewEncodeState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let written = encoder.write(&self.len_prefix[self.prefix_cursor..])?;

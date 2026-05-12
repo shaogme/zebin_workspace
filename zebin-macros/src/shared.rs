@@ -191,10 +191,10 @@ pub fn is_option_type(ty: &Type) -> bool {
 
 pub fn field_state_type(field: &FieldSpec<'_>) -> TokenStream {
     if let Some(wrapper) = packed::packed_wrapper_type(field) {
-        quote! { <#wrapper as zebin::Serialize>::State<'a> }
+        quote! { <#wrapper as zebin::Encode>::State<'a> }
     } else {
         let ty = field.ty;
-        quote! { <#ty as zebin::Serialize>::State<'a> }
+        quote! { <#ty as zebin::Encode>::State<'a> }
     }
 }
 
@@ -264,7 +264,7 @@ pub fn parse_item(input: &DeriveInput) -> Result<ItemSpec<'_>> {
         }
         _ => Err(syn::Error::new(
             input.span(),
-            "ZebinArchive 和 ZebinSerialize 只支持 struct 与 enum",
+            "ZebinArchive 和 ZebinEncode 只支持 struct 与 enum",
         )),
     }
 }

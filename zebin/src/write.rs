@@ -6,8 +6,7 @@ use crate::{
     error::ZebinError,
     format::ArchiveHeader,
     traits::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, ByteSink, Serialize,
-        SerializeState,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, EncodeState,
     },
     write::encoder::{MeasureEncoder, SliceEncoder},
 };
@@ -20,16 +19,16 @@ use alloc::vec::Vec;
 
 enum EncodePhase<'a, T, H = ArchiveHeader>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
     H: ArchiveHeaderTrait,
 {
     Header {
         bytes: H::Bytes,
         cursor: usize,
-        next_state: Option<<T as Serialize>::State<'a>>,
+        next_state: Option<<T as Encode>::State<'a>>,
     },
     Body {
-        state: <T as Serialize>::State<'a>,
+        state: <T as Encode>::State<'a>,
     },
     Done {
         _phantom: PhantomData<H>,
@@ -41,7 +40,7 @@ pub type ZebinWriter<'a, T> = ArchiveWriter<'a, T, ArchiveHeader>;
 /// Stateful archive writer that can stream into caller-provided buffers.
 pub struct ArchiveWriter<'a, T, H = ArchiveHeader>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
     H: ArchiveHeaderTrait,
 {
     phase: EncodePhase<'a, T, H>,
@@ -51,7 +50,7 @@ where
 
 impl<'a, T, H> ArchiveWriter<'a, T, H>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {
@@ -62,7 +61,7 @@ where
             phase: EncodePhase::Header {
                 bytes: header.encode(),
                 cursor: 0,
-                next_state: Some(value.begin_serialize()?),
+                next_state: Some(value.begin_encode()?),
             },
             archive_pos: 0,
             total_len,
@@ -152,7 +151,7 @@ where
         let mut encoder = VecEncoder::new(0);
         encoder.write(header.encode().as_ref())?;
 
-        let mut state = value.begin_serialize()?;
+        let mut state = value.begin_encode()?;
         loop {
             match state.poll(&mut encoder)? {
                 core::task::Poll::Ready(()) => break,
@@ -172,7 +171,7 @@ where
 
 fn measure_total_len<'a, T, H>(value: &'a T) -> Result<usize, ZebinError>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {
@@ -188,10 +187,10 @@ where
 
 pub(crate) fn measure_body_len_from_pos<T>(value: &T, start_pos: usize) -> Result<usize, ZebinError>
 where
-    T: Serialize + Archive + ?Sized,
+    T: Encode + Archive + ?Sized,
 {
     let mut encoder = MeasureEncoder::new(start_pos);
-    let mut state = value.begin_serialize()?;
+    let mut state = value.begin_encode()?;
     loop {
         match state.poll(&mut encoder)? {
             core::task::Poll::Pending => continue,
@@ -207,7 +206,7 @@ where
 
 pub fn measure_body_len<T>(value: &T) -> Result<usize, ZebinError>
 where
-    T: Serialize + Archive + ?Sized,
+    T: Encode + Archive + ?Sized,
 {
     measure_body_len_from_pos(value, 0)
 }

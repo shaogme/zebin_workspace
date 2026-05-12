@@ -6,8 +6,8 @@ use crate::{
     archive::slice::SequenceSource,
     error::{DecodeError, ZebinError},
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Restore, SchemaAware,
-        Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        SchemaAware,
     },
 };
 
@@ -168,20 +168,20 @@ where
 pub struct SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     source: &'a S,
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     aligned: bool,
     index: usize,
-    current_state: Option<Box<<T as Serialize>::State<'a>>>,
+    current_state: Option<Box<<T as Encode>::State<'a>>>,
 }
 
 impl<'a, S, T> SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     pub(crate) fn new(source: &'a S) -> Result<Self, ZebinError> {
         let len = u32::try_from(source.len()).map_err(|_| ZebinError::SerializationError {
@@ -213,15 +213,15 @@ where
             return Ok(());
         }
 
-        self.current_state = Some(Box::new(self.source.get(self.index).begin_serialize()?));
+        self.current_state = Some(Box::new(self.source.get(self.index).begin_encode()?));
         Ok(())
     }
 }
 
-impl<'a, S, T> SerializeState<'a> for SequenceArchiveState<'a, S, T>
+impl<'a, S, T> EncodeState<'a> for SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
     T::Archived: ArchivedLayout,
 {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
@@ -266,16 +266,16 @@ where
 
 pub struct ArrayArchiveState<'a, T, const N: usize>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     items: &'a [T; N],
     index: usize,
-    current_state: Option<<T as Serialize>::State<'a>>,
+    current_state: Option<<T as Encode>::State<'a>>,
 }
 
 impl<'a, T, const N: usize> ArrayArchiveState<'a, T, N>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     pub(crate) fn new(items: &'a [T; N]) -> Self {
         Self {
@@ -286,14 +286,14 @@ where
     }
 }
 
-impl<'a, T, const N: usize> SerializeState<'a> for ArrayArchiveState<'a, T, N>
+impl<'a, T, const N: usize> EncodeState<'a> for ArrayArchiveState<'a, T, N>
 where
-    T: Serialize + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         while self.index < N {
             if self.current_state.is_none() {
-                self.current_state = Some(self.items[self.index].begin_serialize()?);
+                self.current_state = Some(self.items[self.index].begin_encode()?);
             }
             let state = self
                 .current_state
@@ -319,9 +319,9 @@ impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-impl<T> Serialize for Vec<T>
+impl<T> Encode for Vec<T>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
     type State<'a>
@@ -329,7 +329,7 @@ where
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         VecArchiveState::new(self.as_slice())
     }
 }
@@ -341,9 +341,9 @@ where
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-impl<T> Serialize for VecDeque<T>
+impl<T> Encode for VecDeque<T>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
     type State<'a>
@@ -351,14 +351,14 @@ where
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         VecDequeArchiveState::new(self)
     }
 }
 
-impl<T> Serialize for [T]
+impl<T> Encode for [T]
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
     type State<'a>
@@ -366,21 +366,21 @@ where
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         SliceArchiveState::new(self)
     }
 }
 
-impl<T, const N: usize> Serialize for [T; N]
+impl<T, const N: usize> Encode for [T; N]
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
 {
     type State<'a>
         = ArrayArchiveState<'a, T, N>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ArrayArchiveState::new(self))
     }
 }

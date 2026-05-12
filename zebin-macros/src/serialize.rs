@@ -59,7 +59,7 @@ fn field_state_init_for_value(
         }
     } else {
         let ty = field.ty;
-        quote! { <#ty as zebin::Serialize>::begin_serialize(#value)? }
+        quote! { <#ty as zebin::Encode>::begin_encode(#value)? }
     }
 }
 
@@ -180,7 +180,7 @@ fn record_state_def(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2:
 fn record_state_impl(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let logic = record_poll_logic(record);
     quote! {
-        impl<'a> zebin::SerializeState<'a> for #state_name<'a> {
+        impl<'a> zebin::EncodeState<'a> for #state_name<'a> {
             fn poll<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #logic
             }
@@ -196,9 +196,9 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
     quote! {
         #state_def
         #state_impl
-        impl zebin::Serialize for #name {
+        impl zebin::Encode for #name {
             type State<'a> = #s_name<'a> where Self: 'a;
-            fn begin_serialize(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
+            fn begin_encode(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
                 Ok(#s_name { _marker: ::core::marker::PhantomData, #(#inits,)* })
             }
         }
@@ -344,7 +344,7 @@ fn enum_impl(
             #(#payload_variants,)*
         }
 
-        impl<'a> zebin::SerializeState<'a> for #payload_state<'a> {
+        impl<'a> zebin::EncodeState<'a> for #payload_state<'a> {
             fn poll<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
@@ -369,7 +369,7 @@ fn enum_impl(
             }
         }
 
-        impl<'a> zebin::SerializeState<'a> for #enum_state<'a> {
+        impl<'a> zebin::EncodeState<'a> for #enum_state<'a> {
             fn poll<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 if self.tag_cursor < self.tag.len() {
                     let written = encoder.write(&self.tag[self.tag_cursor..])?;
@@ -392,9 +392,9 @@ fn enum_impl(
             }
         }
 
-        impl zebin::Serialize for #name {
+        impl zebin::Encode for #name {
             type State<'a> = #enum_state<'a> where Self: 'a;
-            fn begin_serialize(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
+            fn begin_encode(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
                 match self {
                     #(#begin_matches,)*
                 }

@@ -1,19 +1,19 @@
 use zebin::prelude::*;
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub struct VarIntStruct {
     pub a: u8,
     pub b: VarInt<u32>,
     pub c: u64,
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub struct NestedVarInt {
     pub inner: VarIntStruct,
     pub count: VarInt<usize>,
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 #[allow(dead_code)]
 enum VarIntEnum {
     Small(u8),

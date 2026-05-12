@@ -1,6 +1,6 @@
 use crate::{
     ZebinError,
-    traits::{Archive, Restore, Serialize},
+    traits::{Archive, Encode, Restore},
 };
 use alloc::{borrow::Cow, borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc};
 
@@ -11,17 +11,17 @@ where
     type Archived = T::Archived;
 }
 
-impl<T: ?Sized> Serialize for Box<T>
+impl<T: ?Sized> Encode for Box<T>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
 {
     type State<'a>
-        = <T as Serialize>::State<'a>
+        = <T as Encode>::State<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin_serialize()
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_encode()
     }
 }
 
@@ -61,17 +61,17 @@ where
     type Archived = T::Archived;
 }
 
-impl<T: ?Sized> Serialize for Rc<T>
+impl<T: ?Sized> Encode for Rc<T>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
 {
     type State<'a>
-        = <T as Serialize>::State<'a>
+        = <T as Encode>::State<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin_serialize()
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_encode()
     }
 }
 
@@ -111,17 +111,17 @@ where
     type Archived = T::Archived;
 }
 
-impl<T: ?Sized> Serialize for Arc<T>
+impl<T: ?Sized> Encode for Arc<T>
 where
-    T: Serialize + Archive,
+    T: Encode + Archive,
 {
     type State<'a>
-        = <T as Serialize>::State<'a>
+        = <T as Encode>::State<'a>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin_serialize()
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_encode()
     }
 }
 
@@ -161,17 +161,17 @@ where
     type Archived = B::Archived;
 }
 
-impl<'a, B> Serialize for Cow<'a, B>
+impl<'a, B> Encode for Cow<'a, B>
 where
-    B: ?Sized + ToOwned + Serialize + Archive,
+    B: ?Sized + ToOwned + Encode + Archive,
 {
     type State<'b>
-        = <B as Serialize>::State<'b>
+        = <B as Encode>::State<'b>
     where
         Self: 'b;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
-        self.as_ref().begin_serialize()
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+        self.as_ref().begin_encode()
     }
 }
 

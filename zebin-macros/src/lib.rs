@@ -9,7 +9,7 @@ pub fn derive_zebin_archive(input: TokenStream) -> TokenStream {
     archive::derive(input)
 }
 
-#[proc_macro_derive(ZebinSerialize, attributes(zebin))]
+#[proc_macro_derive(ZebinEncode, attributes(zebin))]
 pub fn derive_zebin_archive_builder(input: TokenStream) -> TokenStream {
     serialize::derive(input)
 }

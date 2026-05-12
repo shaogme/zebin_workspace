@@ -3,8 +3,8 @@ use crate::{
     error::DecodeError,
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, FixedLayout, Restore,
-        SchemaAware, Serialize, SerializeState,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState,
+        FixedLayout, Restore, SchemaAware,
     },
     validation::context::ValidationContext,
 };
@@ -22,7 +22,7 @@ impl<const N: usize> ByteState<N> {
     }
 }
 
-impl<'a, const N: usize> SerializeState<'a> for ByteState<N> {
+impl<'a, const N: usize> EncodeState<'a> for ByteState<N> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         let written = encoder.write(&self.bytes[self.cursor..])?;
         self.cursor += written;
@@ -85,10 +85,10 @@ macro_rules! impl_archive_for_primitive {
                 type Archived = $t;
             }
 
-            impl Serialize for $t {
+            impl Encode for $t {
                 type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
 
-                fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+                fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
                     Ok(ByteState::new(self.to_le_bytes()))
                 }
             }
@@ -167,13 +167,13 @@ impl Archive for bool {
     type Archived = bool;
 }
 
-impl Serialize for bool {
+impl Encode for bool {
     type State<'a>
         = ByteState<1>
     where
         Self: 'a;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(ByteState::new([*self as u8]))
     }
 }
@@ -206,7 +206,7 @@ impl SchemaAware for bool {
 
 pub struct UnitState;
 
-impl<'a> SerializeState<'a> for UnitState {
+impl<'a> EncodeState<'a> for UnitState {
     fn poll<E: ByteSink + ?Sized>(&mut self, _encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
@@ -246,10 +246,10 @@ impl Archive for () {
     type Archived = ();
 }
 
-impl Serialize for () {
+impl Encode for () {
     type State<'a> = UnitState;
 
-    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
         Ok(UnitState)
     }
 }
