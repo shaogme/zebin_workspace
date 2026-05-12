@@ -56,7 +56,6 @@ pub use crate::archive::{
 pub use crate::archive::{
     packed_vec::{PackedBoolVec, PackedSequenceState, PackedU8Vec, PackedVec},
     varint_vec::{PackedVarIntSlice, VarIntVec},
-    vec::archived_bytes,
 };
 pub use crate::core::schema::{
     FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaRevision, StableSchemaKey,

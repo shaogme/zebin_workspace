@@ -1,10 +1,11 @@
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
+use crate::{Cursor, FieldEncoding, ValidationContext};
 use crate::{
-    archive::slice::{ArchivedVec, SequenceSource},
-    error::ZebinError,
-    traits::{Archive, ByteSink, Decode, Restore, Serialize, SerializeState},
+    archive::slice::SequenceSource,
+    error::{AccessError, ZebinError},
+    traits::{Archive, ArchivedDefault, ByteSink, Decode, Restore, Serialize, SerializeState},
 };
 
 impl<T> SequenceSource<T> for VecDeque<T> {
@@ -17,20 +18,111 @@ impl<T> SequenceSource<T> for VecDeque<T> {
     }
 }
 
-pub fn archived_bytes<T>(value: &T) -> Result<Vec<u8>, ZebinError>
-where
-    T: Serialize + Archive + ?Sized,
-{
-    let len = crate::measure_serialized_len(value)?;
-    let mut out = vec![0u8; len];
-    let mut encoder = crate::write::encoder::SliceEncoder::new(&mut out, 0);
-    let mut state = value.begin_serialize()?;
-    loop {
-        match state.poll(&mut encoder)? {
-            Poll::Pending => continue,
-            Poll::Ready(()) => return Ok(out),
+/// Decoded archived vector view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchivedVec<'a, T> {
+    items: Vec<T>,
+    _marker: core::marker::PhantomData<&'a ()>,
+}
+
+impl<'a, T> ArchivedVec<'a, T> {
+    pub fn new(items: Vec<T>) -> Self {
+        Self {
+            items,
+            _marker: core::marker::PhantomData,
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub unsafe fn as_slice(&self) -> &[T] {
+        self.items.as_slice()
+    }
+
+    pub fn iter(&self) -> core::slice::Iter<'_, T> {
+        self.items.iter()
+    }
+}
+
+impl<'a, T: 'static> ArchivedDefault for ArchivedVec<'a, T> {
+    fn archived_default() -> &'static Self {
+        static DEFAULT: ArchivedVec<'static, ()> = ArchivedVec {
+            items: Vec::new(),
+            _marker: core::marker::PhantomData,
+        };
+        unsafe { &*(&DEFAULT as *const ArchivedVec<'static, ()> as *const Self) }
+    }
+}
+
+impl<'marker, 'a, A> Decode<'a> for ArchivedVec<'marker, A>
+where
+    A: Decode<'a>,
+{
+    type View = ArchivedVec<'a, A::View>;
+
+    const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
+
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let len = cursor.read_u32(context)? as usize;
+        let mut items = Vec::with_capacity(len);
+
+        if let Some(_fixed_size) = A::FIXED_SIZE {
+            cursor.align(A::ALIGNMENT, context)?;
+            for index in 0..len {
+                let mut guard = context.push_index(index);
+                items.push(A::decode(cursor, &mut *guard)?);
+            }
+        } else {
+            for index in 0..len {
+                let mut guard = context.push_index(index);
+                items.push(A::decode(cursor, &mut *guard)?);
+            }
+        }
+
+        Ok(ArchivedVec::new(items))
+    }
+}
+
+impl<T, U> Restore<Vec<U>> for ArchivedVec<'_, T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.items.len());
+        for item in &self.items {
+            out.push(item.restore()?);
+        }
+        Ok(out)
+    }
+}
+
+impl<T, U> Restore<Vec<U>> for Vec<T>
+where
+    T: Restore<U>,
+{
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len());
+        for item in self {
+            out.push(item.restore()?);
+        }
+        Ok(out)
+    }
+}
+
+impl<T> Archive for [T]
+where
+    T: Archive,
+{
+    type Archived = ArchivedVec<'static, T::Archived>;
 }
 
 pub struct SequenceArchiveState<'a, S, T>
