@@ -2,9 +2,19 @@ use core::task::Poll;
 
 use crate::{
     error::{AccessError, ZebinError},
-    traits::{Archive, ByteSink, Decode, Restore, Serialize, SerializeState},
+    traits::{Archive, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState},
     validation::context::ValidationContext,
 };
+
+impl<T, E> SchemaAware for ArchivedResult<T, E> {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
 
 /// Decoded representation for `Result<T, E>`.
 #[derive(Debug, Clone, PartialEq, Eq)]

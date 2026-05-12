@@ -6,9 +6,21 @@ use crate::{
     core::schema::FieldEncoding,
     error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Archive, ArchivedDefault, ByteSink, Decode, Restore, Serialize, SerializeState},
+    traits::{
+        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+    },
     validation::context::ValidationContext,
 };
+
+impl SchemaAware for ArchivedStringView<'_> {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
 
 /// Zero-sized decode marker for archived strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

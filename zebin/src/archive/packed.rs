@@ -2,9 +2,29 @@ use crate::{
     core::schema::FieldEncoding,
     error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Archive, ArchivedDefault, Decode, Restore},
+    traits::{Archive, ArchivedDefault, Decode, Restore, SchemaAware},
     validation::context::ValidationContext,
 };
+
+impl SchemaAware for ArchivedPackedBoolSliceView<'_> {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
+
+impl<const BITS: u8> SchemaAware for ArchivedPackedU8SliceView<'_, BITS> {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;

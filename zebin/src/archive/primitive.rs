@@ -3,7 +3,8 @@ use crate::{
     error::AccessError,
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ByteSink, Decode, FixedLayout, Restore, Serialize, SerializeState,
+        Archive, ArchivedDefault, ByteSink, Decode, FixedLayout, Restore, SchemaAware, Serialize,
+        SerializeState,
     },
     validation::context::ValidationContext,
 };
@@ -92,6 +93,16 @@ macro_rules! impl_archive_for_primitive {
                     Ok(*self)
                 }
             }
+
+            impl SchemaAware for $t {
+                fn stable_schema_key(&self) -> u32 {
+                    0
+                }
+
+                fn schema_revision(&self) -> u32 {
+                    0
+                }
+            }
         )*
     };
 }
@@ -151,5 +162,78 @@ impl ArchivedDefault for bool {
 impl Restore<bool> for bool {
     fn restore(&self) -> Result<bool, ZebinError> {
         Ok(*self)
+    }
+}
+
+impl SchemaAware for bool {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
+
+pub struct UnitState;
+
+impl<'a> SerializeState<'a> for UnitState {
+    fn poll<E: ByteSink + ?Sized>(&mut self, _encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+}
+
+impl FixedLayout for () {
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+    const SIZE: usize = 0;
+
+    fn write_fixed(_archived: &Self, _out: &mut [u8]) {}
+}
+
+impl<'a> Decode<'a> for () {
+    type View = ();
+
+    const FIXED_SIZE: Option<usize> = Some(0);
+    const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+
+    fn decode<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<Self::View, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Ok(())
+    }
+}
+
+impl Archive for () {
+    type Archived = ();
+}
+
+impl Serialize for () {
+    type State<'a> = UnitState;
+
+    fn begin_serialize(&self) -> Result<Self::State<'_>, ZebinError> {
+        Ok(UnitState)
+    }
+}
+
+impl ArchivedDefault for () {
+    fn archived_default() -> &'static Self {
+        &()
+    }
+}
+
+impl Restore<()> for () {
+    fn restore(&self) -> Result<(), ZebinError> {
+        Ok(())
+    }
+}
+
+impl SchemaAware for () {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
     }
 }

@@ -5,8 +5,20 @@ use crate::{Cursor, FieldEncoding, ValidationContext};
 use crate::{
     archive::slice::SequenceSource,
     error::{AccessError, ZebinError},
-    traits::{Archive, ArchivedDefault, ByteSink, Decode, Restore, Serialize, SerializeState},
+    traits::{
+        Archive, ArchivedDefault, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState,
+    },
 };
+
+impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
+    fn stable_schema_key(&self) -> u32 {
+        0
+    }
+
+    fn schema_revision(&self) -> u32 {
+        0
+    }
+}
 
 impl<T> SequenceSource<T> for VecDeque<T> {
     fn len(&self) -> usize {

@@ -4,9 +4,23 @@ use crate::{
     core::schema::FieldEncoding,
     error::{AccessError, ZebinError},
     read::Cursor,
-    traits::{Archive, Decode, Restore},
+    traits::{Archive, Decode, FixedLayout, Restore},
     validation::context::ValidationContext,
 };
+
+impl<T, const N: usize> FixedLayout for [T; N]
+where
+    T: FixedLayout,
+{
+    const ALIGNMENT: NonZeroUsize = T::ALIGNMENT;
+    const SIZE: usize = T::SIZE * N;
+
+    fn write_fixed(archived: &Self, out: &mut [u8]) {
+        for i in 0..N {
+            T::write_fixed(&archived[i], &mut out[i * T::SIZE..(i + 1) * T::SIZE]);
+        }
+    }
+}
 
 /// Source of indexed sequence items.
 pub trait SequenceSource<T> {
