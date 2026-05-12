@@ -12,11 +12,15 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ValidationConfig {
     pub max_depth: usize,
+    pub max_sequence_len: usize,
 }
 
 impl Default for ValidationConfig {
     fn default() -> Self {
-        Self { max_depth: 128 }
+        Self {
+            max_depth: 128,
+            max_sequence_len: 1_048_576,
+        }
     }
 }
 
@@ -55,7 +59,14 @@ impl<'a, 'p> Validator<'a, 'p> {
         max_depth: usize,
         path: Option<&'p mut ValidationPathStack>,
     ) -> Self {
-        Self::with_config(data, ValidationConfig { max_depth }, path)
+        Self::with_config(
+            data,
+            ValidationConfig {
+                max_depth,
+                ..ValidationConfig::default()
+            },
+            path,
+        )
     }
 
     pub fn config(&self) -> ValidationConfig {
@@ -92,6 +103,16 @@ impl<'a, 'p> Validator<'a, 'p> {
                 expected: alignment,
                 actual,
                 pos,
+            }));
+        }
+        Ok(())
+    }
+
+    pub fn check_sequence_len(&mut self, len: usize) -> Result<(), DecodeError> {
+        if len > self.config.max_sequence_len {
+            return Err(self.error(DecodeError::ValidationError {
+                message: "Sequence length limit exceeded",
+                pos: 0, // Sequence length context doesn't always have a single position
             }));
         }
         Ok(())
@@ -168,5 +189,9 @@ impl ValidationContext for Validator<'_, '_> {
 
     fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), DecodeError> {
         self.check_alignment(pos, alignment)
+    }
+
+    fn check_sequence_len(&mut self, len: usize) -> Result<(), DecodeError> {
+        self.check_sequence_len(len)
     }
 }

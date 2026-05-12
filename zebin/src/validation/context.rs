@@ -33,6 +33,8 @@ pub trait ValidationContext {
 
     fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), DecodeError>;
 
+    fn check_sequence_len(&mut self, len: usize) -> Result<(), DecodeError>;
+
     fn error(&mut self, error: DecodeError) -> DecodeError {
         self.record_error_path();
         error

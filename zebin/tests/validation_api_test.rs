@@ -63,8 +63,15 @@ fn test_validate_with_config_uses_custom_depth_limit() {
 
     let buf = zebin::encode(&current).unwrap();
     // Pass None as we don't need path tracking here
-    let err =
-        validate_with_config::<Node>(&buf, ValidationConfig { max_depth: 2 }, None).unwrap_err();
+    let err = validate_with_config::<Node>(
+        &buf,
+        ValidationConfig {
+            max_depth: 2,
+            ..ValidationConfig::default()
+        },
+        None,
+    )
+    .unwrap_err();
 
     assert!(matches!(
         err,

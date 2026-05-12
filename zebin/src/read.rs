@@ -102,7 +102,12 @@ impl<'a> Cursor<'a> {
 
 pub(crate) fn padding_for_alignment(pos: usize, alignment: core::num::NonZeroUsize) -> usize {
     let alignment = alignment.get();
-    (alignment - (pos % alignment)) % alignment
+    debug_assert!(
+        alignment.is_power_of_two(),
+        "Alignment must be a power of two"
+    );
+    let mask = alignment - 1;
+    alignment.wrapping_sub(pos) & mask
 }
 
 /// Safe access layer output that keeps the validated byte slice alive.
@@ -141,8 +146,6 @@ where
     pub fn new(bytes: &'a [u8], config: ValidationConfig) -> Result<Self, ZebinError> {
         let header = H::parse(bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
-
-        validate_root::<T>(bytes, H::SIZE, config, None)?;
 
         let mut validator = Validator::with_config(bytes, config, None);
         let mut cursor = Cursor::new(bytes, H::SIZE);

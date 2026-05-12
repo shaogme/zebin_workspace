@@ -102,6 +102,7 @@ impl FieldEntry {
             return Err(context.error(DecodeError::InvalidFieldTable { pos: reserved_pos }));
         }
         let payload_len = cursor.read_u32(context)?;
+        context.check_range(cursor.pos(), payload_len as usize)?;
         Ok(Self {
             field_id,
             encoding,
