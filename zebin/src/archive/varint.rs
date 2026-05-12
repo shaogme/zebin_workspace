@@ -1,7 +1,7 @@
 use core::{marker::PhantomData, ops::Deref, task::Poll};
 
 use crate::{
-    core::schema::FieldEncoding,
+    core::schema::{FieldEncoding, ObjectEncoding},
     error::{AccessError, ZebinError},
     read::Cursor,
     traits::{
@@ -200,6 +200,7 @@ where
 {
     type View = VarIntView<T>;
 
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::VarInt;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::VarInt;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>

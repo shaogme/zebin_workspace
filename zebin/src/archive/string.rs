@@ -4,6 +4,7 @@ use alloc::string::{String, ToString};
 
 use crate::{
     core::schema::FieldEncoding,
+    core::schema::ObjectEncoding,
     error::{AccessError, ZebinError},
     read::Cursor,
     traits::{
@@ -49,6 +50,7 @@ impl Deref for ArchivedStringView<'_> {
 impl<'a> Decode<'a> for ArchivedString {
     type View = ArchivedStringView<'a>;
 
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>

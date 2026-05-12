@@ -1,7 +1,4 @@
-use crate::{
-    core::schema::{FieldEncoding, SchemaRevision, StableSchemaKey},
-    validation::validator::ValidationPathSegment,
-};
+use crate::core::schema::{FieldEncoding, ObjectEncoding, SchemaRevision, StableSchemaKey};
 use core::num::NonZeroUsize;
 
 /// Errors that can occur during archive header parsing.
@@ -10,6 +7,7 @@ pub enum ParseHeaderError {
     TooShort { pos: usize },
     InvalidMagic { pos: usize },
     UnsupportedVersion { version: u8, pos: usize },
+    InvalidObjectEncoding { flags: u8, pos: usize },
 }
 
 impl core::fmt::Display for ParseHeaderError {
@@ -19,6 +17,9 @@ impl core::fmt::Display for ParseHeaderError {
             ParseHeaderError::InvalidMagic { pos } => write!(f, "invalid magic at {pos}"),
             ParseHeaderError::UnsupportedVersion { version, pos } => {
                 write!(f, "unsupported archive version {version} at {pos}")
+            }
+            ParseHeaderError::InvalidObjectEncoding { flags, pos } => {
+                write!(f, "invalid object encoding flag {flags} at {pos}")
             }
         }
     }
@@ -40,6 +41,11 @@ pub enum AccessError {
     },
     ValidationError {
         message: &'static str,
+        pos: usize,
+    },
+    UnexpectedObjectEncoding {
+        expected: ObjectEncoding,
+        actual: ObjectEncoding,
         pos: usize,
     },
     MissingField {
@@ -73,12 +79,6 @@ pub enum AccessError {
     RecursionLimitExceeded,
 }
 
-impl AccessError {
-    pub fn at(self, _segment: ValidationPathSegment) -> Self {
-        self
-    }
-}
-
 impl core::fmt::Display for AccessError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -96,6 +96,14 @@ impl core::fmt::Display for AccessError {
             AccessError::ValidationError { message, pos } => {
                 write!(f, "validation error at {pos}: {message}")
             }
+            AccessError::UnexpectedObjectEncoding {
+                expected,
+                actual,
+                pos,
+            } => write!(
+                f,
+                "object encoding mismatch at {pos}: expected {expected:?}, found {actual:?}"
+            ),
             AccessError::MissingField { field_id, pos } => {
                 write!(f, "missing field {field_id} at {pos}")
             }
@@ -184,12 +192,6 @@ pub enum ZebinError {
     HeaderParseError(ParseHeaderError),
     #[cfg(feature = "mmap")]
     ReadOnlyStorage,
-}
-
-impl ZebinError {
-    pub fn at(self, _segment: ValidationPathSegment) -> Self {
-        self
-    }
 }
 
 impl From<AccessError> for ZebinError {

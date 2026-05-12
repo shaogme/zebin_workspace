@@ -1,5 +1,5 @@
 use crate::{
-    core::schema::FieldEncoding,
+    core::schema::{FieldEncoding, ObjectEncoding},
     error::{AccessError, ZebinError},
     read::Cursor,
     traits::{
@@ -103,6 +103,7 @@ impl<'a> ArchivedPackedBoolSliceView<'a> {
 impl<'a> Decode<'a> for ArchivedPackedBoolSlice {
     type View = ArchivedPackedBoolSliceView<'a>;
 
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Packed;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
@@ -160,6 +161,7 @@ impl<'a, const BITS: u8> ArchivedPackedU8SliceView<'a, BITS> {
 impl<'a, const BITS: u8> Decode<'a> for ArchivedPackedU8Slice<BITS> {
     type View = ArchivedPackedU8SliceView<'a, BITS>;
 
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Packed;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>

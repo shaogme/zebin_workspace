@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use crate::{ZebinError, traits::ByteSink, utils::byteops};
+use crate::{ZebinError, read::padding_for_alignment, traits::ByteSink, utils::byteops};
 
 /// Measuring encoder that simulates writes.
 pub struct MeasureEncoder {
@@ -27,9 +27,7 @@ impl ByteSink for MeasureEncoder {
     }
 
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
-        let alignment = alignment.get();
-        let pos = self.pos;
-        let padding = (alignment - (pos % alignment)) % alignment;
+        let padding = padding_for_alignment(self.pos, alignment);
         self.pos = self
             .pos
             .checked_add(padding)
@@ -91,8 +89,7 @@ impl ByteSink for SliceEncoder<'_> {
     }
 
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
-        let alignment = alignment.get();
-        let padding = (alignment - (self.archive_pos % alignment)) % alignment;
+        let padding = padding_for_alignment(self.archive_pos, alignment);
         self.skip(padding)
     }
 

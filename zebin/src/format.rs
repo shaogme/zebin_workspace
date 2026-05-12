@@ -1,6 +1,7 @@
 use core::num::NonZeroUsize;
 
 use crate::{
+    core::schema::ObjectEncoding,
     error::ParseHeaderError,
     traits::{ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, FixedLayout},
 };
@@ -35,6 +36,13 @@ impl ArchiveHeader {
         bytes[3] = flags;
         bytes
     }
+
+    pub fn object_encoding(&self) -> Result<ObjectEncoding, ParseHeaderError> {
+        ObjectEncoding::from_byte(self.flags).ok_or(ParseHeaderError::InvalidObjectEncoding {
+            flags: self.flags,
+            pos: 3,
+        })
+    }
 }
 
 impl FixedLayout for ArchiveHeader {
@@ -66,7 +74,9 @@ impl ArchiveHeaderTrait for ArchiveHeader {
             return Err(ParseHeaderError::UnsupportedVersion { version, pos: 2 });
         }
 
-        Ok(Self::new(version, flags))
+        let header = Self::new(version, flags);
+        header.object_encoding()?;
+        Ok(header)
     }
 
     fn flags(&self) -> u8 {

@@ -1,4 +1,4 @@
-use core::{marker::PhantomData, mem::MaybeUninit, num::NonZeroUsize};
+use core::{mem::MaybeUninit, num::NonZeroUsize};
 
 #[cfg(feature = "alloc")]
 use crate::alloc::vec::Vec;
@@ -13,19 +13,6 @@ pub struct Validator<'a> {
     last_error_path: Option<ValidationPathStack>,
 }
 
-pub struct DepthGuard<'v> {
-    context: *mut Validator<'v>,
-    _phantom: PhantomData<&'v mut Validator<'v>>,
-}
-
-impl Drop for DepthGuard<'_> {
-    fn drop(&mut self) {
-        unsafe {
-            (*self.context).pop_depth();
-        }
-    }
-}
-
 impl<'a> Validator<'a> {
     pub fn new(data: &'a [u8]) -> Self {
         Self {
@@ -35,14 +22,6 @@ impl<'a> Validator<'a> {
             path: ValidationPathStack::new(),
             last_error_path: None,
         }
-    }
-
-    pub fn enter(&mut self) -> Result<DepthGuard<'a>, AccessError> {
-        self.push_depth()?;
-        Ok(DepthGuard {
-            context: self as *mut _,
-            _phantom: PhantomData,
-        })
     }
 
     pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
@@ -66,6 +45,7 @@ impl<'a> Validator<'a> {
     ) -> Result<(), AccessError> {
         let alignment_value = alignment.get();
         if !pos.is_multiple_of(alignment_value) {
+            self.record_error_path();
             return Err(AccessError::AlignmentError {
                 expected: alignment,
                 actual: unsafe { NonZeroUsize::new_unchecked(pos % alignment_value) },
@@ -214,17 +194,18 @@ impl ValidationPathStack {
     pub fn format(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut first = true;
 
+        for i in 0..self.len {
+            let segment = unsafe { self.segments[i].assume_init_ref() };
+            Self::format_segment(f, segment, &mut first)?;
+        }
+
         #[cfg(feature = "alloc")]
         if let Some(extra) = &self.extra {
-            for segment in extra.iter().rev() {
+            for segment in extra.iter() {
                 Self::format_segment(f, segment, &mut first)?;
             }
         }
 
-        for i in (0..self.len).rev() {
-            let segment = unsafe { self.segments[i].assume_init_ref() };
-            Self::format_segment(f, segment, &mut first)?;
-        }
         Ok(())
     }
 

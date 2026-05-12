@@ -1,6 +1,7 @@
 use core::task::Poll;
 
 use crate::{
+    core::schema::ObjectEncoding,
     error::{AccessError, ZebinError},
     traits::{Archive, ByteSink, Decode, Restore, SchemaAware, Serialize, SerializeState},
     validation::context::ValidationContext,
@@ -53,6 +54,7 @@ where
     B: Decode<'a>,
 {
     type View = ArchivedResult<A::View, B::View>;
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 
     fn decode<C>(
         cursor: &mut crate::read::Cursor<'a>,

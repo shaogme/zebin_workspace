@@ -245,7 +245,9 @@ fn record_decode_impl(
                     let mut __entries = [zebin::FieldEntry::EMPTY; zebin::MAX_SCHEMA_FIELDS];
                     for __index in 0..__field_count {
                         let __field_id = cursor.read_u16(&mut *__guard)?;
-                        let __encoding = zebin::FieldEncoding::from_byte(cursor.read_u8(&mut *__guard)?);
+                        let __encoding_byte = cursor.read_u8(&mut *__guard)?;
+                        let __encoding = zebin::FieldEncoding::from_byte(__encoding_byte)
+                            .ok_or_else(|| __guard.validation_error("Unknown field encoding", cursor.pos().saturating_sub(1)))?;
                         let _reserved = cursor.read_u8(&mut *__guard)?;
                         let __payload_len = cursor.read_u32(&mut *__guard)?;
                         __entries[__index] = zebin::FieldEntry {
@@ -478,7 +480,7 @@ fn enum_impl(
                 let helper_marker = variant_archived_name(name, variant.ident);
                 quote! {
                     #tag => {
-                        let mut __variant_guard = context.push_variant(stringify!(#view_variant));
+                        let mut __variant_guard = __guard.push_variant(stringify!(#view_variant));
                         Ok(#view::#view_variant(<#helper_marker as zebin::Decode<'a>>::decode(cursor, &mut *__variant_guard)?))
                     }
                 }
@@ -591,10 +593,12 @@ fn enum_impl(
             where
                 C: zebin::ValidationContext + ?Sized,
             {
-                let tag = <u32 as zebin::Decode<'a>>::decode(cursor, context)?;
+                let mut __guard = context.guard()?;
+                let __tag_pos = cursor.pos();
+                let tag = <u32 as zebin::Decode<'a>>::decode(cursor, &mut *__guard)?;
                 match tag {
                     #(#decode_arms,)*
-                    _ => Err(context.validation_error("Invalid enum discriminant", cursor.pos())),
+                    _ => Err(__guard.validation_error("Invalid enum discriminant", __tag_pos)),
                 }
             }
         }

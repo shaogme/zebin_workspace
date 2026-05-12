@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
-use crate::{Cursor, FieldEncoding, ValidationContext};
+use crate::{Cursor, FieldEncoding, ObjectEncoding, ValidationContext};
 use crate::{
     archive::slice::SequenceSource,
     error::{AccessError, ZebinError},
@@ -78,6 +78,7 @@ where
 {
     type View = ArchivedVec<'a, A::View>;
 
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>

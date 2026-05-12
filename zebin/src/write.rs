@@ -53,7 +53,7 @@ where
 {
     pub fn new(value: &'a T) -> Result<Self, ZebinError> {
         let total_len = measure_total_len::<T, H>(value)?;
-        let header = H::create(<T::Archived as Decode<'static>>::FIELD_ENCODING as u8);
+        let header = H::create(<T::Archived as Decode<'static>>::OBJECT_ENCODING as u8);
         Ok(Self {
             phase: EncodePhase::Header {
                 bytes: header.encode(),
@@ -129,9 +129,9 @@ where
                         pos: self.archive_pos,
                     })?;
             if chunk == 0 && !self.is_finished() {
-                return Err(ZebinError::SerializationError {
+                return Err(ZebinError::BufferTooSmall {
                     pos: self.archive_pos,
-                    message: "writer stuck or output buffer too small",
+                    required: self.total_len.saturating_sub(self.archive_pos),
                 });
             }
         }

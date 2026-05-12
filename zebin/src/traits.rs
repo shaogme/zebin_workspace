@@ -1,7 +1,7 @@
 use core::{num::NonZeroUsize, task::Poll};
 
 use crate::{
-    core::schema::FieldEncoding,
+    core::schema::{FieldEncoding, ObjectEncoding},
     error::{AccessError, ParseHeaderError, ZebinError},
     read::Cursor,
     validation::context::ValidationContext,
@@ -42,6 +42,7 @@ pub trait Decode<'a>: Sized {
 
     const FIXED_SIZE: Option<usize> = None;
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Fixed;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::Fixed;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>

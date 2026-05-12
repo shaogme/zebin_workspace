@@ -1,4 +1,5 @@
 use crate::{
+    core::schema::ObjectEncoding,
     error::{AccessError, ZebinError},
     format::ArchiveHeader,
     traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, Decode, Restore},
@@ -61,7 +62,7 @@ impl<'a> Cursor<'a> {
     where
         C: ValidationContext + ?Sized,
     {
-        let padding = (alignment.get() - (self.pos % alignment.get())) % alignment.get();
+        let padding = padding_for_alignment(self.pos, alignment);
         self.advance(padding, context)
     }
 
@@ -96,6 +97,11 @@ impl<'a> Cursor<'a> {
         let bytes: [u8; 4] = self.read_exact(4, context)?.try_into().unwrap();
         Ok(u32::from_le_bytes(bytes))
     }
+}
+
+pub(crate) fn padding_for_alignment(pos: usize, alignment: core::num::NonZeroUsize) -> usize {
+    let alignment = alignment.get();
+    (alignment - (pos % alignment)) % alignment
 }
 
 /// Safe access layer output that keeps the validated byte slice alive.
@@ -133,6 +139,7 @@ where
 
     pub fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
         let header = H::parse(bytes)?;
+        validate_root_object_encoding::<T, H>(&header)?;
         let mut validator = Validator::new(bytes);
         let mut cursor = Cursor::new(bytes, H::SIZE);
         let root = T::Archived::decode(&mut cursor, &mut validator)?;
@@ -161,6 +168,30 @@ where
     pub fn validate(bytes: &'a [u8]) -> Result<(), ZebinError> {
         Self::new(bytes).map(|_| ())
     }
+}
+
+fn validate_root_object_encoding<'a, T, H>(header: &H) -> Result<(), ZebinError>
+where
+    T: Archive,
+    H: ArchiveHeaderTrait,
+    T::Archived: Decode<'a>,
+{
+    let actual = ObjectEncoding::from_byte(header.flags()).ok_or(
+        crate::error::ParseHeaderError::InvalidObjectEncoding {
+            flags: header.flags(),
+            pos: H::SIZE.saturating_sub(1),
+        },
+    )?;
+    let expected = <T::Archived as Decode<'a>>::OBJECT_ENCODING;
+    if actual != expected {
+        return Err(AccessError::UnexpectedObjectEncoding {
+            expected,
+            actual,
+            pos: H::SIZE.saturating_sub(1),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 impl<'a, T: Archive, H: ArchiveHeaderTrait> Deref for ZebinReader<'a, T, H>

@@ -3,7 +3,7 @@ use core::task::Poll;
 
 use crate::{
     archive::varint::{VarIntNumber, decode_u64, encode_u64, encoded_len_u64},
-    core::schema::FieldEncoding,
+    core::schema::{FieldEncoding, ObjectEncoding},
     error::{AccessError, ZebinError},
     read::Cursor,
     traits::{
@@ -83,6 +83,7 @@ impl<T: 'static> ArchivedDefault for ArchivedVarIntVec<T> {
 impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
     type View = ArchivedVarIntVec<T>;
 
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, AccessError>
