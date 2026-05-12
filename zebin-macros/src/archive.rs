@@ -161,7 +161,7 @@ fn decode_known_field(
 fn validate_known_field(
     record: &RecordSpec<'_>,
     index: usize,
-    seen_var: &Ident,
+    seen_expr: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     let field = &record.fields[index];
     let field_id = field.field_id.expect("field ids validated");
@@ -171,11 +171,11 @@ fn validate_known_field(
     quote! {
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
-            __entry.check_decodable(__entry_pos, #expected_encoding, #seen_var, &mut *__field_guard)?;
+            __entry.check_decodable(__entry_pos, #expected_encoding, #seen_expr, &mut *__field_guard)?;
             let mut __field_cursor = zebin::Cursor::new(__payload, 0);
             <#archived_ty as zebin::Decode<'a>>::validate(&mut __field_cursor, &mut *__field_guard)?;
             __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
-            #seen_var = true;
+            #seen_expr = true;
             Ok(())
         }
     }
@@ -215,15 +215,12 @@ fn record_decode_impl(
             .active_fields()
             .zip(vars.iter())
             .map(|((index, _), var)| decode_known_field(record, index, var));
-        let seen_vars: Vec<_> = record
-            .active_fields()
-            .map(|(index, _)| format_ident!("__seen_{}", field_user_ident(record, index)))
-            .collect();
-        let seen_var_decls = seen_vars.iter().map(|var| quote! { let mut #var = false; });
-        let validate_field_arms = record
-            .active_fields()
-            .zip(seen_vars.iter())
-            .map(|((index, _), seen_var)| validate_known_field(record, index, seen_var));
+        let active_fields_count = record.active_fields().count();
+        let seen_var_decls = quote! { let mut __seen = [false; #active_fields_count]; };
+        let validate_field_arms = record.active_fields().enumerate().map(|(i, (index, _))| {
+            let seen_expr = quote! { __seen[#i] };
+            validate_known_field(record, index, seen_expr)
+        });
         let missing_checks =
             record
                 .active_fields()
@@ -245,25 +242,28 @@ fn record_decode_impl(
                         })
                     }
                 });
-        let validate_missing_checks = record.active_fields().zip(seen_vars.iter()).filter_map(
-            |((index, field), seen_var)| {
-                if field.optional || field.default || field.default_value.is_some() {
-                    None
-                } else {
-                    let field_id = field.field_id.expect("field ids validated");
-                    let field_name = field_user_ident(record, index);
-                    Some(quote! {
-                        if !#seen_var {
-                            let mut __field_guard = __guard.push_field(stringify!(#field_name));
-                            return Err(__field_guard.error(zebin::DecodeError::MissingField {
-                                field_id: #field_id,
-                                pos: __object_start,
-                            }));
-                        }
-                    })
-                }
-            },
-        );
+        let validate_missing_checks =
+            record
+                .active_fields()
+                .enumerate()
+                .filter_map(|(i, (index, field))| {
+                    if field.optional || field.default || field.default_value.is_some() {
+                        None
+                    } else {
+                        let field_id = field.field_id.expect("field ids validated");
+                        let field_name = field_user_ident(record, index);
+                        let seen_expr = quote! { __seen[#i] };
+                        Some(quote! {
+                            if !#seen_expr {
+                                let mut __field_guard = __guard.push_field(stringify!(#field_name));
+                                return Err(__field_guard.error(zebin::DecodeError::MissingField {
+                                    field_id: #field_id,
+                                    pos: __object_start,
+                                }));
+                            }
+                        })
+                    }
+                });
         let construct_fields = record
             .active_fields()
             .zip(vars.iter())
@@ -320,7 +320,7 @@ fn record_decode_impl(
                     let _schema_revision = __header.schema_revision;
                     let __field_count = __header.field_count as usize;
 
-                    #(#seen_var_decls)*
+                    #seen_var_decls
 
                     zebin::process_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
                         match __entry.field_id {

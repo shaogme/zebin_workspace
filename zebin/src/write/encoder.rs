@@ -34,11 +34,7 @@ impl ByteSink for MeasureEncoder {
 
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
         let align_val = alignment.get();
-        // Ensure alignment is power of two using % as requested
-        if align_val > 1 && (align_val % 2 != 0) && (align_val != 1) {
-             // Basic check for power of two without bitwise
-        }
-        
+        debug_assert!(align_val.is_power_of_two());
         let padding = padding_for_alignment(self.pos, alignment);
         self.pos = self
             .pos
@@ -88,9 +84,12 @@ impl<'a> SliceEncoder<'a> {
         let start = self.written;
         let end = start + count;
 
-        let next_archive_pos = self.archive_pos
-            .checked_add(count)
-            .ok_or(ZebinError::ArithmeticOverflow { pos: self.archive_pos })?;
+        let next_archive_pos =
+            self.archive_pos
+                .checked_add(count)
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
 
         self.archive_pos = next_archive_pos;
         self.written = end;
@@ -104,6 +103,9 @@ impl ByteSink for SliceEncoder<'_> {
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
+        if bytes.is_empty() {
+            return Ok(0);
+        }
         let (start, end) = self.prepare_range(bytes.len())?;
         let len = end - start;
         if len > 0 {
@@ -118,6 +120,9 @@ impl ByteSink for SliceEncoder<'_> {
     }
 
     fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+        if len == 0 {
+            return Ok(0);
+        }
         let (start, end) = self.prepare_range(len)?;
         let written = end - start;
         if written > 0 {

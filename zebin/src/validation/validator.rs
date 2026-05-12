@@ -109,11 +109,11 @@ impl<'a, 'p> Validator<'a, 'p> {
         Ok(())
     }
 
-    pub fn check_sequence_len(&mut self, len: usize) -> Result<(), DecodeError> {
+    pub fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), DecodeError> {
         if len > self.config.max_sequence_len {
             return Err(self.error(DecodeError::ValidationError {
                 message: "Sequence length limit exceeded",
-                pos: 0, // Sequence length context doesn't always have a single position
+                pos,
             }));
         }
         Ok(())
@@ -193,7 +193,7 @@ impl ValidationContext for Validator<'_, '_> {
         self.check_alignment(pos, alignment)
     }
 
-    fn check_sequence_len(&mut self, len: usize) -> Result<(), DecodeError> {
-        self.check_sequence_len(len)
+    fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), DecodeError> {
+        self.check_sequence_len(len, pos)
     }
 }

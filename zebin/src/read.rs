@@ -90,12 +90,8 @@ impl<'a> Cursor<'a> {
         C: ValidationContext + ?Sized,
     {
         let start = self.pos;
-        let end = start
-            .checked_add(N)
-            .ok_or_else(|| context.validation_error("Cursor position overflow", start))?;
-        context.check_range(start, N)?;
-        self.pos = end;
-        Ok(self.bytes[start..end].try_into().unwrap())
+        self.advance(N, context)?;
+        Ok(self.bytes[start..self.pos].try_into().unwrap())
     }
 
     pub fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], DecodeError>
@@ -205,7 +201,10 @@ where
         if cursor.pos() != bytes.len() {
             let pos = cursor.pos();
             return Err(validator
-                .validation_error("archive validation failed: trailing bytes detected after root object", pos)
+                .validation_error(
+                    "archive validation failed: trailing bytes detected after root object",
+                    pos,
+                )
                 .into());
         }
 
