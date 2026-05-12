@@ -79,19 +79,21 @@ impl ByteSink for SliceEncoder<'_> {
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
         let remaining = self.buf.len().saturating_sub(self.written);
-        if remaining == 0 || bytes.is_empty() {
+        let written = remaining.min(bytes.len());
+        if written == 0 {
             return Ok(0);
         }
 
-        let written = remaining.min(bytes.len());
-        self.buf[self.written..self.written + written].copy_from_slice(&bytes[..written]);
-        self.written += written;
-        self.archive_pos =
+        let next_pos =
             self.archive_pos
                 .checked_add(written)
                 .ok_or(ZebinError::ArithmeticOverflow {
                     pos: self.archive_pos,
                 })?;
+
+        self.buf[self.written..self.written + written].copy_from_slice(&bytes[..written]);
+        self.written += written;
+        self.archive_pos = next_pos;
         Ok(written)
     }
 
@@ -101,22 +103,24 @@ impl ByteSink for SliceEncoder<'_> {
     }
 
     fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
-        if len == 0 {
+        let remaining = self.buf.len().saturating_sub(self.written);
+        let written = remaining.min(len);
+        if written == 0 && len > 0 {
             return Ok(0);
         }
 
-        let remaining = self.buf.len().saturating_sub(self.written);
-        let written = remaining.min(len);
-        if written > 0 {
-            byteops::fill(&mut self.buf[self.written..self.written + written], 0);
-            self.written += written;
-        }
-        self.archive_pos =
+        let next_pos =
             self.archive_pos
                 .checked_add(written)
                 .ok_or(ZebinError::ArithmeticOverflow {
                     pos: self.archive_pos,
                 })?;
+
+        if written > 0 {
+            byteops::fill(&mut self.buf[self.written..self.written + written], 0);
+            self.written += written;
+        }
+        self.archive_pos = next_pos;
         Ok(written)
     }
 }
@@ -157,13 +161,14 @@ impl ByteSink for VecEncoder {
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
-        self.buf.extend_from_slice(bytes);
-        self.archive_pos =
+        let next_pos =
             self.archive_pos
                 .checked_add(bytes.len())
                 .ok_or(ZebinError::ArithmeticOverflow {
                     pos: self.archive_pos,
                 })?;
+        self.buf.extend_from_slice(bytes);
+        self.archive_pos = next_pos;
         Ok(bytes.len())
     }
 
@@ -173,13 +178,14 @@ impl ByteSink for VecEncoder {
     }
 
     fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+        let next_pos = self
+            .archive_pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow {
+                pos: self.archive_pos,
+            })?;
         self.buf.resize(self.buf.len() + len, 0);
-        self.archive_pos =
-            self.archive_pos
-                .checked_add(len)
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
+        self.archive_pos = next_pos;
         Ok(len)
     }
 }

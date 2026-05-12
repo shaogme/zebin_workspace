@@ -115,3 +115,47 @@ impl FieldEntry {
 }
 
 pub const MAX_SCHEMA_FIELDS: usize = 128;
+
+/// Common header for schema-aware objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SchemaObjectHeader {
+    pub stable_schema_key: StableSchemaKey,
+    pub schema_revision: SchemaRevision,
+    pub field_count: u16,
+}
+
+impl SchemaObjectHeader {
+    pub fn decode_and_verify<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+        expected_key: StableSchemaKey,
+    ) -> Result<Self, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let object_start = cursor.pos();
+        let stable_schema_key = cursor.read_u32(context)?;
+        if stable_schema_key != expected_key {
+            return Err(context.validation_error("Stable schema key mismatch", object_start));
+        }
+
+        let schema_revision = cursor.read_u32(context)?;
+        let field_count = cursor.read_u16(context)?;
+        let reserved_pos = cursor.pos();
+        let reserved = cursor.read_u16(context)?;
+
+        if reserved != 0 {
+            return Err(context.error(DecodeError::InvalidFieldTable { pos: reserved_pos }));
+        }
+
+        if field_count as usize > MAX_SCHEMA_FIELDS {
+            return Err(context.error(DecodeError::InvalidFieldTable { pos: object_start }));
+        }
+
+        Ok(Self {
+            stable_schema_key,
+            schema_revision,
+            field_count,
+        })
+    }
+}

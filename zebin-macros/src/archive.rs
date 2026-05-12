@@ -320,20 +320,10 @@ fn record_decode_impl(
                 {
                     let mut __guard = context.guard()?;
                     let __object_start = cursor.pos();
-                    let __stable_schema_key = cursor.read_u32(&mut *__guard)?;
-                    if __stable_schema_key != #key {
-                        return Err(__guard.validation_error("Stable schema key mismatch", __object_start));
-                    }
-                    let __schema_revision = cursor.read_u32(&mut *__guard)?;
-                    let __field_count = cursor.read_u16(&mut *__guard)? as usize;
-                    let __reserved_pos = cursor.pos();
-                    let __reserved = cursor.read_u16(&mut *__guard)?;
-                    if __reserved != 0 {
-                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __reserved_pos }));
-                    }
-                    if __field_count > zebin::MAX_SCHEMA_FIELDS {
-                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __object_start }));
-                    }
+                    let __header = zebin::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
+                    let __stable_schema_key = __header.stable_schema_key;
+                    let __schema_revision = __header.schema_revision;
+                    let __field_count = __header.field_count as usize;
                     let mut __table_cursor = *cursor;
                     cursor.advance(__field_count * zebin::FieldEntry::SIZE, &mut *__guard)?;
 
@@ -365,20 +355,9 @@ fn record_decode_impl(
                 {
                     let mut __guard = context.guard()?;
                     let __object_start = cursor.pos();
-                    let __stable_schema_key = cursor.read_u32(&mut *__guard)?;
-                    if __stable_schema_key != #key {
-                        return Err(__guard.validation_error("Stable schema key mismatch", __object_start));
-                    }
-                    let _schema_revision = cursor.read_u32(&mut *__guard)?;
-                    let __field_count = cursor.read_u16(&mut *__guard)? as usize;
-                    let __reserved_pos = cursor.pos();
-                    let __reserved = cursor.read_u16(&mut *__guard)?;
-                    if __reserved != 0 {
-                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __reserved_pos }));
-                    }
-                    if __field_count > zebin::MAX_SCHEMA_FIELDS {
-                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __object_start }));
-                    }
+                    let __header = zebin::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
+                    let _schema_revision = __header.schema_revision;
+                    let __field_count = __header.field_count as usize;
                     let mut __table_cursor = *cursor;
                     cursor.advance(__field_count * zebin::FieldEntry::SIZE, &mut *__guard)?;
 

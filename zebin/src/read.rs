@@ -99,6 +99,42 @@ impl<'a> Cursor<'a> {
         let bytes: [u8; 4] = self.read_exact(4, context)?.try_into().unwrap();
         Ok(u32::from_le_bytes(bytes))
     }
+
+    pub fn read_i8<C>(&mut self, context: &mut C) -> Result<i8, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Ok(self.read_u8(context)? as i8)
+    }
+
+    pub fn read_i16<C>(&mut self, context: &mut C) -> Result<i16, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Ok(self.read_u16(context)? as i16)
+    }
+
+    pub fn read_i32<C>(&mut self, context: &mut C) -> Result<i32, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Ok(self.read_u32(context)? as i32)
+    }
+
+    pub fn read_u64<C>(&mut self, context: &mut C) -> Result<u64, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let bytes: [u8; 8] = self.read_exact(8, context)?.try_into().unwrap();
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    pub fn read_i64<C>(&mut self, context: &mut C) -> Result<i64, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        Ok(self.read_u64(context)? as i64)
+    }
 }
 
 /// Safe access layer output that keeps the validated byte slice alive.

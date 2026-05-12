@@ -59,7 +59,8 @@ pub use crate::archive::{
     varint_vec::{PackedVarIntSlice, VarIntVec},
 };
 pub use crate::core::schema::{
-    FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaRevision, StableSchemaKey,
+    FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaObjectHeader,
+    SchemaRevision, StableSchemaKey,
 };
 pub use crate::error::{ArchiveError, DecodeError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
