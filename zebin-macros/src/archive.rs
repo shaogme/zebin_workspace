@@ -244,17 +244,7 @@ fn record_decode_impl(
                     }
                     let mut __entries = [zebin::FieldEntry::EMPTY; zebin::MAX_SCHEMA_FIELDS];
                     for __index in 0..__field_count {
-                        let __field_id = cursor.read_u16(&mut *__guard)?;
-                        let __encoding_byte = cursor.read_u8(&mut *__guard)?;
-                        let __encoding = zebin::FieldEncoding::from_byte(__encoding_byte)
-                            .ok_or_else(|| __guard.validation_error("Unknown field encoding", cursor.pos().saturating_sub(1)))?;
-                        let _reserved = cursor.read_u8(&mut *__guard)?;
-                        let __payload_len = cursor.read_u32(&mut *__guard)?;
-                        __entries[__index] = zebin::FieldEntry {
-                            field_id: __field_id,
-                            encoding: __encoding,
-                            payload_len: __payload_len,
-                        };
+                        __entries[__index] = zebin::FieldEntry::decode(cursor, &mut *__guard)?;
                     }
 
                     #(#var_decls)*

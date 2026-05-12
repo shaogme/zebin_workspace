@@ -1,4 +1,4 @@
-use crate::{error::AccessError, validation::validator::ValidationPathSegment};
+use crate::{error::AccessError, validation::path::ValidationPathSegment};
 use core::num::NonZeroUsize;
 
 /// Validation context used while sequentially decoding archive data.

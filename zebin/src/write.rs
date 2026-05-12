@@ -165,22 +165,34 @@ where
     T: Serialize + Archive + 'a,
     H: ArchiveHeaderTrait,
 {
-    let body_len = crate::measure_serialized_len(value)?;
+    let body_len = measure_body_len_from_pos(value, H::SIZE)?;
     H::SIZE
         .checked_add(body_len)
         .ok_or(ZebinError::ArithmeticOverflow { pos: H::SIZE })
+}
+
+pub(crate) fn measure_body_len_from_pos<T>(value: &T, start_pos: usize) -> Result<usize, ZebinError>
+where
+    T: Serialize + Archive + ?Sized,
+{
+    let mut encoder = MeasureEncoder::new(start_pos);
+    let mut state = value.begin_serialize()?;
+    loop {
+        match state.poll(&mut encoder)? {
+            core::task::Poll::Pending => continue,
+            core::task::Poll::Ready(()) => {
+                return encoder
+                    .pos()
+                    .checked_sub(start_pos)
+                    .ok_or(ZebinError::ArithmeticOverflow { pos: start_pos });
+            }
+        }
+    }
 }
 
 pub fn measure_body_len<T>(value: &T) -> Result<usize, ZebinError>
 where
     T: Serialize + Archive + ?Sized,
 {
-    let mut encoder = MeasureEncoder::new(0);
-    let mut state = value.begin_serialize()?;
-    loop {
-        match state.poll(&mut encoder)? {
-            core::task::Poll::Pending => continue,
-            core::task::Poll::Ready(()) => return Ok(encoder.pos()),
-        }
-    }
+    measure_body_len_from_pos(value, 0)
 }

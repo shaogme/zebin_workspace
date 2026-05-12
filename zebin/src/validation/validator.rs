@@ -1,8 +1,12 @@
-use core::{mem::MaybeUninit, num::NonZeroUsize};
+use core::num::NonZeroUsize;
 
-#[cfg(feature = "alloc")]
-use crate::alloc::vec::Vec;
-use crate::{error::AccessError, validation::context::ValidationContext};
+use crate::{
+    error::AccessError,
+    validation::{
+        context::ValidationContext,
+        path::{ValidationPathSegment, ValidationPathStack},
+    },
+};
 
 /// Validator for byte streams to ensure safe sequential decoding.
 pub struct Validator<'a> {
@@ -123,108 +127,5 @@ impl ValidationContext for Validator<'_> {
 
     fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), AccessError> {
         Validator::check_alignment(self, pos, alignment)
-    }
-}
-
-/// A single segment in a validation path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ValidationPathSegment {
-    Field(&'static str),
-    Index(usize),
-    Variant(&'static str),
-}
-
-/// A fixed-capacity stack for validation path segments.
-#[derive(Clone)]
-pub struct ValidationPathStack {
-    segments: [MaybeUninit<ValidationPathSegment>; 32],
-    len: usize,
-    #[cfg(feature = "alloc")]
-    extra: Option<Vec<ValidationPathSegment>>,
-}
-
-impl Default for ValidationPathStack {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ValidationPathStack {
-    pub const fn new() -> Self {
-        Self {
-            segments: [MaybeUninit::uninit(); 32],
-            len: 0,
-            #[cfg(feature = "alloc")]
-            extra: None,
-        }
-    }
-
-    pub fn push(&mut self, segment: ValidationPathSegment) {
-        if self.len < 32 {
-            self.segments[self.len].write(segment);
-            self.len += 1;
-        } else {
-            #[cfg(feature = "alloc")]
-            {
-                if let Some(extra) = &mut self.extra {
-                    extra.push(segment);
-                } else {
-                    self.extra = Some(crate::alloc::vec![segment]);
-                }
-            }
-        }
-    }
-
-    pub fn pop(&mut self) {
-        #[cfg(feature = "alloc")]
-        if let Some(extra) = &mut self.extra
-            && extra.pop().is_some()
-        {
-            if extra.is_empty() {
-                self.extra = None;
-            }
-            return;
-        }
-
-        if self.len > 0 {
-            self.len -= 1;
-        }
-    }
-
-    pub fn format(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut first = true;
-
-        for i in 0..self.len {
-            let segment = unsafe { self.segments[i].assume_init_ref() };
-            Self::format_segment(f, segment, &mut first)?;
-        }
-
-        #[cfg(feature = "alloc")]
-        if let Some(extra) = &self.extra {
-            for segment in extra.iter() {
-                Self::format_segment(f, segment, &mut first)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn format_segment(
-        f: &mut core::fmt::Formatter<'_>,
-        segment: &ValidationPathSegment,
-        first: &mut bool,
-    ) -> core::fmt::Result {
-        match segment {
-            ValidationPathSegment::Field(name) => {
-                if !*first {
-                    write!(f, ".")?;
-                }
-                write!(f, "{}", name)?;
-            }
-            ValidationPathSegment::Index(index) => write!(f, "[{}]", index)?,
-            ValidationPathSegment::Variant(name) => write!(f, "({})", name)?,
-        }
-        *first = false;
-        Ok(())
     }
 }

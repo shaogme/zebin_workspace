@@ -1,5 +1,5 @@
 #[cfg(feature = "alloc")]
-pub extern crate alloc;
+extern crate alloc;
 
 mod archive;
 mod core;
@@ -71,7 +71,10 @@ pub use crate::traits::{
     Restore, SchemaAware, Serialize, SerializeState,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
-pub use crate::validation::validator::{ValidationPathSegment, ValidationPathStack, Validator};
+pub use crate::validation::{
+    path::{ValidationPathSegment, ValidationPathStack},
+    validator::Validator,
+};
 pub use crate::write::{ArchiveWriter, ZebinWriter};
 
 pub use memoffset;

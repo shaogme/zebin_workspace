@@ -111,19 +111,26 @@ fn schema_header_poll(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let schema_revision = record.schema_revision;
     let fields = active_fields_by_id(record);
     let field_count = fields.len();
-    let header_len = 12 + field_count * 8;
-    let entries = fields.iter().enumerate().map(|(entry_index, (index, field))| {
-        let field_id = field.field_id.expect("field ids validated");
-        let encoding = field_encoding(field);
-        let len_ident = field_len_ident(record, *index);
-        let start = 12 + entry_index * 8;
-        quote! {
-            __zebin_header[#start..#start + 2].copy_from_slice(&(#field_id as u16).to_le_bytes());
-            __zebin_header[#start + 2] = #encoding as u8;
-            __zebin_header[#start + 3] = 0;
-            __zebin_header[#start + 4..#start + 8].copy_from_slice(&self.#len_ident.to_le_bytes());
-        }
-    });
+    let header_len = quote! { 12 + #field_count * zebin::FieldEntry::SIZE };
+    let entries = fields
+        .iter()
+        .enumerate()
+        .map(|(entry_index, (index, field))| {
+            let field_id = field.field_id.expect("field ids validated");
+            let encoding = field_encoding(field);
+            let len_ident = field_len_ident(record, *index);
+            let start = quote! { 12 + #entry_index * zebin::FieldEntry::SIZE };
+            quote! {
+                __zebin_header[#start..#start + zebin::FieldEntry::SIZE].copy_from_slice(
+                    &zebin::FieldEntry {
+                        field_id: #field_id as u16,
+                        encoding: #encoding,
+                        payload_len: self.#len_ident,
+                    }
+                    .to_bytes()
+                );
+            }
+        });
 
     quote! {
         if self.__zebin_header_cursor < #header_len {
