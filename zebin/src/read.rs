@@ -85,27 +85,33 @@ impl<'a> Cursor<'a> {
         Ok(&self.bytes[self.pos..self.pos + len])
     }
 
+    pub fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let bytes = self.read_exact(N, context)?;
+        Ok(bytes.try_into().unwrap())
+    }
+
     pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(self.read_exact(1, context)?[0])
+        Ok(self.read_array::<1, C>(context)?[0])
     }
 
     pub fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        let bytes: [u8; 2] = self.read_exact(2, context)?.try_into().unwrap();
-        Ok(u16::from_le_bytes(bytes))
+        Ok(u16::from_le_bytes(self.read_array(context)?))
     }
 
     pub fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        let bytes: [u8; 4] = self.read_exact(4, context)?.try_into().unwrap();
-        Ok(u32::from_le_bytes(bytes))
+        Ok(u32::from_le_bytes(self.read_array(context)?))
     }
 
     pub fn read_i8<C>(&mut self, context: &mut C) -> Result<i8, DecodeError>
@@ -119,29 +125,28 @@ impl<'a> Cursor<'a> {
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(self.read_u16(context)? as i16)
+        Ok(i16::from_le_bytes(self.read_array(context)?))
     }
 
     pub fn read_i32<C>(&mut self, context: &mut C) -> Result<i32, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(self.read_u32(context)? as i32)
+        Ok(i32::from_le_bytes(self.read_array(context)?))
     }
 
     pub fn read_u64<C>(&mut self, context: &mut C) -> Result<u64, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        let bytes: [u8; 8] = self.read_exact(8, context)?.try_into().unwrap();
-        Ok(u64::from_le_bytes(bytes))
+        Ok(u64::from_le_bytes(self.read_array(context)?))
     }
 
     pub fn read_i64<C>(&mut self, context: &mut C) -> Result<i64, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(self.read_u64(context)? as i64)
+        Ok(i64::from_le_bytes(self.read_array(context)?))
     }
 }
 

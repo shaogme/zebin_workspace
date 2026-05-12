@@ -111,6 +111,53 @@ impl FieldEntry {
             payload_len,
         })
     }
+
+    pub fn check_decodable<C>(
+        &self,
+        entry_pos: usize,
+        expected_encoding: FieldEncoding,
+        already_seen: bool,
+        context: &mut C,
+    ) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        if self.encoding != expected_encoding {
+            return Err(context.error(DecodeError::UnexpectedFieldEncoding {
+                field_id: self.field_id,
+                expected: expected_encoding,
+                actual: self.encoding,
+                pos: entry_pos,
+            }));
+        }
+        if already_seen {
+            return Err(context.error(DecodeError::DuplicateField {
+                field_id: self.field_id,
+                pos: entry_pos,
+            }));
+        }
+        Ok(())
+    }
+
+    pub fn check_payload_len<C>(
+        &self,
+        entry_pos: usize,
+        consumed: usize,
+        context: &mut C,
+    ) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        if consumed != self.payload_len as usize {
+            return Err(context.error(DecodeError::FieldLengthMismatch {
+                field_id: self.field_id,
+                expected: self.payload_len as usize,
+                actual: consumed,
+                pos: entry_pos,
+            }));
+        }
+        Ok(())
+    }
 }
 
 pub const MAX_SCHEMA_FIELDS: usize = 128;

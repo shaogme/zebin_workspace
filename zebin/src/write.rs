@@ -174,8 +174,13 @@ fn measure_total_len<'a, T, H>(value: &'a T) -> Result<usize, ZebinError>
 where
     T: Serialize + Archive + 'a,
     H: ArchiveHeaderTrait,
+    T::Archived: ArchivedLayout,
 {
-    let body_len = measure_body_len_from_pos(value, H::SIZE)?;
+    let body_len = if let Some(fixed_size) = <T::Archived as ArchivedLayout>::FIXED_SIZE {
+        fixed_size
+    } else {
+        measure_body_len_from_pos(value, H::SIZE)?
+    };
     H::SIZE
         .checked_add(body_len)
         .ok_or(ZebinError::ArithmeticOverflow { pos: H::SIZE })

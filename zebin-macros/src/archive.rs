@@ -148,30 +148,10 @@ fn decode_known_field(
     quote! {
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
-            if __entry.encoding != #expected_encoding {
-                return Err(__field_guard.error(zebin::DecodeError::UnexpectedFieldEncoding {
-                    field_id: #field_id,
-                    expected: #expected_encoding,
-                    actual: __entry.encoding,
-                    pos: __entry_pos,
-                }));
-            }
-            if #field_var.is_some() {
-                return Err(__field_guard.error(zebin::DecodeError::DuplicateField {
-                    field_id: #field_id,
-                    pos: __entry_pos,
-                }));
-            }
+            __entry.check_decodable(__entry_pos, #expected_encoding, #field_var.is_some(), &mut *__field_guard)?;
             let mut __field_cursor = zebin::Cursor::new(__payload, 0);
             let __value = <#archived_ty as zebin::Decode<'a>>::decode(&mut __field_cursor, &mut *__field_guard)?;
-            if __field_cursor.pos() != __payload.len() {
-                return Err(__field_guard.error(zebin::DecodeError::FieldLengthMismatch {
-                    field_id: #field_id,
-                    expected: __payload.len(),
-                    actual: __field_cursor.pos(),
-                    pos: __entry_pos,
-                }));
-            }
+            __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #field_var = ::core::option::Option::Some(__value);
         }
     }
@@ -190,30 +170,10 @@ fn validate_known_field(
     quote! {
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
-            if __entry.encoding != #expected_encoding {
-                return Err(__field_guard.error(zebin::DecodeError::UnexpectedFieldEncoding {
-                    field_id: #field_id,
-                    expected: #expected_encoding,
-                    actual: __entry.encoding,
-                    pos: __entry_pos,
-                }));
-            }
-            if #seen_var {
-                return Err(__field_guard.error(zebin::DecodeError::DuplicateField {
-                    field_id: #field_id,
-                    pos: __entry_pos,
-                }));
-            }
+            __entry.check_decodable(__entry_pos, #expected_encoding, #seen_var, &mut *__field_guard)?;
             let mut __field_cursor = zebin::Cursor::new(__payload, 0);
             <#archived_ty as zebin::Decode<'a>>::validate(&mut __field_cursor, &mut *__field_guard)?;
-            if __field_cursor.pos() != __payload.len() {
-                return Err(__field_guard.error(zebin::DecodeError::FieldLengthMismatch {
-                    field_id: #field_id,
-                    expected: __payload.len(),
-                    actual: __field_cursor.pos(),
-                    pos: __entry_pos,
-                }));
-            }
+            __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #seen_var = true;
         }
     }
