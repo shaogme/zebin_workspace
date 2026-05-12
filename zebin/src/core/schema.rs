@@ -99,7 +99,7 @@ impl FieldEntry {
         let reserved_pos = cursor.pos();
         let reserved = cursor.read_u8(context)?;
         if reserved != Self::RESERVED {
-            return Err(DecodeError::InvalidFieldTable { pos: reserved_pos });
+            return Err(context.error(DecodeError::InvalidFieldTable { pos: reserved_pos }));
         }
         let payload_len = cursor.read_u32(context)?;
         Ok(Self {

@@ -146,7 +146,7 @@ where
 pub fn encode_chunked<T>(value: &T) -> Result<ZebinWriter<'_, T>, ZebinError>
 where
     T: Serialize + Archive,
-    T::Archived: for<'a> Decode<'a>,
+    T::Archived: ArchivedLayout,
 {
     ZebinWriter::encode_chunked(value)
 }
@@ -159,7 +159,7 @@ use alloc::vec::Vec;
 pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
 where
     T: Serialize + Archive,
-    T::Archived: for<'a> Decode<'a>,
+    T::Archived: ArchivedLayout,
 {
     ZebinWriter::encode(value)
 }
@@ -169,7 +169,7 @@ where
 pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
 where
     T: Serialize + Archive,
-    T::Archived: for<'a> Decode<'a>,
+    T::Archived: ArchivedLayout,
 {
     ZebinWriter::encode_into(value, buf)
 }

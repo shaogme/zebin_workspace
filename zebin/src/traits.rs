@@ -93,6 +93,11 @@ pub trait Restore<T> {
 }
 
 /// Byte-stream sink used by archive state machines.
+///
+/// Implementations may perform short writes. `write`, `align`, and `skip`
+/// return the number of bytes actually accepted; callers must preserve their
+/// own cursor state and return `Poll::Pending` when more output space is
+/// needed.
 pub trait ByteSink {
     fn pos(&self) -> usize;
 
@@ -104,6 +109,10 @@ pub trait ByteSink {
 }
 
 /// Trait for resumable sequential archive construction states.
+///
+/// A state should make as much progress as the provided [`ByteSink`] allows.
+/// When a sink accepts only part of the requested bytes, the state must retain
+/// enough progress to resume the next call without rewriting bytes.
 pub trait SerializeState<'a> {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError>;
 }

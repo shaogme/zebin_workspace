@@ -6,7 +6,7 @@ use crate::{
     error::ZebinError,
     format::ArchiveHeader,
     traits::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, ByteSink, Decode, Serialize,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, ByteSink, Serialize,
         SerializeState,
     },
     write::encoder::{MeasureEncoder, SliceEncoder},
@@ -50,7 +50,7 @@ impl<'a, T, H> ArchiveWriter<'a, T, H>
 where
     T: Serialize + Archive + 'a,
     H: ArchiveHeaderTrait,
-    T::Archived: for<'b> Decode<'b>,
+    T::Archived: ArchivedLayout,
 {
     pub fn new(value: &'a T) -> Result<Self, ZebinError> {
         let total_len = measure_total_len::<T, H>(value)?;

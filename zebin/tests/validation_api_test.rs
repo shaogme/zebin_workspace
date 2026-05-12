@@ -18,6 +18,15 @@ struct Node {
     children: Vec<Node>,
 }
 
+#[derive(ZebinArchive, ZebinSerialize)]
+#[zebin(schema_key = 0x5151)]
+struct SchemaRecord {
+    #[zebin(id = 1)]
+    flag: bool,
+    #[zebin(id = 2)]
+    name: String,
+}
+
 #[test]
 fn test_validate_detailed_reports_logical_path() {
     let value = Parent {
@@ -60,5 +69,120 @@ fn test_validate_with_config_uses_custom_depth_limit() {
     assert!(matches!(
         err,
         ZebinError::Decode(DecodeError::RecursionLimitExceeded)
+    ));
+}
+
+#[test]
+fn test_validate_detailed_reports_schema_field_encoding_path() {
+    let value = SchemaRecord {
+        flag: true,
+        name: "Ada".to_string(),
+    };
+
+    let mut buf = zebin::encode(&value).unwrap();
+    let object_pos = 4;
+    let first_entry_encoding_pos = object_pos + 12 + 2;
+    buf[first_entry_encoding_pos] = zebin::FieldEncoding::LengthPrefixed as u8;
+
+    let mut stack = ValidationPathStack::new();
+    let err = validate_detailed::<SchemaRecord>(&buf, &mut stack).unwrap_err();
+
+    assert_eq!(stack.to_string(), "flag");
+    assert!(matches!(
+        err,
+        ZebinError::Decode(DecodeError::UnexpectedFieldEncoding { field_id: 1, .. })
+    ));
+}
+
+#[test]
+fn test_validate_detailed_reports_schema_field_length_path() {
+    let value = SchemaRecord {
+        flag: true,
+        name: "Ada".to_string(),
+    };
+
+    let mut buf = zebin::encode(&value).unwrap();
+    let object_pos = 4;
+    let first_entry_payload_len_pos = object_pos + 12 + 4;
+    buf[first_entry_payload_len_pos..first_entry_payload_len_pos + 4]
+        .copy_from_slice(&2u32.to_le_bytes());
+
+    let mut stack = ValidationPathStack::new();
+    let err = validate_detailed::<SchemaRecord>(&buf, &mut stack).unwrap_err();
+
+    assert_eq!(stack.to_string(), "flag");
+    assert!(matches!(
+        err,
+        ZebinError::Decode(DecodeError::FieldLengthMismatch { field_id: 1, .. })
+    ));
+}
+
+#[test]
+fn test_validate_detailed_reports_duplicate_schema_field_path() {
+    let value = SchemaRecord {
+        flag: true,
+        name: "Ada".to_string(),
+    };
+
+    let mut buf = zebin::encode(&value).unwrap();
+    let object_pos = 4;
+    let second_entry_id_pos = object_pos + 12 + zebin::FieldEntry::SIZE;
+    buf[second_entry_id_pos..second_entry_id_pos + 2].copy_from_slice(&1u16.to_le_bytes());
+    let second_entry_encoding_pos = second_entry_id_pos + 2;
+    buf[second_entry_encoding_pos] = zebin::FieldEncoding::Fixed as u8;
+    let second_entry_payload_len_pos = second_entry_id_pos + 4;
+    buf[second_entry_payload_len_pos..second_entry_payload_len_pos + 4]
+        .copy_from_slice(&1u32.to_le_bytes());
+
+    let mut stack = ValidationPathStack::new();
+    let err = validate_detailed::<SchemaRecord>(&buf, &mut stack).unwrap_err();
+
+    assert_eq!(stack.to_string(), "flag");
+    assert!(matches!(
+        err,
+        ZebinError::Decode(DecodeError::DuplicateField { field_id: 1, .. })
+    ));
+}
+
+#[test]
+fn test_validate_detailed_reports_trailing_bytes_at_root() {
+    let value = Parent {
+        children: vec![Child { flag: true }],
+    };
+
+    let mut buf = zebin::encode(&value).unwrap();
+    buf.push(0);
+
+    let mut stack = ValidationPathStack::new();
+    let err = validate_detailed::<Parent>(&buf, &mut stack).unwrap_err();
+
+    assert_eq!(stack.to_string(), "<root>");
+    assert!(matches!(
+        err,
+        ZebinError::Decode(DecodeError::ValidationError {
+            message: "Trailing bytes after root object",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_reader_rejects_invalid_sequence_length_before_building_view() {
+    let value = Parent { children: vec![] };
+
+    let mut buf = zebin::encode(&value).unwrap();
+    buf[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+
+    let err = match zebin::reader::<Parent>(&buf) {
+        Ok(_) => panic!("reader accepted invalid sequence length"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        err,
+        ZebinError::Decode(DecodeError::ValidationError {
+            message: "Pointer out of bounds",
+            ..
+        })
     ));
 }

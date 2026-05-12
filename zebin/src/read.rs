@@ -141,15 +141,16 @@ where
     pub fn new(bytes: &'a [u8], config: ValidationConfig) -> Result<Self, ZebinError> {
         let header = H::parse(bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
+
+        validate_root::<T>(bytes, H::SIZE, config, None)?;
+
         let mut validator = Validator::with_config(bytes, config, None);
         let mut cursor = Cursor::new(bytes, H::SIZE);
         let root = T::Archived::decode(&mut cursor, &mut validator)?;
         if cursor.pos() != bytes.len() {
-            return Err(DecodeError::ValidationError {
-                message: "Trailing bytes after root object",
-                pos: cursor.pos(),
-            }
-            .into());
+            return Err(validator
+                .validation_error("Trailing bytes after root object", cursor.pos())
+                .into());
         }
 
         Ok(Self {
@@ -169,34 +170,42 @@ where
     pub fn validate(
         bytes: &'a [u8],
         config: ValidationConfig,
-        mut stack: Option<&mut ValidationPathStack>,
+        stack: Option<&mut ValidationPathStack>,
     ) -> Result<(), ZebinError> {
         let header = H::parse(bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
-
-        let mut cursor = Cursor::new(bytes, H::SIZE);
-        let (result, error_path) = {
-            let mut validator = Validator::with_config(bytes, config, stack.as_deref_mut());
-            let res = T::Archived::validate(&mut cursor, &mut validator);
-            (res, validator.last_error_path().cloned())
-        };
-
-        if let (Some(s), Some(ep)) = (stack, error_path) {
-            *s = ep;
-        }
-
-        result?;
-
-        if cursor.pos() != bytes.len() {
-            return Err(DecodeError::ValidationError {
-                message: "Trailing bytes after root object",
-                pos: cursor.pos(),
-            }
-            .into());
-        }
-
-        Ok(())
+        validate_root::<T>(bytes, H::SIZE, config, stack)
     }
+}
+
+fn validate_root<'a, T>(
+    bytes: &'a [u8],
+    root_pos: usize,
+    config: ValidationConfig,
+    mut stack: Option<&mut ValidationPathStack>,
+) -> Result<(), ZebinError>
+where
+    T: Archive,
+    T::Archived: Decode<'a>,
+{
+    let mut cursor = Cursor::new(bytes, root_pos);
+    let (result, error_path) = {
+        let mut validator = Validator::with_config(bytes, config, stack.as_deref_mut());
+        let res = T::Archived::validate(&mut cursor, &mut validator).and_then(|()| {
+            if cursor.pos() != bytes.len() {
+                Err(validator.validation_error("Trailing bytes after root object", cursor.pos()))
+            } else {
+                Ok(())
+            }
+        });
+        (res, validator.last_error_path().cloned())
+    };
+
+    if let (Some(s), Some(ep)) = (stack, error_path) {
+        *s = ep;
+    }
+
+    result.map_err(Into::into)
 }
 
 fn validate_root_object_encoding<'a, T, H>(header: &H) -> Result<(), ZebinError>

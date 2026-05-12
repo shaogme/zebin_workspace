@@ -197,14 +197,14 @@ where
 
     fn fixed_width() -> bool
     where
-        T::Archived: for<'b> Decode<'b>,
+        T::Archived: ArchivedLayout,
     {
         <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some()
     }
 
     fn ensure_current_state(&mut self) -> Result<(), ZebinError>
     where
-        T::Archived: for<'b> Decode<'b>,
+        T::Archived: ArchivedLayout,
     {
         if self.current_state.is_some() {
             return Ok(());
@@ -219,7 +219,7 @@ impl<'a, S, T> SerializeState<'a> for SequenceArchiveState<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Serialize + Archive + 'a,
-    T::Archived: for<'b> Decode<'b>,
+    T::Archived: ArchivedLayout,
 {
     fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
@@ -319,7 +319,7 @@ impl<T: Archive> Archive for Vec<T> {
 impl<T> Serialize for Vec<T>
 where
     T: Serialize + Archive,
-    T::Archived: for<'b> Decode<'b>,
+    T::Archived: ArchivedLayout,
 {
     type State<'a>
         = VecArchiveState<'a, T>
@@ -341,7 +341,7 @@ where
 impl<T> Serialize for VecDeque<T>
 where
     T: Serialize + Archive,
-    T::Archived: for<'b> Decode<'b>,
+    T::Archived: ArchivedLayout,
 {
     type State<'a>
         = VecDequeArchiveState<'a, T>
@@ -356,7 +356,7 @@ where
 impl<T> Serialize for [T]
 where
     T: Serialize + Archive,
-    T::Archived: for<'b> Decode<'b>,
+    T::Archived: ArchivedLayout,
 {
     type State<'a>
         = SliceArchiveState<'a, T>

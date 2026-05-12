@@ -33,9 +33,13 @@ pub trait ValidationContext {
 
     fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), DecodeError>;
 
-    fn validation_error(&mut self, message: &'static str, pos: usize) -> DecodeError {
+    fn error(&mut self, error: DecodeError) -> DecodeError {
         self.record_error_path();
-        DecodeError::ValidationError { message, pos }
+        error
+    }
+
+    fn validation_error(&mut self, message: &'static str, pos: usize) -> DecodeError {
+        self.error(DecodeError::ValidationError { message, pos })
     }
 }
 

@@ -144,30 +144,30 @@ fn decode_known_field(
     let expected_encoding = field_encoding(field);
     quote! {
         #field_id => {
+            let mut __field_guard = __guard.push_field(stringify!(#field_name));
             if __entry.encoding != #expected_encoding {
-                return Err(zebin::DecodeError::UnexpectedFieldEncoding {
+                return Err(__field_guard.error(zebin::DecodeError::UnexpectedFieldEncoding {
                     field_id: #field_id,
                     expected: #expected_encoding,
                     actual: __entry.encoding,
                     pos: __object_start,
-                });
+                }));
             }
             if #field_var.is_some() {
-                return Err(zebin::DecodeError::DuplicateField {
+                return Err(__field_guard.error(zebin::DecodeError::DuplicateField {
                     field_id: #field_id,
                     pos: __object_start,
-                });
+                }));
             }
             let mut __field_cursor = zebin::Cursor::new(__payload, 0);
-            let mut __field_guard = __guard.push_field(stringify!(#field_name));
             let __value = <#archived_ty as zebin::Decode<'a>>::decode(&mut __field_cursor, &mut *__field_guard)?;
             if __field_cursor.pos() != __payload.len() {
-                return Err(zebin::DecodeError::FieldLengthMismatch {
+                return Err(__field_guard.error(zebin::DecodeError::FieldLengthMismatch {
                     field_id: #field_id,
                     expected: __payload.len(),
                     actual: __field_cursor.pos(),
                     pos: __object_start,
-                });
+                }));
             }
             #field_var = ::core::option::Option::Some(__value);
         }
@@ -186,30 +186,30 @@ fn validate_known_field(
     let expected_encoding = field_encoding(field);
     quote! {
         #field_id => {
+            let mut __field_guard = __guard.push_field(stringify!(#field_name));
             if __entry.encoding != #expected_encoding {
-                return Err(zebin::DecodeError::UnexpectedFieldEncoding {
+                return Err(__field_guard.error(zebin::DecodeError::UnexpectedFieldEncoding {
                     field_id: #field_id,
                     expected: #expected_encoding,
                     actual: __entry.encoding,
                     pos: __object_start,
-                });
+                }));
             }
             if #seen_var {
-                return Err(zebin::DecodeError::DuplicateField {
+                return Err(__field_guard.error(zebin::DecodeError::DuplicateField {
                     field_id: #field_id,
                     pos: __object_start,
-                });
+                }));
             }
             let mut __field_cursor = zebin::Cursor::new(__payload, 0);
-            let mut __field_guard = __guard.push_field(stringify!(#field_name));
             <#archived_ty as zebin::Decode<'a>>::validate(&mut __field_cursor, &mut *__field_guard)?;
             if __field_cursor.pos() != __payload.len() {
-                return Err(zebin::DecodeError::FieldLengthMismatch {
+                return Err(__field_guard.error(zebin::DecodeError::FieldLengthMismatch {
                     field_id: #field_id,
                     expected: __payload.len(),
                     actual: __field_cursor.pos(),
                     pos: __object_start,
-                });
+                }));
             }
             #seen_var = true;
         }
@@ -263,33 +263,37 @@ fn record_decode_impl(
             record
                 .active_fields()
                 .zip(vars.iter())
-                .filter_map(|((_index, field), var)| {
+                .filter_map(|((index, field), var)| {
                     if field.optional || field.default || field.default_value.is_some() {
                         None
                     } else {
                         let field_id = field.field_id.expect("field ids validated");
+                        let field_name = field_user_ident(record, index);
                         Some(quote! {
                             if #var.is_none() {
-                                return Err(zebin::DecodeError::MissingField {
+                                let mut __field_guard = __guard.push_field(stringify!(#field_name));
+                                return Err(__field_guard.error(zebin::DecodeError::MissingField {
                                     field_id: #field_id,
                                     pos: __object_start,
-                                });
+                                }));
                             }
                         })
                     }
                 });
         let validate_missing_checks = record.active_fields().zip(seen_vars.iter()).filter_map(
-            |((_index, field), seen_var)| {
+            |((index, field), seen_var)| {
                 if field.optional || field.default || field.default_value.is_some() {
                     None
                 } else {
                     let field_id = field.field_id.expect("field ids validated");
+                    let field_name = field_user_ident(record, index);
                     Some(quote! {
                         if !#seen_var {
-                            return Err(zebin::DecodeError::MissingField {
+                            let mut __field_guard = __guard.push_field(stringify!(#field_name));
+                            return Err(__field_guard.error(zebin::DecodeError::MissingField {
                                 field_id: #field_id,
                                 pos: __object_start,
-                            });
+                            }));
                         }
                     })
                 }
@@ -322,9 +326,13 @@ fn record_decode_impl(
                     }
                     let __schema_revision = cursor.read_u32(&mut *__guard)?;
                     let __field_count = cursor.read_u16(&mut *__guard)? as usize;
-                    let _reserved = cursor.read_u16(&mut *__guard)?;
+                    let __reserved_pos = cursor.pos();
+                    let __reserved = cursor.read_u16(&mut *__guard)?;
+                    if __reserved != 0 {
+                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __reserved_pos }));
+                    }
                     if __field_count > zebin::MAX_SCHEMA_FIELDS {
-                        return Err(zebin::DecodeError::InvalidFieldTable { pos: __object_start });
+                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __object_start }));
                     }
                     let mut __entries = [zebin::FieldEntry::EMPTY; zebin::MAX_SCHEMA_FIELDS];
                     for __index in 0..__field_count {
@@ -364,9 +372,13 @@ fn record_decode_impl(
                     }
                     let _schema_revision = cursor.read_u32(&mut *__guard)?;
                     let __field_count = cursor.read_u16(&mut *__guard)? as usize;
-                    let _reserved = cursor.read_u16(&mut *__guard)?;
+                    let __reserved_pos = cursor.pos();
+                    let __reserved = cursor.read_u16(&mut *__guard)?;
+                    if __reserved != 0 {
+                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __reserved_pos }));
+                    }
                     if __field_count > zebin::MAX_SCHEMA_FIELDS {
-                        return Err(zebin::DecodeError::InvalidFieldTable { pos: __object_start });
+                        return Err(__guard.error(zebin::DecodeError::InvalidFieldTable { pos: __object_start }));
                     }
                     let mut __entries = [zebin::FieldEntry::EMPTY; zebin::MAX_SCHEMA_FIELDS];
                     for __index in 0..__field_count {

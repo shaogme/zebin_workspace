@@ -64,7 +64,10 @@ impl<'a, 'p> Validator<'a, 'p> {
 
     pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), DecodeError> {
         if size == 0 {
-            return Ok(());
+            if pos <= self.data.len() {
+                return Ok(());
+            }
+            return Err(self.validation_error("Pointer out of bounds", pos));
         }
 
         let end = pos
@@ -83,12 +86,13 @@ impl<'a, 'p> Validator<'a, 'p> {
     ) -> Result<(), DecodeError> {
         let alignment_value = alignment.get();
         if !pos.is_multiple_of(alignment_value) {
-            self.record_error_path();
-            return Err(DecodeError::AlignmentError {
+            let actual = NonZeroUsize::new(pos % alignment_value)
+                .expect("misaligned position has non-zero remainder");
+            return Err(self.error(DecodeError::AlignmentError {
                 expected: alignment,
-                actual: unsafe { NonZeroUsize::new_unchecked(pos % alignment_value) },
+                actual,
                 pos,
-            });
+            }));
         }
         Ok(())
     }
@@ -97,7 +101,7 @@ impl<'a, 'p> Validator<'a, 'p> {
         self.depth += 1;
         if self.depth > self.config.max_depth {
             self.depth = self.depth.saturating_sub(1);
-            return Err(DecodeError::RecursionLimitExceeded);
+            return Err(self.error(DecodeError::RecursionLimitExceeded));
         }
         Ok(())
     }
@@ -133,8 +137,7 @@ impl<'a, 'p> Validator<'a, 'p> {
     }
 
     fn validation_error(&mut self, message: &'static str, pos: usize) -> DecodeError {
-        self.record_error_path();
-        DecodeError::ValidationError { message, pos }
+        self.error(DecodeError::ValidationError { message, pos })
     }
 }
 
