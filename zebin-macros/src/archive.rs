@@ -150,13 +150,13 @@ fn decode_known_field(
                     field_id: #field_id,
                     expected: #expected_encoding,
                     actual: __entry.encoding,
-                    pos: __object_start,
+                    pos: __entry_pos,
                 }));
             }
             if #field_var.is_some() {
                 return Err(__field_guard.error(zebin::DecodeError::DuplicateField {
                     field_id: #field_id,
-                    pos: __object_start,
+                    pos: __entry_pos,
                 }));
             }
             let mut __field_cursor = zebin::Cursor::new(__payload, 0);
@@ -166,7 +166,7 @@ fn decode_known_field(
                     field_id: #field_id,
                     expected: __payload.len(),
                     actual: __field_cursor.pos(),
-                    pos: __object_start,
+                    pos: __entry_pos,
                 }));
             }
             #field_var = ::core::option::Option::Some(__value);
@@ -192,13 +192,13 @@ fn validate_known_field(
                     field_id: #field_id,
                     expected: #expected_encoding,
                     actual: __entry.encoding,
-                    pos: __object_start,
+                    pos: __entry_pos,
                 }));
             }
             if #seen_var {
                 return Err(__field_guard.error(zebin::DecodeError::DuplicateField {
                     field_id: #field_id,
-                    pos: __object_start,
+                    pos: __entry_pos,
                 }));
             }
             let mut __field_cursor = zebin::Cursor::new(__payload, 0);
@@ -208,7 +208,7 @@ fn validate_known_field(
                     field_id: #field_id,
                     expected: __payload.len(),
                     actual: __field_cursor.pos(),
-                    pos: __object_start,
+                    pos: __entry_pos,
                 }));
             }
             #seen_var = true;
@@ -340,6 +340,7 @@ fn record_decode_impl(
                     #(#var_decls)*
 
                     for _ in 0..__field_count {
+                        let __entry_pos = __table_cursor.pos();
                         let __entry = zebin::FieldEntry::decode(&mut __table_cursor, &mut *__guard)?;
                         let __payload = cursor.read_exact(__entry.payload_len as usize, &mut *__guard)?;
                         match __entry.field_id {
@@ -384,6 +385,7 @@ fn record_decode_impl(
                     #(#seen_var_decls)*
 
                     for _ in 0..__field_count {
+                        let __entry_pos = __table_cursor.pos();
                         let __entry = zebin::FieldEntry::decode(&mut __table_cursor, &mut *__guard)?;
                         let __payload = cursor.read_exact(__entry.payload_len as usize, &mut *__guard)?;
                         match __entry.field_id {

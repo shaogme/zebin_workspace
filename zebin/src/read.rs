@@ -4,6 +4,7 @@ use crate::{
     error::{DecodeError, ZebinError},
     format::ArchiveHeader,
     traits::{Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, Decode, Restore},
+    utils::padding_for_alignment,
     validation::{
         context::ValidationContext,
         validator::{ValidationConfig, Validator},
@@ -98,16 +99,6 @@ impl<'a> Cursor<'a> {
         let bytes: [u8; 4] = self.read_exact(4, context)?.try_into().unwrap();
         Ok(u32::from_le_bytes(bytes))
     }
-}
-
-pub(crate) fn padding_for_alignment(pos: usize, alignment: core::num::NonZeroUsize) -> usize {
-    let alignment = alignment.get();
-    debug_assert!(
-        alignment.is_power_of_two(),
-        "Alignment must be a power of two"
-    );
-    let mask = alignment - 1;
-    alignment.wrapping_sub(pos) & mask
 }
 
 /// Safe access layer output that keeps the validated byte slice alive.

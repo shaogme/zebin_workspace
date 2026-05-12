@@ -13,6 +13,9 @@ use crate::{
 };
 
 #[cfg(feature = "alloc")]
+use crate::write::encoder::VecEncoder;
+
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 enum EncodePhase<'a, T, H = ArchiveHeader>
@@ -145,18 +148,24 @@ where
 
     #[cfg(feature = "alloc")]
     pub fn encode(value: &'a T) -> Result<Vec<u8>, ZebinError> {
-        let mut writer = Self::encode_chunked(value)?;
-        let mut buf = vec![0u8; writer.total_len()];
-        writer.write_all(&mut buf)?;
-        Ok(buf)
+        let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
+        let mut encoder = VecEncoder::new(0);
+        encoder.write(header.encode().as_ref())?;
+
+        let mut state = value.begin_serialize()?;
+        loop {
+            match state.poll(&mut encoder)? {
+                core::task::Poll::Ready(()) => break,
+                core::task::Poll::Pending => continue,
+            }
+        }
+        Ok(encoder.into_inner())
     }
 
     #[cfg(feature = "alloc")]
     pub fn encode_into(value: &'a T, buf: &mut Vec<u8>) -> Result<(), ZebinError> {
-        let mut writer = Self::encode_chunked(value)?;
         buf.clear();
-        buf.resize(writer.total_len(), 0);
-        writer.write_all(buf)?;
+        *buf = Self::encode(value)?;
         Ok(())
     }
 }

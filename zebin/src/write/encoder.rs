@@ -1,6 +1,10 @@
 use core::num::NonZeroUsize;
 
-use crate::{ZebinError, read::padding_for_alignment, traits::ByteSink, utils::byteops};
+use crate::{
+    ZebinError,
+    traits::ByteSink,
+    utils::{byteops, padding_for_alignment},
+};
 
 /// Measuring encoder that simulates writes.
 pub struct MeasureEncoder {
@@ -111,5 +115,68 @@ impl ByteSink for SliceEncoder<'_> {
                     pos: self.archive_pos,
                 })?;
         Ok(written)
+    }
+}
+
+#[cfg(feature = "alloc")]
+/// Encoder that writes into a dynamically growing vector.
+pub struct VecEncoder {
+    buf: alloc::vec::Vec<u8>,
+    archive_pos: usize,
+}
+
+#[cfg(feature = "alloc")]
+impl VecEncoder {
+    pub fn new(archive_pos: usize) -> Self {
+        Self {
+            buf: alloc::vec::Vec::new(),
+            archive_pos,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_capacity(capacity: usize, archive_pos: usize) -> Self {
+        Self {
+            buf: alloc::vec::Vec::with_capacity(capacity),
+            archive_pos,
+        }
+    }
+
+    pub fn into_inner(self) -> alloc::vec::Vec<u8> {
+        self.buf
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl ByteSink for VecEncoder {
+    fn pos(&self) -> usize {
+        self.archive_pos
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
+        self.buf.extend_from_slice(bytes);
+        self.archive_pos =
+            self.archive_pos
+                .checked_add(bytes.len())
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
+        Ok(bytes.len())
+    }
+
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
+        let padding = padding_for_alignment(self.archive_pos, alignment);
+        self.skip(padding)
+    }
+
+    fn skip(&mut self, len: usize) -> Result<usize, ZebinError> {
+        self.buf.resize(self.buf.len() + len, 0);
+        self.archive_pos =
+            self.archive_pos
+                .checked_add(len)
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
+        Ok(len)
     }
 }
