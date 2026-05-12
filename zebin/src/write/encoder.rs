@@ -23,11 +23,13 @@ impl ByteSink for MeasureEncoder {
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, ZebinError> {
+        let len = bytes.len();
         self.pos = self
             .pos
-            .checked_add(bytes.len())
+            .checked_add(len)
             .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
-        Ok(bytes.len())
+        debug_assert!(len <= core::isize::MAX as usize);
+        Ok(len)
     }
 
     fn align(&mut self, alignment: NonZeroUsize) -> Result<usize, ZebinError> {
@@ -36,6 +38,7 @@ impl ByteSink for MeasureEncoder {
             .pos
             .checked_add(padding)
             .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
+        debug_assert!(self.pos % alignment.get() == 0);
         Ok(padding)
     }
 

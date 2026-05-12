@@ -119,11 +119,10 @@ impl<'a, 'p> Validator<'a, 'p> {
     }
 
     pub fn push_depth(&mut self) -> Result<(), DecodeError> {
-        self.depth += 1;
-        if self.depth > self.config.max_depth {
-            self.depth = self.depth.saturating_sub(1);
+        if self.depth >= self.config.max_depth {
             return Err(self.error(DecodeError::RecursionLimitExceeded));
         }
+        self.depth += 1;
         Ok(())
     }
 

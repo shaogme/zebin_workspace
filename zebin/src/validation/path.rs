@@ -12,7 +12,6 @@ pub enum ValidationPathSegment {
 }
 
 /// A fixed-capacity stack for validation path segments.
-#[derive(Clone)]
 pub struct ValidationPathStack {
     segments: [MaybeUninit<ValidationPathSegment>; 32],
     len: usize,
@@ -116,6 +115,21 @@ impl ValidationPathStack {
         }
         *first = false;
         Ok(())
+    }
+}
+
+impl Clone for ValidationPathStack {
+    fn clone(&self) -> Self {
+        let mut segments = [core::mem::MaybeUninit::uninit(); 32];
+        for i in 0..self.len {
+            segments[i].write(unsafe { *self.segments[i].assume_init_ref() });
+        }
+        Self {
+            segments,
+            len: self.len,
+            #[cfg(feature = "alloc")]
+            extra: self.extra.clone(),
+        }
     }
 }
 

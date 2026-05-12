@@ -91,18 +91,21 @@ impl FieldEntry {
     where
         C: ValidationContext + ?Sized,
     {
-        let field_id = cursor.read_u16(context)?;
-        let encoding_pos = cursor.pos();
-        let encoding_byte = cursor.read_u8(context)?;
+        let entry_pos = cursor.pos();
+        let bytes = cursor.read_exact(Self::SIZE, context)?;
+
+        let field_id = u16::from_le_bytes(bytes[0..2].try_into().unwrap());
+        let encoding_byte = bytes[2];
+        let reserved = bytes[3];
+        let payload_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+
         let encoding = FieldEncoding::from_byte(encoding_byte)
-            .ok_or_else(|| context.validation_error("Unknown field encoding", encoding_pos))?;
-        let reserved_pos = cursor.pos();
-        let reserved = cursor.read_u8(context)?;
+            .ok_or_else(|| context.validation_error("Unknown field encoding", entry_pos + 2))?;
+
         if reserved != Self::RESERVED {
-            return Err(context.error(DecodeError::InvalidFieldTable { pos: reserved_pos }));
+            return Err(context.error(DecodeError::InvalidFieldTable { pos: entry_pos + 3 }));
         }
-        let payload_len = cursor.read_u32(context)?;
-        context.check_range(cursor.pos(), payload_len as usize)?;
+
         Ok(Self {
             field_id,
             encoding,
