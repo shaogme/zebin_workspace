@@ -461,7 +461,7 @@ fn restore_field_expr(
             let field_id = field.field_id.expect("field ids validated");
             quote! {
                 #source.#member.as_ref()
-                    .ok_or(zebin::DecodeError::MissingField { field_id: #field_id, pos: 0 })?
+                    .ok_or(zebin::DecodeError::MissingField { field_id: #field_id, pos: #source.pos })?
                     .restore()?
             }
         }

@@ -203,8 +203,9 @@ where
         let mut cursor = Cursor::new(bytes, H::SIZE);
         let root = T::Archived::decode(&mut cursor, &mut validator)?;
         if cursor.pos() != bytes.len() {
+            let pos = cursor.pos();
             return Err(validator
-                .validation_error("Trailing bytes after root object", cursor.pos())
+                .validation_error("archive validation failed: trailing bytes detected after root object", pos)
                 .into());
         }
 

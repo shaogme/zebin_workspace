@@ -101,7 +101,7 @@ where
                     }
                     let state = next_state.take().ok_or(ZebinError::SerializationError {
                         pos: encoder.pos(),
-                        message: "writer body state was already consumed",
+                        message: "archive writer state machine error: body state missing",
                     })?;
                     self.phase = EncodePhase::Body { state };
                 }
