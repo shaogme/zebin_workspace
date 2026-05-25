@@ -117,10 +117,14 @@ where
                 }
 
                 let len_pos = current_end - 4;
-                let object_len = u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
+                let object_len =
+                    u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
+                        as usize;
 
                 if object_len < 20 || current_end - object_len < elements_start {
-                    return Err(context.validation_error("Invalid object length in sequence", len_pos));
+                    return Err(
+                        context.validation_error("Invalid object length in sequence", len_pos)
+                    );
                 }
 
                 let element_start = current_end - object_len;
@@ -156,7 +160,9 @@ where
             cursor.align(A::ALIGNMENT, context)?;
         }
 
-        if A::FIXED_SIZE.is_none() && <A as ArchivedLayout>::FIELD_ENCODING == FieldEncoding::SchemaAware {
+        if A::FIXED_SIZE.is_none()
+            && <A as ArchivedLayout>::FIELD_ENCODING == FieldEncoding::SchemaAware
+        {
             let start_pos = cursor.pos();
             let total_bytes = cursor.bytes();
             let elements_start = start_pos;
@@ -169,10 +175,14 @@ where
                 }
 
                 let len_pos = current_end - 4;
-                let object_len = u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
+                let object_len =
+                    u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
+                        as usize;
 
                 if object_len < 20 || current_end - object_len < elements_start {
-                    return Err(context.validation_error("Invalid object length in sequence", len_pos));
+                    return Err(
+                        context.validation_error("Invalid object length in sequence", len_pos)
+                    );
                 }
 
                 let element_start = current_end - object_len;

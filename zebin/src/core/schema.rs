@@ -299,7 +299,10 @@ where
     let object_end = cursor.bytes().len();
 
     if object_end < object_start + 20 {
-        return Err(context.validation_error("Object too short to contain trailing table metadata", cursor.pos()));
+        return Err(context.validation_error(
+            "Object too short to contain trailing table metadata",
+            cursor.pos(),
+        ));
     }
 
     let offset_pos = object_end - 8;
@@ -318,7 +321,9 @@ where
     }
 
     if field_count > MAX_SCHEMA_FIELDS {
-        return Err(context.validation_error("Field count exceeds maximum schema fields", object_start));
+        return Err(
+            context.validation_error("Field count exceeds maximum schema fields", object_start)
+        );
     }
 
     let mut entries = [FieldEntry::EMPTY; MAX_SCHEMA_FIELDS];
@@ -336,7 +341,9 @@ where
         let entry_pos = entry_positions[i];
         let payload_len = entry.payload_len as usize;
         if payload_pos + payload_len > table_abs_pos {
-            return Err(context.validation_error("Field payload exceeds field table boundary", payload_pos));
+            return Err(
+                context.validation_error("Field payload exceeds field table boundary", payload_pos)
+            );
         }
 
         let payload = &cursor.bytes()[payload_pos..payload_pos + payload_len];
@@ -349,4 +356,3 @@ where
     *cursor = cursor.with_pos(object_end);
     Ok(())
 }
-
