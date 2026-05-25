@@ -1,5 +1,7 @@
 use core::num::NonZeroUsize;
 
+#[cfg(feature = "mmap")]
+use crate::io::storage::mmap::MmapMut;
 use crate::{
     ZebinError,
     traits::{ByteSink, SinkProgress},
@@ -204,14 +206,14 @@ impl ByteSink for VecEncoder {
 /// All writes return `SinkProgress::Complete`; if a write would exceed the
 /// map, `ZebinError::BufferTooSmall` is returned.
 pub struct MmapEncoder {
-    mmap: memmap2::MmapMut,
+    mmap: MmapMut,
     archive_pos: usize,
     written: usize,
 }
 
 #[cfg(feature = "mmap")]
 impl MmapEncoder {
-    pub fn new(mmap: memmap2::MmapMut, archive_pos: usize) -> Self {
+    pub fn new(mmap: MmapMut, archive_pos: usize) -> Self {
         Self {
             mmap,
             archive_pos,
@@ -227,7 +229,7 @@ impl MmapEncoder {
         self.mmap.len()
     }
 
-    pub fn into_inner(self) -> memmap2::MmapMut {
+    pub fn into_inner(self) -> MmapMut {
         self.mmap
     }
 

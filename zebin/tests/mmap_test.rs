@@ -1,16 +1,15 @@
 #![cfg(feature = "mmap")]
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs,
     num::NonZeroUsize,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use memmap2::{MmapMut, MmapOptions};
 use zebin::{
     ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, EncodeState, Mmap,
-    MmapEncoder, Storage, ZebinArchive, ZebinEncode, ZebinError,
+    MmapEncoder, MmapMut, Storage, ZebinArchive, ZebinEncode, ZebinError,
 };
 
 #[derive(ZebinArchive, ZebinEncode)]
@@ -31,17 +30,8 @@ fn temp_archive_path() -> PathBuf {
     ))
 }
 
-fn open_writable_mmap(path: &Path, len: usize) -> (File, MmapMut) {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-        .expect("open writable mmap file");
-    file.set_len(len as u64).expect("set_len");
-    let mmap = unsafe { MmapOptions::new().map_mut(&file).expect("map_mut") };
-    (file, mmap)
+fn open_writable_mmap(path: &Path, len: usize) -> MmapMut {
+    MmapMut::create(path, len as u64).expect("create writable mmap")
 }
 
 fn drive_to_mmap<T>(value: &T, encoder: &mut MmapEncoder) -> Result<(), ZebinError>
@@ -115,7 +105,7 @@ fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::er
     let expected = zebin::encode(&user)?;
 
     let path = temp_archive_path();
-    let (file, mmap_mut) = open_writable_mmap(&path, expected.len());
+    let mmap_mut = open_writable_mmap(&path, expected.len());
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
     drive_to_mmap(&user, &mut encoder)?;
@@ -123,7 +113,6 @@ fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::er
     assert_eq!(encoder.pos(), expected.len());
     encoder.flush()?;
     drop(encoder);
-    drop(file);
 
     let mmap = Mmap::open(&path)?;
     assert_eq!(mmap.as_slice(), expected.as_slice());
@@ -147,13 +136,12 @@ fn test_mmap_encoder_matches_vec_encode() -> Result<(), Box<dyn std::error::Erro
     let expected = zebin::encode(&user)?;
 
     let path = temp_archive_path();
-    let (file, mmap_mut) = open_writable_mmap(&path, expected.len());
+    let mmap_mut = open_writable_mmap(&path, expected.len());
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
     drive_to_mmap(&user, &mut encoder)?;
     encoder.flush()?;
     drop(encoder);
-    drop(file);
 
     let on_disk = fs::read(&path)?;
     assert_eq!(on_disk, expected);
@@ -172,7 +160,7 @@ fn test_mmap_encoder_overflow_returns_buffer_too_small() -> Result<(), Box<dyn s
     assert!(expected.len() > 1, "archive must be larger than 1 byte");
 
     let path = temp_archive_path();
-    let (file, mmap_mut) = open_writable_mmap(&path, expected.len() - 1);
+    let mmap_mut = open_writable_mmap(&path, expected.len() - 1);
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
     let result = drive_to_mmap(&user, &mut encoder);
@@ -181,7 +169,6 @@ fn test_mmap_encoder_overflow_returns_buffer_too_small() -> Result<(), Box<dyn s
         other => panic!("expected BufferTooSmall, got {other:?}"),
     }
     drop(encoder);
-    drop(file);
 
     fs::remove_file(&path)?;
     Ok(())
@@ -190,7 +177,7 @@ fn test_mmap_encoder_overflow_returns_buffer_too_small() -> Result<(), Box<dyn s
 #[test]
 fn test_mmap_encoder_skip_and_align() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_archive_path();
-    let (file, mmap_mut) = open_writable_mmap(&path, 64);
+    let mmap_mut = open_writable_mmap(&path, 64);
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
     assert_eq!(encoder.pos(), 0);
@@ -213,7 +200,6 @@ fn test_mmap_encoder_skip_and_align() -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(&mmap[0..8], &[0u8; 8], "skip/align region must be zeros");
     assert_eq!(&mmap[8..13], b"hello");
     drop(mmap);
-    drop(file);
 
     fs::remove_file(&path)?;
     Ok(())
@@ -222,7 +208,7 @@ fn test_mmap_encoder_skip_and_align() -> Result<(), Box<dyn std::error::Error>> 
 #[test]
 fn test_mmap_encoder_write_past_end_errors() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_archive_path();
-    let (file, mmap_mut) = open_writable_mmap(&path, 4);
+    let mmap_mut = open_writable_mmap(&path, 4);
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
     encoder.write(b"abc")?;
@@ -230,7 +216,6 @@ fn test_mmap_encoder_write_past_end_errors() -> Result<(), Box<dyn std::error::E
     assert!(matches!(err, ZebinError::BufferTooSmall { .. }));
 
     drop(encoder);
-    drop(file);
     fs::remove_file(&path)?;
     Ok(())
 }

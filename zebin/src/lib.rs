@@ -32,7 +32,7 @@ pub mod prelude {
     pub use crate::error::{ArchiveError, DecodeError, ZebinError};
     pub use crate::format::ArchiveHeader;
     #[cfg(feature = "mmap")]
-    pub use crate::io::storage::mmap::Mmap;
+    pub use crate::io::storage::mmap::{Mmap, MmapMut};
     pub use crate::traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
         Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware, SinkProgress,
@@ -68,7 +68,7 @@ pub use crate::error::{ArchiveError, DecodeError, ZebinError};
 pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
-pub use crate::io::storage::mmap::Mmap;
+pub use crate::io::storage::mmap::{Mmap, MmapMut};
 pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
     Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
