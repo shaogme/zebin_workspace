@@ -211,11 +211,47 @@ where
     }
 }
 
-#[cfg(feature = "alloc")]
-type CurrentEncoder<'a, T> = Box<(<T as Encode>::Encoder<'a>, bool)>;
+pub struct CurrentEncoder<'a, T: Encode + 'a> {
+    #[cfg(feature = "alloc")]
+    inner: Box<(<T as Encode>::Encoder<'a>, bool)>,
+    #[cfg(not(feature = "alloc"))]
+    inner: (<T as Encode>::Encoder<'a>, bool),
+}
 
-#[cfg(not(feature = "alloc"))]
-type CurrentEncoder<'a, T> = (<T as Encode>::Encoder<'a>, bool);
+impl<'a, T: Encode + 'a> CurrentEncoder<'a, T> {
+    pub fn new(encoder: <T as Encode>::Encoder<'a>, started: bool) -> Self {
+        Self {
+            #[cfg(feature = "alloc")]
+            inner: Box::new((encoder, started)),
+            #[cfg(not(feature = "alloc"))]
+            inner: (encoder, started),
+        }
+    }
+
+    pub fn get_mut(&mut self) -> (&mut <T as Encode>::Encoder<'a>, &mut bool) {
+        #[cfg(feature = "alloc")]
+        {
+            let (ref mut encoder, ref mut started) = *self.inner;
+            (encoder, started)
+        }
+        #[cfg(not(feature = "alloc"))]
+        {
+            let (ref mut encoder, ref mut started) = self.inner;
+            (encoder, started)
+        }
+    }
+
+    pub fn into_inner(self) -> (<T as Encode>::Encoder<'a>, bool) {
+        #[cfg(feature = "alloc")]
+        {
+            *self.inner
+        }
+        #[cfg(not(feature = "alloc"))]
+        {
+            self.inner
+        }
+    }
+}
 
 pub struct IterEncoder<'a, S: ?Sized, T, I: ?Sized = S>
 where
@@ -302,25 +338,11 @@ where
                     let mut encoder = item.begin_encode()?;
                     match encoder.input(item, sink)? {
                         Poll::Pending => {
-                            #[cfg(feature = "alloc")]
-                            {
-                                self.current_encoder = Some(Box::new((encoder, true)));
-                            }
-                            #[cfg(not(feature = "alloc"))]
-                            {
-                                self.current_encoder = Some((encoder, true));
-                            }
+                            self.current_encoder = Some(CurrentEncoder::new(encoder, true));
                             return Ok(Poll::Pending);
                         }
                         Poll::Ready(()) => {
-                            #[cfg(feature = "alloc")]
-                            {
-                                self.current_encoder = Some(Box::new((encoder, false)));
-                            }
-                            #[cfg(not(feature = "alloc"))]
-                            {
-                                self.current_encoder = Some((encoder, false));
-                            }
+                            self.current_encoder = Some(CurrentEncoder::new(encoder, false));
                         }
                     }
                 } else {
@@ -329,10 +351,7 @@ where
             }
 
             if let Some(state) = &mut self.current_encoder {
-                #[cfg(feature = "alloc")]
-                let (encoder, started) = &mut **state;
-                #[cfg(not(feature = "alloc"))]
-                let (encoder, started) = state;
+                let (encoder, started) = state.get_mut();
 
                 if *started {
                     match encoder.poll_pending(sink)? {
@@ -341,10 +360,7 @@ where
                     }
                 }
 
-                #[cfg(feature = "alloc")]
-                let (encoder, _) = *self.current_encoder.take().unwrap();
-                #[cfg(not(feature = "alloc"))]
-                let (encoder, _) = self.current_encoder.take().unwrap();
+                let (encoder, _) = self.current_encoder.take().unwrap().into_inner();
 
                 let _ = encoder.finish(sink)?;
             }
