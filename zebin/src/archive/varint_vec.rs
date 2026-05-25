@@ -92,6 +92,7 @@ impl<T> ArchivedLayout for ArchivedVarIntVec<T> {
 
 impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
     type View = ArchivedVarIntVec<T>;
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where

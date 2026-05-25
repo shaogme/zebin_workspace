@@ -3,7 +3,7 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder,
         SchemaAware,
     },
     validation::context::ValidationContext,
@@ -116,6 +116,8 @@ impl ArchivedLayout for ArchivedPackedBoolSlice {
 
 impl<'a> Decode<'a> for ArchivedPackedBoolSlice {
     type View = ArchivedPackedBoolSliceView<'a>;
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
@@ -186,6 +188,8 @@ impl<const BITS: u8> ArchivedLayout for ArchivedPackedU8Slice<BITS> {
 
 impl<'a, const BITS: u8> Decode<'a> for ArchivedPackedU8Slice<BITS> {
     type View = ArchivedPackedU8SliceView<'a, BITS>;
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
@@ -380,7 +384,7 @@ impl<'a, I> Encoder<'a> for PackedViewEncoder<'a, I> {
 }
 
 #[cfg(feature = "alloc")]
-impl Restore<Vec<bool>> for ArchivedPackedBoolSliceView<'_> {
+impl crate::traits::Restore<Vec<bool>> for ArchivedPackedBoolSliceView<'_> {
     fn restore(&self) -> Result<Vec<bool>, ZebinError> {
         let mut out = Vec::with_capacity(self.len());
         for i in 0..self.len() {
@@ -391,7 +395,7 @@ impl Restore<Vec<bool>> for ArchivedPackedBoolSliceView<'_> {
 }
 
 #[cfg(feature = "alloc")]
-impl<const BITS: u8> Restore<Vec<u8>> for ArchivedPackedU8SliceView<'_, BITS> {
+impl<const BITS: u8> crate::traits::Restore<Vec<u8>> for ArchivedPackedU8SliceView<'_, BITS> {
     fn restore(&self) -> Result<Vec<u8>, ZebinError> {
         let mut out = Vec::with_capacity(self.len());
         for i in 0..self.len() {

@@ -2,14 +2,44 @@ use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
 use crate::traits::Encoder;
-use crate::{Cursor, FieldEncoding, ObjectEncoding, ValidationContext};
+use crate::{Cursor, ObjectEncoding, ValidationContext};
 use crate::{
-    archive::slice::SequenceSource,
     error::{DecodeError, ZebinError},
     traits::{
         Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Restore, SchemaAware,
     },
 };
+
+
+/// Source of indexed sequence items.
+pub trait SequenceSource<T> {
+    fn len(&self) -> usize;
+
+    #[cfg(feature = "alloc")]
+    fn get(&self, index: usize) -> &T;
+}
+
+impl<T> SequenceSource<T> for [T] {
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
+
+    #[cfg(feature = "alloc")]
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
+
+impl<T, const N: usize> SequenceSource<T> for [T; N] {
+    fn len(&self) -> usize {
+        N
+    }
+
+    #[cfg(feature = "alloc")]
+    fn get(&self, index: usize) -> &T {
+        &self[index]
+    }
+}
 
 impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
     fn pos(&self) -> usize {
@@ -88,65 +118,14 @@ where
     A: Decode<'a>,
 {
     type View = ArchivedVec<'a, A::View>;
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
         let len = cursor.read_u32(context)? as usize;
-        let mut items = Vec::with_capacity(len);
-
-        if let Some(_fixed_size) = A::FIXED_SIZE {
-            cursor.align(A::ALIGNMENT, context)?;
-            for index in 0..len {
-                let mut guard = context.push_index(index);
-                items.push(A::decode(cursor, &mut *guard)?);
-            }
-        } else if <A as ArchivedLayout>::FIELD_ENCODING == FieldEncoding::SchemaAware {
-            let start_pos = cursor.pos();
-            let total_bytes = cursor.bytes();
-            let elements_start = start_pos;
-            let elements_end = total_bytes.len();
-
-            let mut current_end = elements_end;
-            let mut temp_items = Vec::with_capacity(len);
-
-            for index in (0..len).rev() {
-                if current_end < elements_start + 8 {
-                    return Err(context.validation_error("Sequence element truncated", current_end));
-                }
-
-                let len_pos = current_end - 4;
-                let object_len =
-                    u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
-                        as usize;
-
-                if object_len < 20 || current_end - object_len < elements_start {
-                    return Err(
-                        context.validation_error("Invalid object length in sequence", len_pos)
-                    );
-                }
-
-                let element_start = current_end - object_len;
-                let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
-                let mut guard = context.push_index(index);
-
-                let view = A::decode(&mut element_cursor, &mut *guard)?;
-                temp_items.push(view);
-
-                current_end = element_start;
-            }
-
-            temp_items.reverse();
-            items = temp_items;
-            *cursor = cursor.with_pos(elements_end);
-        } else {
-            for index in 0..len {
-                let mut guard = context.push_index(index);
-                items.push(A::decode(cursor, &mut *guard)?);
-            }
-        }
-
+        let items = <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::decode_sequence(cursor, len, context)?;
         Ok(ArchivedVec::new(items))
     }
 
@@ -155,53 +134,7 @@ where
         C: ValidationContext + ?Sized,
     {
         let len = cursor.read_u32(context)? as usize;
-
-        if A::FIXED_SIZE.is_some() {
-            cursor.align(A::ALIGNMENT, context)?;
-        }
-
-        if A::FIXED_SIZE.is_none()
-            && <A as ArchivedLayout>::FIELD_ENCODING == FieldEncoding::SchemaAware
-        {
-            let start_pos = cursor.pos();
-            let total_bytes = cursor.bytes();
-            let elements_start = start_pos;
-            let elements_end = total_bytes.len();
-
-            let mut current_end = elements_end;
-            for index in (0..len).rev() {
-                if current_end < elements_start + 8 {
-                    return Err(context.validation_error("Sequence element truncated", current_end));
-                }
-
-                let len_pos = current_end - 4;
-                let object_len =
-                    u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
-                        as usize;
-
-                if object_len < 20 || current_end - object_len < elements_start {
-                    return Err(
-                        context.validation_error("Invalid object length in sequence", len_pos)
-                    );
-                }
-
-                let element_start = current_end - object_len;
-                let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
-                let mut guard = context.push_index(index);
-
-                A::validate(&mut element_cursor, &mut *guard)?;
-
-                current_end = element_start;
-            }
-            *cursor = cursor.with_pos(elements_end);
-        } else {
-            for index in 0..len {
-                let mut guard = context.push_index(index);
-                A::validate(cursor, &mut *guard)?;
-            }
-        }
-
-        Ok(())
+        <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::validate_sequence(cursor, len, context)
     }
 }
 

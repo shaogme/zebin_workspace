@@ -21,35 +21,6 @@ where
     }
 }
 
-/// Source of indexed sequence items.
-pub trait SequenceSource<T> {
-    fn len(&self) -> usize;
-
-    #[cfg(feature = "alloc")]
-    fn get(&self, index: usize) -> &T;
-}
-
-impl<T> SequenceSource<T> for [T] {
-    fn len(&self) -> usize {
-        <[T]>::len(self)
-    }
-
-    #[cfg(feature = "alloc")]
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
-
-impl<T, const N: usize> SequenceSource<T> for [T; N] {
-    fn len(&self) -> usize {
-        N
-    }
-
-    #[cfg(feature = "alloc")]
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
 
 impl<T, const N: usize> Archive for [T; N]
 where
@@ -104,6 +75,8 @@ where
     A: Decode<'a>,
 {
     type View = [A::View; N];
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where

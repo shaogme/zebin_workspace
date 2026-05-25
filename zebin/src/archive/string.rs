@@ -59,6 +59,7 @@ impl ArchivedLayout for ArchivedString {
 
 impl<'a> Decode<'a> for ArchivedString {
     type View = ArchivedStringView<'a>;
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where

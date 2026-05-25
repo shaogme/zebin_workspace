@@ -60,6 +60,8 @@ where
     A: Decode<'a>,
 {
     type View = ArchivedOption<A::View>;
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(
         cursor: &mut crate::read::Cursor<'a>,

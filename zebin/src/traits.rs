@@ -7,6 +7,9 @@ use crate::{
     validation::context::ValidationContext,
 };
 
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
 /// Fixed-width archived overlay contract.
 ///
 /// Only plain fixed-size overlays implement this trait. Variable-width archive
@@ -47,6 +50,8 @@ pub trait ArchivedLayout {
 /// Read-side decode contract for consuming a value from a sequential cursor.
 pub trait Decode<'a>: ArchivedLayout + Sized {
     type View: 'a;
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy: SequenceDecodeStrategy<'a, Self>;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
@@ -56,6 +61,201 @@ pub trait Decode<'a>: ArchivedLayout + Sized {
     where
         C: ValidationContext + ?Sized;
 }
+
+/// Strategy for decoding and validating a sequence of elements.
+#[cfg(feature = "alloc")]
+pub trait SequenceDecodeStrategy<'a, T: Decode<'a>> {
+    fn decode_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<Vec<T::View>, DecodeError>
+    where
+        C: ValidationContext + ?Sized;
+
+    fn validate_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized;
+}
+
+/// Strategy for fixed-size sequence elements (with alignment).
+#[cfg(feature = "alloc")]
+pub struct FixedSequenceStrategy;
+
+#[cfg(feature = "alloc")]
+impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for FixedSequenceStrategy {
+    fn decode_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<Vec<T::View>, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let mut items = Vec::with_capacity(len);
+        cursor.align(T::ALIGNMENT, context)?;
+        for index in 0..len {
+            let mut guard = context.push_index(index);
+            items.push(T::decode(cursor, &mut *guard)?);
+        }
+        Ok(items)
+    }
+
+    fn validate_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        cursor.align(T::ALIGNMENT, context)?;
+        for index in 0..len {
+            let mut guard = context.push_index(index);
+            T::validate(cursor, &mut *guard)?;
+        }
+        Ok(())
+    }
+}
+
+/// Strategy for forward self-describing variable-length elements.
+#[cfg(feature = "alloc")]
+pub struct ForwardSequenceStrategy;
+
+#[cfg(feature = "alloc")]
+impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for ForwardSequenceStrategy {
+    fn decode_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<Vec<T::View>, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let mut items = Vec::with_capacity(len);
+        for index in 0..len {
+            let mut guard = context.push_index(index);
+            items.push(T::decode(cursor, &mut *guard)?);
+        }
+        Ok(items)
+    }
+
+    fn validate_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        for index in 0..len {
+            let mut guard = context.push_index(index);
+            T::validate(cursor, &mut *guard)?;
+        }
+        Ok(())
+    }
+}
+
+/// Strategy for backward self-describing variable-length elements (e.g. Schema-Aware).
+#[cfg(feature = "alloc")]
+pub struct BackwardSequenceStrategy;
+
+#[cfg(feature = "alloc")]
+impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrategy {
+    fn decode_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<Vec<T::View>, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start_pos = cursor.pos();
+        let total_bytes = cursor.bytes();
+        let elements_start = start_pos;
+        let elements_end = total_bytes.len();
+
+        let mut current_end = elements_end;
+        let mut temp_items = Vec::with_capacity(len);
+
+        for index in (0..len).rev() {
+            if current_end < elements_start + 8 {
+                return Err(context.validation_error("Sequence element truncated", current_end));
+            }
+
+            let len_pos = current_end - 4;
+            let object_len =
+                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
+                    as usize;
+
+            if object_len < 20 || current_end - object_len < elements_start {
+                return Err(
+                    context.validation_error("Invalid object length in sequence", len_pos)
+                );
+            }
+
+            let element_start = current_end - object_len;
+            let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
+            let mut guard = context.push_index(index);
+
+            let view = T::decode(&mut element_cursor, &mut *guard)?;
+            temp_items.push(view);
+
+            current_end = element_start;
+        }
+
+        temp_items.reverse();
+        *cursor = cursor.with_pos(elements_end);
+        Ok(temp_items)
+    }
+
+    fn validate_sequence<C>(
+        cursor: &mut Cursor<'a>,
+        len: usize,
+        context: &mut C,
+    ) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start_pos = cursor.pos();
+        let total_bytes = cursor.bytes();
+        let elements_start = start_pos;
+        let elements_end = total_bytes.len();
+
+        let mut current_end = elements_end;
+        for index in (0..len).rev() {
+            if current_end < elements_start + 8 {
+                return Err(context.validation_error("Sequence element truncated", current_end));
+            }
+
+            let len_pos = current_end - 4;
+            let object_len =
+                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
+                    as usize;
+
+            if object_len < 20 || current_end - object_len < elements_start {
+                return Err(
+                    context.validation_error("Invalid object length in sequence", len_pos)
+                );
+            }
+
+            let element_start = current_end - object_len;
+            let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
+            let mut guard = context.push_index(index);
+
+            T::validate(&mut element_cursor, &mut *guard)?;
+
+            current_end = element_start;
+        }
+        *cursor = cursor.with_pos(elements_end);
+        Ok(())
+    }
+}
+
 
 /// Object model layer: type-level archive and decode contracts.
 pub trait Archive {

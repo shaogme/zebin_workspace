@@ -56,6 +56,10 @@ pub use crate::archive::{
     varint::{VarInt, VarIntView},
 };
 #[cfg(feature = "alloc")]
+pub use crate::traits::{
+    SequenceDecodeStrategy, FixedSequenceStrategy, ForwardSequenceStrategy, BackwardSequenceStrategy,
+};
+#[cfg(feature = "alloc")]
 pub use crate::archive::{
     packed_vec::{PackedBoolVec, PackedSequenceEncoder, PackedU8Vec, PackedVec},
     varint_vec::{PackedVarIntSlice, VarIntVec},

@@ -278,6 +278,8 @@ fn record_decode_impl(
 
             impl<'a> zebin::Decode<'a> for #marker {
                 type View = #view<'a>;
+                #[cfg(feature = "alloc")]
+                type DecodeStrategy = zebin::BackwardSequenceStrategy;
 
                 fn decode<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::DecodeError>
                 where
@@ -381,6 +383,8 @@ fn record_decode_impl(
 
             impl<'a> zebin::Decode<'a> for #marker {
                 type View = #view<'a>;
+                #[cfg(feature = "alloc")]
+                type DecodeStrategy = zebin::ForwardSequenceStrategy;
                 fn decode<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::DecodeError>
                 where
                     C: zebin::ValidationContext + ?Sized,
@@ -689,6 +693,8 @@ fn enum_impl(
 
         impl<'a> zebin::Decode<'a> for #marker {
             type View = #view<'a>;
+            #[cfg(feature = "alloc")]
+            type DecodeStrategy = zebin::ForwardSequenceStrategy;
             fn decode<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::DecodeError>
             where
                 C: zebin::ValidationContext + ?Sized,

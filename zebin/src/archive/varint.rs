@@ -209,6 +209,8 @@ where
     T: VarIntNumber + 'a,
 {
     type View = VarIntView<T>;
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
