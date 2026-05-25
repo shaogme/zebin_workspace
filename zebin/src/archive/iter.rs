@@ -30,7 +30,11 @@ impl ValidationContext for DummyContext {
         Ok(())
     }
 
-    fn check_alignment(&mut self, _pos: usize, _alignment: NonZeroUsize) -> Result<(), DecodeError> {
+    fn check_alignment(
+        &mut self,
+        _pos: usize,
+        _alignment: NonZeroUsize,
+    ) -> Result<(), DecodeError> {
         Ok(())
     }
 
@@ -361,7 +365,8 @@ where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
-    type Encoder<'a> = IterEncoder<'a, I, T, IterArchive<I, T>>
+    type Encoder<'a>
+        = IterEncoder<'a, I, T, IterArchive<I, T>>
     where
         Self: 'a;
 

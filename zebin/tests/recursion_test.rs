@@ -41,7 +41,9 @@ pub struct IterNode {
 
 #[test]
 fn test_recursion_limit_iter() {
-    let mut current = IterNode { children: IterArchive::new(vec![]) };
+    let mut current = IterNode {
+        children: IterArchive::new(vec![]),
+    };
     for _ in 0..300 {
         current = IterNode {
             children: IterArchive::new(vec![current]),
@@ -57,4 +59,3 @@ fn test_recursion_limit_iter() {
         Ok(_) => panic!("Expected error, got Ok"),
     }
 }
-

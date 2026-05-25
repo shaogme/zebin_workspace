@@ -116,4 +116,3 @@ fn test_borrowed_container_round_trip() {
     let owned: Vec<u32> = archived.owned_numbers.restore().unwrap();
     assert_eq!(owned, vec![4, 5, 6]);
 }
-

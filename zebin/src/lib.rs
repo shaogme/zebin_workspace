@@ -36,8 +36,8 @@ pub mod prelude {
     pub use crate::io::{Mmap, MmapEncoder, MmapMut};
     pub use crate::{
         archive::{
-            ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedSlice,
-            PackedU8Slice, VarInt, VarIntView, IterArchive,
+            ArchivedPackedBoolSlice, ArchivedPackedU8Slice, IterArchive, PackedBoolSlice,
+            PackedSlice, PackedU8Slice, VarInt, VarIntView,
         },
         error::{ArchiveError, DecodeError, ZebinError},
         io::{
@@ -62,12 +62,12 @@ pub mod prelude {
 /// 底层表示与数据存储结构相关的高级 API
 pub mod archive {
     pub use crate::archive_impl::{
+        iter::{ArchivedIter, IterArchive, IterEncoder},
         packed::{
             ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView, ArchivedPackedU8Slice,
             ArchivedPackedU8SliceView, PackedBoolSlice, PackedSlice, PackedU8Slice,
         },
         varint::{VarInt, VarIntView},
-        iter::{IterArchive, IterEncoder, ArchivedIter},
     };
     #[cfg(feature = "alloc")]
     pub use crate::archive_impl::{

@@ -40,11 +40,12 @@ fn test_iter_archive_lazy() {
     let bytes = zebin::encode(&wrapped).expect("failed to encode");
 
     // 不做 Restore，直接获取零拷贝延迟反序列化视图
-    let reader = zebin::reader::<IterArchive<BTreeSet<u64>, u64>>(&bytes).expect("failed to create reader");
+    let reader =
+        zebin::reader::<IterArchive<BTreeSet<u64>, u64>>(&bytes).expect("failed to create reader");
     let archived_iter = reader.root();
-    
+
     assert_eq!(archived_iter.len(), 2);
-    
+
     let mut iter = archived_iter.iter();
     assert_eq!(iter.next().unwrap().unwrap(), 100);
     assert_eq!(iter.next().unwrap().unwrap(), 200);
@@ -60,7 +61,8 @@ fn test_iter_archive_restore_explicit() {
     let wrapped = IterArchive::new(set);
     let bytes = zebin::encode(&wrapped).expect("failed to encode");
 
-    let reader = zebin::reader::<IterArchive<BTreeSet<u64>, u64>>(&bytes).expect("failed to create reader");
+    let reader =
+        zebin::reader::<IterArchive<BTreeSet<u64>, u64>>(&bytes).expect("failed to create reader");
     let archived_iter = reader.root();
 
     use zebin::prelude::Restore;
@@ -71,8 +73,8 @@ fn test_iter_archive_restore_explicit() {
 
     // 显式恢复为 VecDeque
     use std::collections::VecDeque;
-    let restored_deque: VecDeque<u64> = archived_iter.restore().expect("failed to restore VecDeque");
+    let restored_deque: VecDeque<u64> =
+        archived_iter.restore().expect("failed to restore VecDeque");
     let expected_deque: VecDeque<u64> = vec![100, 200].into();
     assert_eq!(restored_deque, expected_deque);
 }
-

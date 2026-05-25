@@ -224,7 +224,8 @@ where
     for<'b> &'b [T]: IntoIterator<Item = &'b T>,
     for<'b> <&'b [T] as IntoIterator>::IntoIter: ExactSizeIterator,
 {
-    type Encoder<'a> = crate::archive::IterEncoder<'a, [T], T>
+    type Encoder<'a>
+        = crate::archive::IterEncoder<'a, [T], T>
     where
         Self: 'a;
 
@@ -232,6 +233,3 @@ where
         crate::archive::IterEncoder::new(self)
     }
 }
-
-
-

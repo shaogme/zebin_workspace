@@ -1,40 +1,12 @@
-use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
-use core::task::Poll;
+use alloc::{collections::VecDeque, vec::Vec};
 
 use crate::{
     io::{ForwardSequenceStrategy, SequenceDecodeStrategy},
     prelude::*,
 };
 
-/// Source of indexed sequence items.
-pub trait SequenceSource<T> {
-    fn len(&self) -> usize;
-
-    #[cfg(feature = "alloc")]
-    fn get(&self, index: usize) -> &T;
-}
-
-impl<T> SequenceSource<T> for [T] {
-    fn len(&self) -> usize {
-        <[T]>::len(self)
-    }
-
-    #[cfg(feature = "alloc")]
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
-
-impl<T, const N: usize> SequenceSource<T> for [T; N] {
-    fn len(&self) -> usize {
-        N
-    }
-
-    #[cfg(feature = "alloc")]
-    fn get(&self, index: usize) -> &T {
-        &self[index]
-    }
-}
+// Replaced SequenceSource with IterEncoder from iter.rs
+use super::iter::IterEncoder;
 
 impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
     fn pos(&self) -> usize {
@@ -46,16 +18,6 @@ impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
 
     fn schema_revision(&self) -> u32 {
         0
-    }
-}
-
-impl<T> SequenceSource<T> for VecDeque<T> {
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn get(&self, index: usize) -> &T {
-        &self[index]
     }
 }
 
@@ -163,148 +125,8 @@ where
     }
 }
 
-pub struct SequenceEncoder<'a, S, T, I: ?Sized = S>
-where
-    S: ?Sized + SequenceSource<T>,
-    T: Encode + Archive + 'a,
-{
-    source: &'a S,
-    len_prefix: [u8; 4],
-    prefix_cursor: usize,
-    aligned: bool,
-    index: usize,
-    current_encoder: Option<Box<(<T as Encode>::Encoder<'a>, bool)>>,
-    _phantom: core::marker::PhantomData<&'a I>,
-}
-
-impl<'a, S, T, I: ?Sized> SequenceEncoder<'a, S, T, I>
-where
-    S: ?Sized + SequenceSource<T>,
-    T: Encode + Archive + 'a,
-{
-    pub(crate) fn new(source: &'a S) -> Result<Self, ZebinError> {
-        let len = u32::try_from(source.len()).map_err(|_| ZebinError::SerializationError {
-            pos: 0,
-            message: "sequence length exceeds u32 range",
-        })?;
-        Ok(Self {
-            source,
-            len_prefix: len.to_le_bytes(),
-            prefix_cursor: 0,
-            aligned: false,
-            index: 0,
-            current_encoder: None,
-            _phantom: core::marker::PhantomData,
-        })
-    }
-
-    fn fixed_width() -> bool
-    where
-        T::Archived: ArchivedLayout,
-    {
-        <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some()
-    }
-
-    fn ensure_current_encoder(&mut self) -> Result<(), ZebinError>
-    where
-        T::Archived: ArchivedLayout,
-    {
-        if self.current_encoder.is_some() {
-            return Ok(());
-        }
-
-        self.current_encoder = Some(Box::new((
-            self.source.get(self.index).begin_encode()?,
-            false,
-        )));
-        Ok(())
-    }
-}
-
-impl<'a, S, T, I> Encoder<'a> for SequenceEncoder<'a, S, T, I>
-where
-    S: ?Sized + SequenceSource<T>,
-    T: Encode + Archive + 'a,
-    T::Archived: ArchivedLayout,
-    I: ?Sized,
-{
-    type Input = &'a I;
-
-    fn input<Sink: ByteSink + ?Sized>(
-        &mut self,
-        _item: Self::Input,
-        sink: &mut Sink,
-    ) -> Result<Poll<()>, ZebinError> {
-        self.poll_pending(sink)
-    }
-
-    fn poll_pending<Sink: ByteSink + ?Sized>(
-        &mut self,
-        sink: &mut Sink,
-    ) -> Result<Poll<()>, ZebinError> {
-        if self.prefix_cursor < self.len_prefix.len() {
-            let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if sink
-                .write(&self.len_prefix[self.prefix_cursor..])?
-                .advance_cursor(&mut self.prefix_cursor, remaining)
-                .is_pending()
-            {
-                return Ok(Poll::Pending);
-            }
-        }
-
-        if Self::fixed_width() && !self.aligned {
-            if sink
-                .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
-                .is_complete()
-            {
-                self.aligned = true;
-            } else {
-                return Ok(Poll::Pending);
-            }
-        }
-
-        while self.index < self.source.len() {
-            self.ensure_current_encoder()?;
-
-            let (encoder, started) = &mut **self
-                .current_encoder
-                .as_mut()
-                .expect("current encoder initialized above");
-
-            let progress = if !*started {
-                let item = self.source.get(self.index);
-                match encoder.input(item, sink)? {
-                    Poll::Pending => {
-                        *started = true;
-                        Poll::Pending
-                    }
-                    Poll::Ready(()) => Poll::Ready(()),
-                }
-            } else {
-                encoder.poll_pending(sink)?
-            };
-
-            match progress {
-                Poll::Pending => return Ok(Poll::Pending),
-                Poll::Ready(()) => {
-                    let (encoder, _) = *self.current_encoder.take().expect("present");
-                    let _ = encoder.finish(sink)?;
-                    self.index += 1;
-                }
-            }
-        }
-
-        Ok(Poll::Ready(()))
-    }
-
-    fn finish<Sink: ByteSink + ?Sized>(self, _sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
-        Ok(Poll::Ready(()))
-    }
-}
-
-pub type VecEncoder<'a, T> = SequenceEncoder<'a, [T], T, Vec<T>>;
-pub type VecDequeEncoder<'a, T> = SequenceEncoder<'a, VecDeque<T>, T, VecDeque<T>>;
+pub type VecEncoder<'a, T> = IterEncoder<'a, [T], T, Vec<T>>;
+pub type VecDequeEncoder<'a, T> = IterEncoder<'a, VecDeque<T>, T, VecDeque<T>>;
 
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
