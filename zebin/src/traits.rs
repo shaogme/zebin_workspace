@@ -189,13 +189,10 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
 
             let len_pos = current_end - 4;
             let object_len =
-                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
-                    as usize;
+                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
 
             if object_len < 20 || current_end - object_len < elements_start {
-                return Err(
-                    context.validation_error("Invalid object length in sequence", len_pos)
-                );
+                return Err(context.validation_error("Invalid object length in sequence", len_pos));
             }
 
             let element_start = current_end - object_len;
@@ -234,13 +231,10 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
 
             let len_pos = current_end - 4;
             let object_len =
-                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap())
-                    as usize;
+                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
 
             if object_len < 20 || current_end - object_len < elements_start {
-                return Err(
-                    context.validation_error("Invalid object length in sequence", len_pos)
-                );
+                return Err(context.validation_error("Invalid object length in sequence", len_pos));
             }
 
             let element_start = current_end - object_len;
@@ -255,7 +249,6 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
         Ok(())
     }
 }
-
 
 /// Object model layer: type-level archive and decode contracts.
 pub trait Archive {

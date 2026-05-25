@@ -1,5 +1,8 @@
-use std::{borrow::Cow, collections::VecDeque};
+#![cfg(feature = "alloc")]
 
+extern crate alloc;
+
+use alloc::{borrow::Cow, collections::VecDeque};
 use zebin::{ZebinArchive, ZebinEncode};
 
 #[derive(ZebinArchive, ZebinEncode)]

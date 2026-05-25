@@ -10,7 +10,6 @@ use crate::{
     },
 };
 
-
 /// Source of indexed sequence items.
 pub trait SequenceSource<T> {
     fn len(&self) -> usize;
@@ -125,7 +124,10 @@ where
         C: ValidationContext + ?Sized,
     {
         let len = cursor.read_u32(context)? as usize;
-        let items = <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::decode_sequence(cursor, len, context)?;
+        let items =
+            <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::decode_sequence(
+                cursor, len, context,
+            )?;
         Ok(ArchivedVec::new(items))
     }
 
@@ -134,7 +136,9 @@ where
         C: ValidationContext + ?Sized,
     {
         let len = cursor.read_u32(context)? as usize;
-        <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::validate_sequence(cursor, len, context)
+        <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::validate_sequence(
+            cursor, len, context,
+        )
     }
 }
 
@@ -311,84 +315,6 @@ where
     }
 }
 
-pub struct ArrayEncoder<'a, T, const N: usize>
-where
-    T: Encode + Archive + 'a,
-{
-    items: &'a [T; N],
-    index: usize,
-    current_encoder: Option<(<T as Encode>::Encoder<'a>, bool)>,
-}
-
-impl<'a, T, const N: usize> ArrayEncoder<'a, T, N>
-where
-    T: Encode + Archive + 'a,
-{
-    pub(crate) fn new(items: &'a [T; N]) -> Self {
-        Self {
-            items,
-            index: 0,
-            current_encoder: None,
-        }
-    }
-}
-
-impl<'a, T, const N: usize> Encoder<'a> for ArrayEncoder<'a, T, N>
-where
-    T: Encode + Archive + 'a,
-{
-    type Input = &'a [T; N];
-
-    fn input<Sink: ByteSink + ?Sized>(
-        &mut self,
-        _item: Self::Input,
-        sink: &mut Sink,
-    ) -> Result<Poll<()>, ZebinError> {
-        self.poll_pending(sink)
-    }
-
-    fn poll_pending<Sink: ByteSink + ?Sized>(
-        &mut self,
-        sink: &mut Sink,
-    ) -> Result<Poll<()>, ZebinError> {
-        while self.index < N {
-            if self.current_encoder.is_none() {
-                self.current_encoder = Some((self.items[self.index].begin_encode()?, false));
-            }
-            let (encoder, started) = self
-                .current_encoder
-                .as_mut()
-                .expect("array item encoder initialized above");
-
-            let progress = if !*started {
-                match encoder.input(&self.items[self.index], sink)? {
-                    Poll::Pending => {
-                        *started = true;
-                        Poll::Pending
-                    }
-                    Poll::Ready(()) => Poll::Ready(()),
-                }
-            } else {
-                encoder.poll_pending(sink)?
-            };
-
-            match progress {
-                Poll::Pending => return Ok(Poll::Pending),
-                Poll::Ready(()) => {
-                    let (encoder, _) = self.current_encoder.take().expect("present");
-                    let _ = encoder.finish(sink)?;
-                    self.index += 1;
-                }
-            }
-        }
-        Ok(Poll::Ready(()))
-    }
-
-    fn finish<Sink: ByteSink + ?Sized>(self, _sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
-        Ok(Poll::Ready(()))
-    }
-}
-
 pub type VecEncoder<'a, T> = SequenceEncoder<'a, [T], T, Vec<T>>;
 pub type VecDequeEncoder<'a, T> = SequenceEncoder<'a, VecDeque<T>, T, VecDeque<T>>;
 pub type SliceEncoder<'a, T> = SequenceEncoder<'a, [T], T, [T]>;
@@ -446,20 +372,6 @@ where
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         SliceEncoder::new(self)
-    }
-}
-
-impl<T, const N: usize> Encode for [T; N]
-where
-    T: Encode + Archive,
-{
-    type Encoder<'a>
-        = ArrayEncoder<'a, T, N>
-    where
-        Self: 'a;
-
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(ArrayEncoder::new(self))
     }
 }
 

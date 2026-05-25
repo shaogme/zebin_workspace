@@ -56,10 +56,6 @@ pub use crate::archive::{
     varint::{VarInt, VarIntView},
 };
 #[cfg(feature = "alloc")]
-pub use crate::traits::{
-    SequenceDecodeStrategy, FixedSequenceStrategy, ForwardSequenceStrategy, BackwardSequenceStrategy,
-};
-#[cfg(feature = "alloc")]
 pub use crate::archive::{
     packed_vec::{PackedBoolVec, PackedSequenceEncoder, PackedU8Vec, PackedVec},
     varint_vec::{PackedVarIntSlice, VarIntVec},
@@ -78,6 +74,11 @@ pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
     Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
     Decode, Encode, Encoder, FixedLayout, Restore, SchemaAware, SinkProgress,
+};
+#[cfg(feature = "alloc")]
+pub use crate::traits::{
+    BackwardSequenceStrategy, FixedSequenceStrategy, ForwardSequenceStrategy,
+    SequenceDecodeStrategy,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::{

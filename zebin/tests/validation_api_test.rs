@@ -1,6 +1,9 @@
+use zebin::{ZebinArchive, ZebinEncode};
+
+#[cfg(feature = "alloc")]
 use zebin::{
-    DecodeError, ValidationConfig, ValidationPathStack, ZebinArchive, ZebinEncode, ZebinError,
-    validate_detailed, validate_with_config,
+    DecodeError, ValidationConfig, ValidationPathStack, ZebinError, validate_detailed,
+    validate_with_config,
 };
 
 #[derive(ZebinArchive, ZebinEncode)]
@@ -8,16 +11,19 @@ struct Child {
     flag: bool,
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode)]
 struct Parent {
     children: Vec<Child>,
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode)]
 struct Node {
     children: Vec<Node>,
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode)]
 #[zebin(schema_key = 0x5151)]
 struct SchemaRecord {
@@ -27,6 +33,7 @@ struct SchemaRecord {
     name: String,
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_validate_detailed_reports_logical_path() {
     let value = Parent {
@@ -52,6 +59,7 @@ fn test_validate_detailed_reports_logical_path() {
     ));
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_validate_with_config_uses_custom_depth_limit() {
     let mut current = Node { children: vec![] };
@@ -79,6 +87,7 @@ fn test_validate_with_config_uses_custom_depth_limit() {
     ));
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_validate_detailed_reports_schema_field_encoding_path() {
     let value = SchemaRecord {
@@ -101,6 +110,7 @@ fn test_validate_detailed_reports_schema_field_encoding_path() {
     ));
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_validate_detailed_reports_schema_field_length_path() {
     let value = SchemaRecord {
@@ -124,6 +134,7 @@ fn test_validate_detailed_reports_schema_field_length_path() {
     ));
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_validate_detailed_reports_duplicate_schema_field_path() {
     let value = SchemaRecord {
@@ -152,6 +163,7 @@ fn test_validate_detailed_reports_duplicate_schema_field_path() {
     ));
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_validate_detailed_reports_trailing_bytes_at_root() {
     let value = Parent {
@@ -174,6 +186,7 @@ fn test_validate_detailed_reports_trailing_bytes_at_root() {
     ));
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_reader_rejects_invalid_sequence_length_before_building_view() {
     let value = Parent { children: vec![] };

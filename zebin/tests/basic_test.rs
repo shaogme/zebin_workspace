@@ -1,11 +1,13 @@
 use zebin::{ZebinArchive, ZebinEncode};
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode)]
 pub struct UserProfile {
     pub id: u64,
     pub username: String,
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_basic_archive() {
     let user = UserProfile {
@@ -18,6 +20,7 @@ fn test_basic_archive() {
     assert_eq!(unsafe { archived.username.as_str() }, "Alice");
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_encode_into_existing_buffer() {
     let user = UserProfile {
@@ -32,6 +35,7 @@ fn test_encode_into_existing_buffer() {
     assert_eq!(buf, expected);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_chunked_writer_resume() {
     let user = UserProfile {
@@ -52,4 +56,26 @@ fn test_chunked_writer_resume() {
     }
 
     assert_eq!(actual, expected);
+}
+
+#[derive(ZebinArchive, ZebinEncode)]
+pub struct SimpleUser {
+    pub id: u64,
+}
+
+#[test]
+fn test_basic_no_alloc() {
+    let user = SimpleUser { id: 42 };
+    let mut buf = [0u8; 64];
+    let mut writer = zebin::encode_chunked(&user).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+    let archived = zebin::reader::<SimpleUser>(&buf[..written]).unwrap();
+    assert_eq!(archived.id, 42);
 }

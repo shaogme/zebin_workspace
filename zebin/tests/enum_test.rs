@@ -6,6 +6,7 @@ enum UnitMode {
     Busy,
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode)]
 enum TuplePacket {
     Empty,
@@ -13,6 +14,7 @@ enum TuplePacket {
     Data(#[zebin(id = 0)] u32, #[zebin(id = 1)] String),
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode)]
 enum StructPacket {
     Ping,
@@ -25,6 +27,7 @@ enum StructPacket {
     },
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode)]
 enum RecursiveNode {
     Leaf,
@@ -36,13 +39,25 @@ fn test_unit_enum_round_trip() {
     let idle = UnitMode::Idle;
     assert!(matches!(idle, UnitMode::Idle));
     let value = UnitMode::Busy;
-    let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::reader::<UnitMode>(&buf).unwrap();
+
+    let mut buf = [0u8; 64];
+    let mut writer = zebin::encode_chunked(&value).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+
+    let archived = zebin::reader::<UnitMode>(&buf[..written]).unwrap();
     assert!(archived.is_busy());
     assert!(!archived.is_idle());
     assert_eq!(archived.tag(), 1);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_tuple_enum_round_trip() {
     let empty = TuplePacket::Empty;
@@ -61,6 +76,7 @@ fn test_tuple_enum_round_trip() {
     assert_eq!(unsafe { data.field1().unwrap().as_str() }, "packet");
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_struct_enum_round_trip() {
     let ping = StructPacket::Ping;
@@ -84,17 +100,29 @@ fn test_struct_enum_round_trip() {
 #[test]
 fn test_invalid_enum_discriminant() {
     let value = UnitMode::Idle;
-    let mut buf = zebin::encode(&value).unwrap();
+
+    let mut buf = [0u8; 64];
+    let mut writer = zebin::encode_chunked(&value).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+
     let root_offset = 4usize;
     buf[root_offset..root_offset + 4].copy_from_slice(&99u32.to_le_bytes());
 
-    let err = zebin::validate::<UnitMode>(&buf).unwrap_err();
+    let err = zebin::validate::<UnitMode>(&buf[..written]).unwrap_err();
     match err {
         ZebinError::Decode(zebin::DecodeError::ValidationError { .. }) => {}
         other => panic!("expected validation error, got {other:?}"),
     }
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_truncated_enum_payload_rejected() {
     let value = TuplePacket::Data(11, "cut".to_string());
@@ -104,6 +132,7 @@ fn test_truncated_enum_payload_rejected() {
     assert!(zebin::validate::<TuplePacket>(&buf).is_err());
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_recursive_enum_depth_limit() {
     let mut current = RecursiveNode::Leaf;
@@ -121,6 +150,7 @@ fn test_recursive_enum_depth_limit() {
     ));
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_enum_layout_mismatch_rejected() {
     let value = StructPacket::Data {

@@ -1,5 +1,6 @@
 use zebin::{ZebinArchive, ZebinEncode};
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 #[zebin(schema_key = 1)]
 pub struct UserProfile {
@@ -11,6 +12,7 @@ pub struct UserProfile {
     pub tags: Vec<String>,
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub enum Packet {
     Ping,
@@ -23,6 +25,7 @@ pub enum Packet {
     },
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_struct_restore() {
     let user = UserProfile {
@@ -36,6 +39,7 @@ fn test_struct_restore() {
     assert_eq!(restored, user);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_enum_restore() {
     let ping = Packet::Ping;
@@ -52,6 +56,7 @@ fn test_enum_restore() {
     assert_eq!(restored_data, data);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_nested_restore() {
     #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
@@ -73,6 +78,7 @@ fn test_nested_restore() {
     assert_eq!(restored, container);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_optional_option_restore() {
     #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
@@ -101,4 +107,64 @@ fn test_optional_option_restore() {
     let buf_none = zebin::encode(&obj_none).unwrap();
     let restored_none: OptionalStruct = zebin::decode::<OptionalStruct>(&buf_none).unwrap();
     assert_eq!(restored_none, obj_none);
+}
+
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+pub struct SimpleProfile {
+    pub id: u64,
+    pub val: u32,
+}
+
+#[test]
+fn test_struct_restore_no_alloc() {
+    let profile = SimpleProfile { id: 42, val: 99 };
+    let mut buf = [0u8; 128];
+    let mut writer = zebin::encode_chunked(&profile).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+    let restored: SimpleProfile = zebin::decode::<SimpleProfile>(&buf[..written]).unwrap();
+    assert_eq!(restored, profile);
+}
+
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+pub enum SimplePacket {
+    Ping,
+    Data(u32),
+}
+
+#[test]
+fn test_enum_restore_no_alloc() {
+    let ping = SimplePacket::Ping;
+    let mut buf = [0u8; 64];
+    let mut writer = zebin::encode_chunked(&ping).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+    let restored: SimplePacket = zebin::decode::<SimplePacket>(&buf[..written]).unwrap();
+    assert_eq!(restored, ping);
+
+    let data = SimplePacket::Data(123);
+    let mut buf = [0u8; 64];
+    let mut writer = zebin::encode_chunked(&data).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+    let restored: SimplePacket = zebin::decode::<SimplePacket>(&buf[..written]).unwrap();
+    assert_eq!(restored, data);
 }

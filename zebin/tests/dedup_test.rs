@@ -1,3 +1,5 @@
+#![cfg(feature = "alloc")]
+
 use zebin::{ZebinArchive, ZebinEncode};
 
 #[derive(ZebinArchive, ZebinEncode)]

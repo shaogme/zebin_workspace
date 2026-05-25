@@ -1,3 +1,5 @@
+#![cfg(feature = "alloc")]
+
 use zebin::prelude::*;
 
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]

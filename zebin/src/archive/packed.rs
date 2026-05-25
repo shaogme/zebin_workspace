@@ -3,8 +3,7 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder,
-        SchemaAware,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, SchemaAware,
     },
     validation::context::ValidationContext,
 };

@@ -1,3 +1,5 @@
+#![cfg(feature = "alloc")]
+
 use zebin::{
     PackedBoolSlice, PackedBoolVec, PackedU8Slice, PackedU8Vec, ZebinArchive, ZebinEncode,
 };

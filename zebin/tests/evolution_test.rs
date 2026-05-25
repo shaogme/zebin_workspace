@@ -1,5 +1,7 @@
+#[cfg(feature = "alloc")]
 use zebin::{ZebinArchive, ZebinEncode};
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 #[zebin(schema_key = 0x100)]
 pub struct Version1 {
@@ -9,6 +11,7 @@ pub struct Version1 {
     pub name: String,
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 #[zebin(schema_key = 0x100)]
 pub struct Version2 {
@@ -24,11 +27,13 @@ pub struct Version2 {
     pub score: u32,
 }
 
+#[cfg(feature = "alloc")]
 fn custom_default() -> &'static u32 {
     static VAL: u32 = 100;
     &VAL
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_evolution_optional_and_default() {
     let v1 = Version1 {
@@ -53,6 +58,7 @@ fn test_evolution_optional_and_default() {
     assert_eq!(reader.score().unwrap(), &100);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_version2_with_all_fields() {
     let v2 = Version2 {
@@ -75,6 +81,7 @@ fn test_version2_with_all_fields() {
     assert_eq!(reader.score().unwrap(), &95);
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub enum MessageV1 {
     #[zebin(schema_key = 0x201)]
@@ -84,6 +91,7 @@ pub enum MessageV1 {
     },
 }
 
+#[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub enum MessageV2 {
     #[zebin(schema_key = 0x201)]
@@ -95,6 +103,7 @@ pub enum MessageV2 {
     },
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_enum_evolution() {
     let m1 = MessageV1::Login {

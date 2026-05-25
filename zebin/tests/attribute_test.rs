@@ -1,5 +1,7 @@
+#[cfg(feature = "alloc")]
 use zebin::{ZebinArchive, ZebinEncode};
 
+#[cfg(feature = "alloc")]
 #[allow(dead_code)]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
 pub struct AttributeTest {
@@ -15,6 +17,7 @@ pub struct AttributeTest {
     pub also_ignored: String,
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_rename_and_skip() {
     let user = AttributeTest {
@@ -32,10 +35,12 @@ fn test_rename_and_skip() {
     assert_eq!(unsafe { archived.name.as_str() }, "Alice");
 }
 
+#[cfg(feature = "alloc")]
 #[allow(dead_code)]
 #[derive(ZebinArchive, ZebinEncode)]
 pub struct TupleTest(u32, #[zebin(skip)] String, u64);
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_tuple_skip() {
     let t = TupleTest(1, "ignored".to_string(), 2);
@@ -47,6 +52,7 @@ fn test_tuple_skip() {
     assert_eq!(archived.1, 2);
 }
 
+#[cfg(feature = "alloc")]
 #[allow(dead_code)]
 #[derive(ZebinArchive, ZebinEncode)]
 pub enum EnumTest {
@@ -62,6 +68,7 @@ pub enum EnumTest {
     },
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_enum_skip_rename() {
     let e1 = EnumTest::Variant1 {

@@ -21,7 +21,6 @@ where
     }
 }
 
-
 impl<T, const N: usize> Archive for [T; N]
 where
     T: Archive,
@@ -117,5 +116,100 @@ where
         }
 
         Ok(())
+    }
+}
+
+pub struct ArrayEncoder<'a, T, const N: usize>
+where
+    T: crate::traits::Encode + Archive + 'a,
+{
+    items: &'a [T; N],
+    index: usize,
+    current_encoder: Option<(<T as crate::traits::Encode>::Encoder<'a>, bool)>,
+}
+
+impl<'a, T, const N: usize> ArrayEncoder<'a, T, N>
+where
+    T: crate::traits::Encode + Archive + 'a,
+{
+    pub(crate) fn new(items: &'a [T; N]) -> Self {
+        Self {
+            items,
+            index: 0,
+            current_encoder: None,
+        }
+    }
+}
+
+impl<'a, T, const N: usize> crate::traits::Encoder<'a> for ArrayEncoder<'a, T, N>
+where
+    T: crate::traits::Encode + Archive + 'a,
+{
+    type Input = &'a [T; N];
+
+    fn input<Sink: crate::traits::ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut Sink,
+    ) -> Result<core::task::Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<Sink: crate::traits::ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut Sink,
+    ) -> Result<core::task::Poll<()>, ZebinError> {
+        while self.index < N {
+            if self.current_encoder.is_none() {
+                self.current_encoder = Some((self.items[self.index].begin_encode()?, false));
+            }
+            let (encoder, started) = self
+                .current_encoder
+                .as_mut()
+                .expect("array item encoder initialized above");
+
+            let progress = if !*started {
+                match encoder.input(&self.items[self.index], sink)? {
+                    core::task::Poll::Pending => {
+                        *started = true;
+                        core::task::Poll::Pending
+                    }
+                    core::task::Poll::Ready(()) => core::task::Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
+
+            match progress {
+                core::task::Poll::Pending => return Ok(core::task::Poll::Pending),
+                core::task::Poll::Ready(()) => {
+                    let (encoder, _) = self.current_encoder.take().expect("present");
+                    let _ = encoder.finish(sink)?;
+                    self.index += 1;
+                }
+            }
+        }
+        Ok(core::task::Poll::Ready(()))
+    }
+
+    fn finish<Sink: crate::traits::ByteSink + ?Sized>(
+        self,
+        _sink: &mut Sink,
+    ) -> Result<core::task::Poll<()>, ZebinError> {
+        Ok(core::task::Poll::Ready(()))
+    }
+}
+
+impl<T, const N: usize> crate::traits::Encode for [T; N]
+where
+    T: crate::traits::Encode + Archive,
+{
+    type Encoder<'a>
+        = ArrayEncoder<'a, T, N>
+    where
+        Self: 'a;
+
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(ArrayEncoder::new(self))
     }
 }

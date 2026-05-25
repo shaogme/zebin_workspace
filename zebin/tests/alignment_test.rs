@@ -1,11 +1,14 @@
+#[cfg(feature = "alloc")]
 use zebin::{ZebinArchive, ZebinEncode};
 
+#[cfg(feature = "alloc")]
 #[derive(Debug, PartialEq, Eq, ZebinArchive, ZebinEncode)]
 struct AlignedContainers {
     values: Vec<u64>,
     fixed: [u64; 3],
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_aligned_containers_round_trip() {
     let value = AlignedContainers {
@@ -20,6 +23,7 @@ fn test_aligned_containers_round_trip() {
     assert_eq!(archived.fixed, [55, 66, 77]);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_aligned_containers_chunked_writer_matches_full_encode() {
     let value = AlignedContainers {
@@ -43,6 +47,7 @@ fn test_aligned_containers_chunked_writer_matches_full_encode() {
     zebin::reader::<AlignedContainers>(&actual).unwrap();
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_root_vec_u64_round_trip() {
     let value = vec![7u64, 14, 21, 28];
@@ -57,8 +62,18 @@ fn test_root_vec_u64_round_trip() {
 fn test_root_array_u64_round_trip() {
     let value = [8u64, 16, 32];
 
-    let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::reader::<[u64; 3]>(&buf).unwrap();
+    let mut buf = [0u8; 128];
+    let mut writer = zebin::encode_chunked(&value).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+
+    let archived = zebin::reader::<[u64; 3]>(&buf[..written]).unwrap();
 
     assert_eq!(archived.root(), &[8, 16, 32]);
 }
