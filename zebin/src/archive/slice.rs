@@ -209,3 +209,29 @@ where
         Ok(ArrayEncoder::new(self))
     }
 }
+
+impl<T> Archive for [T]
+where
+    T: Archive,
+{
+    type Archived = crate::archive::ArchivedIter<'static, T::Archived>;
+}
+
+impl<T> Encode for [T]
+where
+    T: Encode + Archive,
+    T::Archived: ArchivedLayout,
+    for<'b> &'b [T]: IntoIterator<Item = &'b T>,
+    for<'b> <&'b [T] as IntoIterator>::IntoIter: ExactSizeIterator,
+{
+    type Encoder<'a> = crate::archive::IterEncoder<'a, [T], T>
+    where
+        Self: 'a;
+
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        crate::archive::IterEncoder::new(self)
+    }
+}
+
+
+

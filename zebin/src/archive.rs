@@ -35,3 +35,7 @@ pub mod varint_vec;
 #[cfg(feature = "alloc")]
 #[path = "archive/vec.rs"]
 pub mod vec;
+
+#[path = "archive/iter.rs"]
+pub mod iter;
+

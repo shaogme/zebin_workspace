@@ -163,13 +163,6 @@ where
     }
 }
 
-impl<T> Archive for [T]
-where
-    T: Archive,
-{
-    type Archived = ArchivedVec<'static, T::Archived>;
-}
-
 pub struct SequenceEncoder<'a, S, T, I: ?Sized = S>
 where
     S: ?Sized + SequenceSource<T>,
@@ -312,7 +305,6 @@ where
 
 pub type VecEncoder<'a, T> = SequenceEncoder<'a, [T], T, Vec<T>>;
 pub type VecDequeEncoder<'a, T> = SequenceEncoder<'a, VecDeque<T>, T, VecDeque<T>>;
-pub type SliceEncoder<'a, T> = SequenceEncoder<'a, [T], T, [T]>;
 
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
@@ -352,21 +344,6 @@ where
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         VecDequeEncoder::new(self)
-    }
-}
-
-impl<T> Encode for [T]
-where
-    T: Encode + Archive,
-    T::Archived: ArchivedLayout,
-{
-    type Encoder<'a>
-        = SliceEncoder<'a, T>
-    where
-        Self: 'a;
-
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        SliceEncoder::new(self)
     }
 }
 

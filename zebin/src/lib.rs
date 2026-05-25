@@ -37,7 +37,7 @@ pub mod prelude {
     pub use crate::{
         archive::{
             ArchivedPackedBoolSlice, ArchivedPackedU8Slice, PackedBoolSlice, PackedSlice,
-            PackedU8Slice, VarInt, VarIntView,
+            PackedU8Slice, VarInt, VarIntView, IterArchive,
         },
         error::{ArchiveError, DecodeError, ZebinError},
         io::{
@@ -67,6 +67,7 @@ pub mod archive {
             ArchivedPackedU8SliceView, PackedBoolSlice, PackedSlice, PackedU8Slice,
         },
         varint::{VarInt, VarIntView},
+        iter::{IterArchive, IterEncoder, ArchivedIter},
     };
     #[cfg(feature = "alloc")]
     pub use crate::archive_impl::{

@@ -109,6 +109,11 @@ fn test_borrowed_container_round_trip() {
 
     assert_eq!(unsafe { archived.borrowed_text.as_str() }, "borrowed");
     assert_eq!(unsafe { archived.owned_text.as_str() }, "owned");
-    assert_eq!(unsafe { archived.borrowed_numbers.as_slice() }, &[1, 2, 3]);
-    assert_eq!(unsafe { archived.owned_numbers.as_slice() }, &[4, 5, 6]);
+
+    use zebin::prelude::Restore;
+    let borrowed: Vec<u32> = archived.borrowed_numbers.restore().unwrap();
+    assert_eq!(borrowed, vec![1, 2, 3]);
+    let owned: Vec<u32> = archived.owned_numbers.restore().unwrap();
+    assert_eq!(owned, vec![4, 5, 6]);
 }
+

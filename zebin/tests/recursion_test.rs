@@ -31,3 +31,30 @@ fn test_recursion_limit() {
         Ok(_) => panic!("Expected error, got Ok"),
     }
 }
+
+use zebin::archive::IterArchive;
+
+#[derive(ZebinArchive, ZebinEncode)]
+pub struct IterNode {
+    pub children: IterArchive<Vec<IterNode>, IterNode>,
+}
+
+#[test]
+fn test_recursion_limit_iter() {
+    let mut current = IterNode { children: IterArchive::new(vec![]) };
+    for _ in 0..300 {
+        current = IterNode {
+            children: IterArchive::new(vec![current]),
+        };
+    }
+
+    let buf = zebin::encode(&current).unwrap();
+
+    let result = zebin::validate::<IterNode>(&buf);
+    match result {
+        Err(ZebinError::Decode(zebin::error::DecodeError::RecursionLimitExceeded)) => {}
+        Err(e) => panic!("Expected RecursionLimitExceeded, got {:?}", e),
+        Ok(_) => panic!("Expected error, got Ok"),
+    }
+}
+
