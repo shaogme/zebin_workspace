@@ -191,10 +191,10 @@ pub fn is_option_type(ty: &Type) -> bool {
 
 pub fn field_state_type(field: &FieldSpec<'_>) -> TokenStream {
     if let Some(wrapper) = packed::packed_wrapper_type(field) {
-        quote! { <#wrapper as zebin::Encode>::State<'a> }
+        quote! { <#wrapper as zebin::Encode>::Encoder<'a> }
     } else {
         let ty = field.ty;
-        quote! { <#ty as zebin::Encode>::State<'a> }
+        quote! { <#ty as zebin::Encode>::Encoder<'a> }
     }
 }
 

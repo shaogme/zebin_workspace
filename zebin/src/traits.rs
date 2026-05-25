@@ -149,20 +149,38 @@ pub trait ByteSink {
     fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
 }
 
-/// Trait for resumable sequential archive construction states.
-///
-/// A state should make as much progress as the provided [`ByteSink`] allows.
-/// When a sink accepts only part of the requested bytes, the state must retain
-/// enough progress to resume the next call without rewriting bytes.
-pub trait EncodeState<'a> {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError>;
+/// Unified encoder protocol, supporting one-off or incremental step-by-step input.
+pub trait Encoder<'a> {
+    /// The type of input items received by the encoder.
+    /// - For one-off encoding, this can be `()` (since data is already bound at creation).
+    /// - For streamable step-by-step encoding, this is the concrete input slice/item type (e.g., `&'a T`, `&'a [u8]`, etc.).
+    type Input;
+
+    /// Attempts to input a data slice into the encoder and encode it into the underlying `ByteSink`.
+    ///
+    /// # Return Value
+    /// - `Ok(Poll::Ready(()))`: The current input item has been fully encoded and written.
+    /// - `Ok(Poll::Pending)`: The `ByteSink` is full. The current input item is pending, and the caller should flush/provide a new Sink and call `poll_pending`.
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError>;
+
+    /// Advances and flushes any state/data previously accumulated inside the encoder due to insufficient `ByteSink` space.
+    ///
+    /// Regardless of whether it is a one-off or step-by-step input, this method can be called to advance the remaining encoding progress until it returns `Poll::Ready(())`.
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError>;
+
+    /// Finishes the encoding process, writing any necessary alignments, paddings, or trailing metadata.
+    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError>;
 }
 
 /// Trait for types that can create resumable archive states.
 pub trait Encode: Archive {
-    type State<'a>: EncodeState<'a>
+    type Encoder<'a>: Encoder<'a, Input = ()>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError>;
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError>;
 }

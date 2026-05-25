@@ -152,10 +152,10 @@ pub fn packed_begin_expr(field: &FieldSpec<'_>, value: TokenStream) -> Option<To
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
         PackedElementKind::Bool => quote! {
-            zebin::PackedSequenceState::new_bool(#value.as_ref())
+            zebin::PackedSequenceEncoder::new_bool(#value.as_ref())
         },
         PackedElementKind::U8 => quote! {
-            zebin::PackedSequenceState::new_u8(#value.as_ref(), #bits)
+            zebin::PackedSequenceEncoder::new_u8(#value.as_ref(), #bits)
         },
     })
 }

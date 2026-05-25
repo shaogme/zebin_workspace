@@ -15,12 +15,12 @@ impl<T: ?Sized> Encode for Box<T>
 where
     T: Encode + Archive,
 {
-    type State<'a>
-        = <T as Encode>::State<'a>
+    type Encoder<'a>
+        = <T as Encode>::Encoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         self.as_ref().begin_encode()
     }
 }
@@ -65,12 +65,12 @@ impl<T: ?Sized> Encode for Rc<T>
 where
     T: Encode + Archive,
 {
-    type State<'a>
-        = <T as Encode>::State<'a>
+    type Encoder<'a>
+        = <T as Encode>::Encoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         self.as_ref().begin_encode()
     }
 }
@@ -115,12 +115,12 @@ impl<T: ?Sized> Encode for Arc<T>
 where
     T: Encode + Archive,
 {
-    type State<'a>
-        = <T as Encode>::State<'a>
+    type Encoder<'a>
+        = <T as Encode>::Encoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         self.as_ref().begin_encode()
     }
 }
@@ -165,12 +165,12 @@ impl<'a, B> Encode for Cow<'a, B>
 where
     B: ?Sized + ToOwned + Encode + Archive,
 {
-    type State<'b>
-        = <B as Encode>::State<'b>
+    type Encoder<'b>
+        = <B as Encode>::Encoder<'b>
     where
         Self: 'b;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         self.as_ref().begin_encode()
     }
 }

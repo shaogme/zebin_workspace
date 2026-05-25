@@ -3,31 +3,50 @@ use crate::{
     error::DecodeError,
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState,
-        FixedLayout, Restore, SchemaAware,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, FixedLayout,
+        Restore, SchemaAware,
     },
     validation::context::ValidationContext,
 };
 use core::{num::NonZeroUsize, task::Poll};
 
-/// Byte-oriented state used by fixed-width primitive encoders.
-pub struct ByteState<const N: usize> {
+/// Byte-oriented encoder used by fixed-width primitive encoders.
+pub struct ByteEncoder<'a, const N: usize> {
     bytes: [u8; N],
     cursor: usize,
+    _phantom: core::marker::PhantomData<&'a ()>,
 }
 
-impl<const N: usize> ByteState<N> {
+impl<'a, const N: usize> ByteEncoder<'a, N> {
     pub fn new(bytes: [u8; N]) -> Self {
-        Self { bytes, cursor: 0 }
+        Self {
+            bytes,
+            cursor: 0,
+            _phantom: core::marker::PhantomData,
+        }
     }
 }
 
-impl<'a, const N: usize> EncodeState<'a> for ByteState<N> {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+impl<'a, const N: usize> Encoder<'a> for ByteEncoder<'a, N> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         let remaining = N - self.cursor;
-        Ok(encoder
+        Ok(sink
             .write(&self.bytes[self.cursor..])?
             .advance_cursor(&mut self.cursor, remaining))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -83,10 +102,10 @@ macro_rules! impl_archive_for_primitive {
             }
 
             impl Encode for $t {
-                type State<'a> = ByteState<{ core::mem::size_of::<$t>() }> where Self: 'a;
+                type Encoder<'a> = ByteEncoder<'a, { core::mem::size_of::<$t>() }> where Self: 'a;
 
-                fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-                    Ok(ByteState::new(self.to_le_bytes()))
+                fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+                    Ok(ByteEncoder::new(self.to_le_bytes()))
                 }
             }
 
@@ -165,13 +184,13 @@ impl Archive for bool {
 }
 
 impl Encode for bool {
-    type State<'a>
-        = ByteState<1>
+    type Encoder<'a>
+        = ByteEncoder<'a, 1>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(ByteState::new([*self as u8]))
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(ByteEncoder::new([*self as u8]))
     }
 }
 
@@ -201,10 +220,29 @@ impl SchemaAware for bool {
     }
 }
 
-pub struct UnitState;
+pub struct UnitEncoder<'a> {
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
 
-impl<'a> EncodeState<'a> for UnitState {
-    fn poll<E: ByteSink + ?Sized>(&mut self, _encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+impl<'a> Encoder<'a> for UnitEncoder<'a> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        _sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(
+        &mut self,
+        _sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -244,10 +282,12 @@ impl Archive for () {
 }
 
 impl Encode for () {
-    type State<'a> = UnitState;
+    type Encoder<'a> = UnitEncoder<'a>;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(UnitState)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(UnitEncoder {
+            _phantom: core::marker::PhantomData,
+        })
     }
 }
 

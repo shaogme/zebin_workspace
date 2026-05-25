@@ -7,7 +7,7 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
         SchemaAware,
     },
     validation::context::ValidationContext,
@@ -127,7 +127,7 @@ impl<T> Archive for ArchivedVarIntVec<T> {
     type Archived = Self;
 }
 
-pub struct VarIntVecBuilderState<'a, T: VarIntNumber> {
+pub struct VarIntVecEncoder<'a, T: VarIntNumber> {
     values: &'a [T],
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -137,7 +137,7 @@ pub struct VarIntVecBuilderState<'a, T: VarIntNumber> {
     current_val_len: usize,
 }
 
-impl<'a, T: VarIntNumber> VarIntVecBuilderState<'a, T> {
+impl<'a, T: VarIntNumber> VarIntVecEncoder<'a, T> {
     pub(crate) fn new(values: &'a [T]) -> Result<Self, ZebinError> {
         let len = u32::try_from(values.len()).map_err(|_| ZebinError::SerializationError {
             pos: 0,
@@ -155,11 +155,21 @@ impl<'a, T: VarIntNumber> VarIntVecBuilderState<'a, T> {
     }
 }
 
-impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntVecBuilderState<'a, T> {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+impl<'a, T: VarIntNumber> Encoder<'a> for VarIntVecEncoder<'a, T> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if encoder
+            if sink
                 .write(&self.len_prefix[self.prefix_cursor..])?
                 .advance_cursor(&mut self.prefix_cursor, remaining)
                 .is_pending()
@@ -177,7 +187,7 @@ impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntVecBuilderState<'a, T> {
             }
 
             let remaining = self.current_val_len - self.cursor;
-            if encoder
+            if sink
                 .write(&self.current_val_buf[self.cursor..self.current_val_len])?
                 .advance_cursor(&mut self.cursor, remaining)
                 .is_pending()
@@ -191,27 +201,31 @@ impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntVecBuilderState<'a, T> {
 
         Ok(Poll::Ready(()))
     }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
 }
 
 impl<T: VarIntNumber> Encode for VarIntVec<T> {
-    type State<'a>
-        = VarIntVecBuilderState<'a, T>
+    type Encoder<'a>
+        = VarIntVecEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        VarIntVecBuilderState::new(&self.values)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        VarIntVecEncoder::new(&self.values)
     }
 }
 
 impl<T: VarIntNumber> Encode for ArchivedVarIntVec<T> {
-    type State<'a>
-        = VarIntVecBuilderState<'a, T>
+    type Encoder<'a>
+        = VarIntVecEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        VarIntVecBuilderState::new(&self.values)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        VarIntVecEncoder::new(&self.values)
     }
 }
 
@@ -220,13 +234,13 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
 }
 
 impl<'a, T: VarIntNumber> Encode for PackedVarIntSlice<'a, T> {
-    type State<'b>
-        = VarIntVecBuilderState<'b, T>
+    type Encoder<'b>
+        = VarIntVecEncoder<'b, T>
     where
         Self: 'b;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        VarIntVecBuilderState::new(self.values)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        VarIntVecEncoder::new(self.values)
     }
 }
 

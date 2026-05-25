@@ -4,7 +4,7 @@ use crate::{
     core::schema::ObjectEncoding,
     error::{DecodeError, ZebinError},
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
         SchemaAware,
     },
     validation::context::ValidationContext,
@@ -127,16 +127,16 @@ where
 }
 
 /// Resumable serialization state for `Option<T>`.
-pub struct OptionArchiveState<'a, T>
+pub struct OptionEncoder<'a, T>
 where
     T: Encode + Archive + 'a,
 {
     prefix: [u8; 1],
     prefix_cursor: usize,
-    inner: Option<<T as Encode>::State<'a>>,
+    inner: Option<(<T as Encode>::Encoder<'a>, bool)>,
 }
 
-impl<'a, T> OptionArchiveState<'a, T>
+impl<'a, T> OptionEncoder<'a, T>
 where
     T: Encode + Archive + 'a,
 {
@@ -145,7 +145,7 @@ where
             Some(inner) => Ok(Self {
                 prefix: [1],
                 prefix_cursor: 0,
-                inner: Some(inner.begin_encode()?),
+                inner: Some((inner.begin_encode()?, false)),
             }),
             None => Ok(Self {
                 prefix: [0],
@@ -156,14 +156,24 @@ where
     }
 }
 
-impl<'a, T> EncodeState<'a> for OptionArchiveState<'a, T>
+impl<'a, T> Encoder<'a> for OptionEncoder<'a, T>
 where
     T: Encode + Archive + 'a,
 {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.prefix.len() {
             let remaining = self.prefix.len() - self.prefix_cursor;
-            if encoder
+            if sink
                 .write(&self.prefix[self.prefix_cursor..])?
                 .advance_cursor(&mut self.prefix_cursor, remaining)
                 .is_pending()
@@ -172,17 +182,34 @@ where
             }
         }
 
-        if let Some(inner) = &mut self.inner {
-            match inner.poll(encoder)? {
+        if let Some((encoder, started)) = &mut self.inner {
+            let progress = if !*started {
+                match encoder.input((), sink)? {
+                    Poll::Pending => {
+                        *started = true;
+                        Poll::Pending
+                    }
+                    Poll::Ready(()) => Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
+
+            match progress {
                 Poll::Pending => Ok(Poll::Pending),
                 Poll::Ready(()) => {
-                    self.inner = None;
+                    let (encoder, _) = self.inner.take().expect("present");
+                    let _ = encoder.finish(sink)?;
                     Ok(Poll::Ready(()))
                 }
             }
         } else {
             Ok(Poll::Ready(()))
         }
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -197,12 +224,12 @@ impl<T> Encode for Option<T>
 where
     T: Encode + Archive,
 {
-    type State<'a>
-        = OptionArchiveState<'a, T>
+    type Encoder<'a>
+        = OptionEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        OptionArchiveState::new(self.as_ref())
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        OptionEncoder::new(self.as_ref())
     }
 }

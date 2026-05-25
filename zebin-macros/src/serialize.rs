@@ -161,7 +161,7 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let polls = fields.iter().map(|(index, _)| {
         let state_ident = &record.fields[*index].state_ident;
         quote! {
-            match self.#state_ident.poll(encoder)? {
+            match self.#state_ident.poll_pending(encoder)? {
                 ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
                 ::core::task::Poll::Ready(()) => {}
             }
@@ -181,10 +181,24 @@ fn record_state_def(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2:
 
 fn record_state_impl(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let logic = record_poll_logic(record);
+    let finishes = record.active_fields().map(|(index, _)| {
+        let state_ident = &record.fields[index].state_ident;
+        quote! {
+            let _ = self.#state_ident.finish(sink)?;
+        }
+    });
     quote! {
-        impl<'a> zebin::EncodeState<'a> for #state_name<'a> {
-            fn poll<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+        impl<'a> zebin::Encoder<'a> for #state_name<'a> {
+            type Input = ();
+            fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+                self.poll_pending(sink)
+            }
+            fn poll_pending<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #logic
+            }
+            fn finish<S: zebin::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+                #(#finishes)*
+                Ok(::core::task::Poll::Ready(()))
             }
         }
     }
@@ -199,8 +213,8 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
         #state_def
         #state_impl
         impl zebin::Encode for #name {
-            type State<'a> = #s_name<'a> where Self: 'a;
-            fn begin_encode(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
+            type Encoder<'a> = #s_name<'a> where Self: 'a;
+            fn begin_encode(&self) -> Result<Self::Encoder<'_>, zebin::ZebinError> {
                 Ok(#s_name { _marker: ::core::marker::PhantomData, #(#inits,)* })
             }
         }
@@ -218,7 +232,7 @@ fn variant_state_constructor(
     let tag = variant_index as u32;
     match variant.record.style {
         RecordStyle::Unit => quote! {
-            #enum_name::#variant_ident => Ok(Self::State::new_unit(#tag))
+            #enum_name::#variant_ident => Ok(Self::Encoder::new_unit(#tag))
         },
         RecordStyle::Named => {
             let binders: Vec<_> = variant
@@ -246,7 +260,7 @@ fn variant_state_constructor(
             quote! {
                 #enum_name::#variant_ident { #(#binders),* } => {
                     let __zebin_payload_state = #state_ident { _marker: ::core::marker::PhantomData, #(#inits,)* };
-                    Ok(Self::State::new_payload(#tag, #payload_state::#variant_ident(__zebin_payload_state)))
+                    Ok(Self::Encoder::new_payload(#tag, #payload_state::#variant_ident(__zebin_payload_state)))
                 }
             }
         }
@@ -277,7 +291,7 @@ fn variant_state_constructor(
             quote! {
                 #enum_name::#variant_ident( #(#binders),* ) => {
                     let __zebin_payload_state = #state_ident { _marker: ::core::marker::PhantomData, #(#inits,)* };
-                    Ok(Self::State::new_payload(#tag, #payload_state::#variant_ident(__zebin_payload_state)))
+                    Ok(Self::Encoder::new_payload(#tag, #payload_state::#variant_ident(__zebin_payload_state)))
                 }
             }
         }
@@ -320,7 +334,15 @@ fn enum_impl(
         .filter(|variant| variant.record.style != RecordStyle::Unit)
         .map(|variant| {
             let ident = variant.ident;
-            quote! { #payload_state::#ident(state) => state.poll(encoder) }
+            quote! { #payload_state::#ident(state) => state.poll_pending(encoder) }
+        })
+        .collect();
+    let payload_finishes: Vec<_> = variants
+        .iter()
+        .filter(|variant| variant.record.style != RecordStyle::Unit)
+        .map(|variant| {
+            let ident = variant.ident;
+            quote! { #payload_state::#ident(state) => state.finish(sink) }
         })
         .collect();
     let begin_matches: Vec<_> = variants
@@ -346,11 +368,21 @@ fn enum_impl(
             #(#payload_variants,)*
         }
 
-        impl<'a> zebin::EncodeState<'a> for #payload_state<'a> {
-            fn poll<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+        impl<'a> zebin::Encoder<'a> for #payload_state<'a> {
+            type Input = ();
+            fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+                self.poll_pending(sink)
+            }
+            fn poll_pending<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
                     #(#payload_polls,)*
+                }
+            }
+            fn finish<S: zebin::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+                match self {
+                    #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
+                    #(#payload_finishes,)*
                 }
             }
         }
@@ -371,8 +403,12 @@ fn enum_impl(
             }
         }
 
-        impl<'a> zebin::EncodeState<'a> for #enum_state<'a> {
-            fn poll<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+        impl<'a> zebin::Encoder<'a> for #enum_state<'a> {
+            type Input = ();
+            fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+                self.poll_pending(sink)
+            }
+            fn poll_pending<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 if self.tag_cursor < self.tag.len() {
                     let __zebin_remaining = self.tag.len() - self.tag_cursor;
                     if encoder.write(&self.tag[self.tag_cursor..])?
@@ -383,10 +419,9 @@ fn enum_impl(
                     }
                 }
                 if let Some(payload) = &mut self.payload {
-                    match payload.poll(encoder)? {
+                    match payload.poll_pending(encoder)? {
                         ::core::task::Poll::Pending => Ok(::core::task::Poll::Pending),
                         ::core::task::Poll::Ready(()) => {
-                            self.payload = None;
                             Ok(::core::task::Poll::Ready(()))
                         }
                     }
@@ -394,11 +429,18 @@ fn enum_impl(
                     Ok(::core::task::Poll::Ready(()))
                 }
             }
+            fn finish<S: zebin::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+                if let Some(payload) = self.payload {
+                    payload.finish(sink)
+                } else {
+                    Ok(::core::task::Poll::Ready(()))
+                }
+            }
         }
 
         impl zebin::Encode for #name {
-            type State<'a> = #enum_state<'a> where Self: 'a;
-            fn begin_encode(&self) -> Result<Self::State<'_>, zebin::ZebinError> {
+            type Encoder<'a> = #enum_state<'a> where Self: 'a;
+            fn begin_encode(&self) -> Result<Self::Encoder<'_>, zebin::ZebinError> {
                 match self {
                     #(#begin_matches,)*
                 }

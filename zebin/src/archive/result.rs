@@ -3,9 +3,7 @@ use core::task::Poll;
 use crate::{
     core::schema::ObjectEncoding,
     error::{DecodeError, ZebinError},
-    traits::{
-        Archive, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore, SchemaAware,
-    },
+    traits::{Archive, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore, SchemaAware},
     validation::context::ValidationContext,
 };
 
@@ -136,22 +134,24 @@ where
 }
 
 /// Resumable serialization state for `Result<T, E>`.
-pub enum ResultArchiveState<'a, T, E>
+pub enum ResultEncoder<'a, T, E>
 where
     T: Encode + Archive + 'a,
     E: Encode + Archive + 'a,
 {
     Ok {
         prefix_cursor: usize,
-        state: <T as Encode>::State<'a>,
+        encoder: <T as Encode>::Encoder<'a>,
+        started: bool,
     },
     Err {
         prefix_cursor: usize,
-        state: <E as Encode>::State<'a>,
+        encoder: <E as Encode>::Encoder<'a>,
+        started: bool,
     },
 }
 
-impl<'a, T, E> ResultArchiveState<'a, T, E>
+impl<'a, T, E> ResultEncoder<'a, T, E>
 where
     T: Encode + Archive + 'a,
     E: Encode + Archive + 'a,
@@ -160,51 +160,104 @@ where
         match value {
             Ok(inner) => Ok(Self::Ok {
                 prefix_cursor: 0,
-                state: inner.begin_encode()?,
+                encoder: inner.begin_encode()?,
+                started: false,
             }),
             Err(inner) => Ok(Self::Err {
                 prefix_cursor: 0,
-                state: inner.begin_encode()?,
+                encoder: inner.begin_encode()?,
+                started: false,
             }),
         }
     }
 }
 
-impl<'a, T, E> EncodeState<'a> for ResultArchiveState<'a, T, E>
+impl<'a, T, E> Encoder<'a> for ResultEncoder<'a, T, E>
 where
     T: Encode + Archive + 'a,
     E: Encode + Archive + 'a,
 {
-    fn poll<R: ByteSink + ?Sized>(&mut self, encoder: &mut R) -> Result<Poll<()>, ZebinError> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         match self {
-            ResultArchiveState::Ok {
+            ResultEncoder::Ok {
                 prefix_cursor,
-                state,
+                encoder,
+                started,
             } => {
                 if *prefix_cursor == 0
-                    && encoder
+                    && sink
                         .write(&[0])?
                         .advance_cursor(prefix_cursor, 1)
                         .is_pending()
                 {
                     return Ok(Poll::Pending);
                 }
-                state.poll(encoder)
+
+                let progress = if !*started {
+                    match encoder.input((), sink)? {
+                        Poll::Pending => {
+                            *started = true;
+                            Poll::Pending
+                        }
+                        Poll::Ready(()) => Poll::Ready(()),
+                    }
+                } else {
+                    encoder.poll_pending(sink)?
+                };
+
+                match progress {
+                    Poll::Pending => Ok(Poll::Pending),
+                    Poll::Ready(()) => Ok(Poll::Ready(())),
+                }
             }
-            ResultArchiveState::Err {
+            ResultEncoder::Err {
                 prefix_cursor,
-                state,
+                encoder,
+                started,
             } => {
                 if *prefix_cursor == 0
-                    && encoder
+                    && sink
                         .write(&[1])?
                         .advance_cursor(prefix_cursor, 1)
                         .is_pending()
                 {
                     return Ok(Poll::Pending);
                 }
-                state.poll(encoder)
+
+                let progress = if !*started {
+                    match encoder.input((), sink)? {
+                        Poll::Pending => {
+                            *started = true;
+                            Poll::Pending
+                        }
+                        Poll::Ready(()) => Poll::Ready(()),
+                    }
+                } else {
+                    encoder.poll_pending(sink)?
+                };
+
+                match progress {
+                    Poll::Pending => Ok(Poll::Pending),
+                    Poll::Ready(()) => Ok(Poll::Ready(())),
+                }
             }
+        }
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        match self {
+            ResultEncoder::Ok { encoder, .. } => encoder.finish(sink),
+            ResultEncoder::Err { encoder, .. } => encoder.finish(sink),
         }
     }
 }
@@ -222,12 +275,12 @@ where
     T: Encode + Archive,
     E: Encode + Archive,
 {
-    type State<'a>
-        = ResultArchiveState<'a, T, E>
+    type Encoder<'a>
+        = ResultEncoder<'a, T, E>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        ResultArchiveState::new(self.as_ref())
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        ResultEncoder::new(self.as_ref())
     }
 }

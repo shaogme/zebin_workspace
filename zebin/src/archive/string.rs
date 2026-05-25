@@ -8,7 +8,7 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
         SchemaAware,
     },
     validation::context::ValidationContext,
@@ -99,7 +99,7 @@ impl Restore<String> for ArchivedStringView<'_> {
 }
 
 /// Resumable serialization state for `String` and `str`.
-pub struct StringArchiveState<'a> {
+pub struct StringEncoder<'a> {
     bytes: &'a [u8],
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -107,7 +107,7 @@ pub struct StringArchiveState<'a> {
     _marker: PhantomData<&'a str>,
 }
 
-impl<'a> StringArchiveState<'a> {
+impl<'a> StringEncoder<'a> {
     pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
         let len = u32::try_from(bytes.len()).map_err(|_| ZebinError::SerializationError {
             pos: 0,
@@ -123,11 +123,21 @@ impl<'a> StringArchiveState<'a> {
     }
 }
 
-impl<'a> EncodeState<'a> for StringArchiveState<'a> {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+impl<'a> Encoder<'a> for StringEncoder<'a> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if encoder
+            if sink
                 .write(&self.len_prefix[self.prefix_cursor..])?
                 .advance_cursor(&mut self.prefix_cursor, remaining)
                 .is_pending()
@@ -137,9 +147,13 @@ impl<'a> EncodeState<'a> for StringArchiveState<'a> {
         }
 
         let remaining = self.bytes.len() - self.cursor;
-        Ok(encoder
+        Ok(sink
             .write(&self.bytes[self.cursor..])?
             .advance_cursor(&mut self.cursor, remaining))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -148,13 +162,13 @@ impl Archive for String {
 }
 
 impl Encode for String {
-    type State<'a>
-        = StringArchiveState<'a>
+    type Encoder<'a>
+        = StringEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        StringArchiveState::new(self.as_bytes())
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        StringEncoder::new(self.as_bytes())
     }
 }
 
@@ -163,13 +177,13 @@ impl Archive for str {
 }
 
 impl Encode for str {
-    type State<'a>
-        = StringArchiveState<'a>
+    type Encoder<'a>
+        = StringEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        StringArchiveState::new(self.as_bytes())
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        StringEncoder::new(self.as_bytes())
     }
 }
 

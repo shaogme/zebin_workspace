@@ -3,7 +3,7 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
         SchemaAware,
     },
     validation::context::ValidationContext,
@@ -295,36 +295,36 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
 }
 
 impl Encode for ArchivedPackedBoolSliceView<'_> {
-    type State<'a>
-        = PackedViewEncodeState<'a>
+    type Encoder<'a>
+        = PackedViewEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedViewEncodeState::new(self.len, self.bytes))
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(PackedViewEncoder::new(self.len, self.bytes))
     }
 }
 
 impl<const BITS: u8> Encode for ArchivedPackedU8SliceView<'_, BITS> {
-    type State<'a>
-        = PackedViewEncodeState<'a>
+    type Encoder<'a>
+        = PackedViewEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(PackedViewEncodeState::new(self.len, self.bytes))
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(PackedViewEncoder::new(self.len, self.bytes))
     }
 }
 
 /// State for serializing an already-packed view.
-pub struct PackedViewEncodeState<'a> {
+pub struct PackedViewEncoder<'a> {
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     bytes: &'a [u8],
     bytes_cursor: usize,
 }
 
-impl<'a> PackedViewEncodeState<'a> {
+impl<'a> PackedViewEncoder<'a> {
     pub fn new(len: usize, bytes: &'a [u8]) -> Self {
         Self {
             len_prefix: (len as u32).to_le_bytes(),
@@ -335,11 +335,21 @@ impl<'a> PackedViewEncodeState<'a> {
     }
 }
 
-impl<'a> EncodeState<'a> for PackedViewEncodeState<'a> {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+impl<'a> Encoder<'a> for PackedViewEncoder<'a> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let remaining = 4 - self.prefix_cursor;
-            if encoder
+            if sink
                 .write(&self.len_prefix[self.prefix_cursor..])?
                 .advance_cursor(&mut self.prefix_cursor, remaining)
                 .is_pending()
@@ -350,7 +360,7 @@ impl<'a> EncodeState<'a> for PackedViewEncodeState<'a> {
 
         if self.bytes_cursor < self.bytes.len() {
             let remaining = self.bytes.len() - self.bytes_cursor;
-            if encoder
+            if sink
                 .write(&self.bytes[self.bytes_cursor..])?
                 .advance_cursor(&mut self.bytes_cursor, remaining)
                 .is_pending()
@@ -359,6 +369,10 @@ impl<'a> EncodeState<'a> for PackedViewEncodeState<'a> {
             }
         }
 
+        Ok(Poll::Ready(()))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

@@ -1,13 +1,13 @@
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
+use crate::traits::Encoder;
 use crate::{Cursor, FieldEncoding, ObjectEncoding, ValidationContext};
 use crate::{
     archive::slice::SequenceSource,
     error::{DecodeError, ZebinError},
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
-        SchemaAware,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Restore, SchemaAware,
     },
 };
 
@@ -165,7 +165,7 @@ where
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-pub struct SequenceArchiveState<'a, S, T>
+pub struct SequenceEncoder<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Encode + Archive + 'a,
@@ -175,10 +175,10 @@ where
     prefix_cursor: usize,
     aligned: bool,
     index: usize,
-    current_state: Option<Box<<T as Encode>::State<'a>>>,
+    current_encoder: Option<Box<(<T as Encode>::Encoder<'a>, bool)>>,
 }
 
-impl<'a, S, T> SequenceArchiveState<'a, S, T>
+impl<'a, S, T> SequenceEncoder<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Encode + Archive + 'a,
@@ -194,7 +194,7 @@ where
             prefix_cursor: 0,
             aligned: false,
             index: 0,
-            current_state: None,
+            current_encoder: None,
         })
     }
 
@@ -205,29 +205,45 @@ where
         <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some()
     }
 
-    fn ensure_current_state(&mut self) -> Result<(), ZebinError>
+    fn ensure_current_encoder(&mut self) -> Result<(), ZebinError>
     where
         T::Archived: ArchivedLayout,
     {
-        if self.current_state.is_some() {
+        if self.current_encoder.is_some() {
             return Ok(());
         }
 
-        self.current_state = Some(Box::new(self.source.get(self.index).begin_encode()?));
+        self.current_encoder = Some(Box::new((
+            self.source.get(self.index).begin_encode()?,
+            false,
+        )));
         Ok(())
     }
 }
 
-impl<'a, S, T> EncodeState<'a> for SequenceArchiveState<'a, S, T>
+impl<'a, S, T> Encoder<'a> for SequenceEncoder<'a, S, T>
 where
     S: ?Sized + SequenceSource<T>,
     T: Encode + Archive + 'a,
     T::Archived: ArchivedLayout,
 {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+    type Input = ();
+
+    fn input<Sink: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<Sink: ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if encoder
+            if sink
                 .write(&self.len_prefix[self.prefix_cursor..])?
                 .advance_cursor(&mut self.prefix_cursor, remaining)
                 .is_pending()
@@ -237,7 +253,7 @@ where
         }
 
         if Self::fixed_width() && !self.aligned {
-            if encoder
+            if sink
                 .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
                 .is_complete()
             {
@@ -248,16 +264,30 @@ where
         }
 
         while self.index < self.source.len() {
-            self.ensure_current_state()?;
+            self.ensure_current_encoder()?;
 
-            let state = self
-                .current_state
+            let (encoder, started) = &mut **self
+                .current_encoder
                 .as_mut()
-                .expect("current state initialized above");
-            match state.poll(encoder)? {
+                .expect("current encoder initialized above");
+
+            let progress = if !*started {
+                match encoder.input((), sink)? {
+                    Poll::Pending => {
+                        *started = true;
+                        Poll::Pending
+                    }
+                    Poll::Ready(()) => Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
+
+            match progress {
                 Poll::Pending => return Ok(Poll::Pending),
                 Poll::Ready(()) => {
-                    self.current_state = None;
+                    let (encoder, _) = *self.current_encoder.take().expect("present");
+                    let _ = encoder.finish(sink)?;
                     self.index += 1;
                 }
             }
@@ -265,18 +295,22 @@ where
 
         Ok(Poll::Ready(()))
     }
+
+    fn finish<Sink: ByteSink + ?Sized>(self, _sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
 }
 
-pub struct ArrayArchiveState<'a, T, const N: usize>
+pub struct ArrayEncoder<'a, T, const N: usize>
 where
     T: Encode + Archive + 'a,
 {
     items: &'a [T; N],
     index: usize,
-    current_state: Option<<T as Encode>::State<'a>>,
+    current_encoder: Option<(<T as Encode>::Encoder<'a>, bool)>,
 }
 
-impl<'a, T, const N: usize> ArrayArchiveState<'a, T, N>
+impl<'a, T, const N: usize> ArrayEncoder<'a, T, N>
 where
     T: Encode + Archive + 'a,
 {
@@ -284,39 +318,70 @@ where
         Self {
             items,
             index: 0,
-            current_state: None,
+            current_encoder: None,
         }
     }
 }
 
-impl<'a, T, const N: usize> EncodeState<'a> for ArrayArchiveState<'a, T, N>
+impl<'a, T, const N: usize> Encoder<'a> for ArrayEncoder<'a, T, N>
 where
     T: Encode + Archive + 'a,
 {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+    type Input = ();
+
+    fn input<Sink: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<Sink: ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
         while self.index < N {
-            if self.current_state.is_none() {
-                self.current_state = Some(self.items[self.index].begin_encode()?);
+            if self.current_encoder.is_none() {
+                self.current_encoder = Some((self.items[self.index].begin_encode()?, false));
             }
-            let state = self
-                .current_state
+            let (encoder, started) = self
+                .current_encoder
                 .as_mut()
-                .expect("array item state initialized above");
-            match state.poll(encoder)? {
+                .expect("array item encoder initialized above");
+
+            let progress = if !*started {
+                match encoder.input((), sink)? {
+                    Poll::Pending => {
+                        *started = true;
+                        Poll::Pending
+                    }
+                    Poll::Ready(()) => Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
+
+            match progress {
                 Poll::Pending => return Ok(Poll::Pending),
                 Poll::Ready(()) => {
-                    self.current_state = None;
+                    let (encoder, _) = self.current_encoder.take().expect("present");
+                    let _ = encoder.finish(sink)?;
                     self.index += 1;
                 }
             }
         }
         Ok(Poll::Ready(()))
     }
+
+    fn finish<Sink: ByteSink + ?Sized>(self, _sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
 }
 
-pub type VecArchiveState<'a, T> = SequenceArchiveState<'a, [T], T>;
-pub type VecDequeArchiveState<'a, T> = SequenceArchiveState<'a, VecDeque<T>, T>;
-pub type SliceArchiveState<'a, T> = SequenceArchiveState<'a, [T], T>;
+pub type VecEncoder<'a, T> = SequenceEncoder<'a, [T], T>;
+pub type VecDequeEncoder<'a, T> = SequenceEncoder<'a, VecDeque<T>, T>;
+pub type SliceEncoder<'a, T> = SequenceEncoder<'a, [T], T>;
 
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
@@ -327,13 +392,13 @@ where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
-    type State<'a>
-        = VecArchiveState<'a, T>
+    type Encoder<'a>
+        = VecEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        VecArchiveState::new(self.as_slice())
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        VecEncoder::new(self.as_slice())
     }
 }
 
@@ -349,13 +414,13 @@ where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
-    type State<'a>
-        = VecDequeArchiveState<'a, T>
+    type Encoder<'a>
+        = VecDequeEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        VecDequeArchiveState::new(self)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        VecDequeEncoder::new(self)
     }
 }
 
@@ -364,13 +429,13 @@ where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {
-    type State<'a>
-        = SliceArchiveState<'a, T>
+    type Encoder<'a>
+        = SliceEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        SliceArchiveState::new(self)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        SliceEncoder::new(self)
     }
 }
 
@@ -378,13 +443,13 @@ impl<T, const N: usize> Encode for [T; N]
 where
     T: Encode + Archive,
 {
-    type State<'a>
-        = ArrayArchiveState<'a, T, N>
+    type Encoder<'a>
+        = ArrayEncoder<'a, T, N>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(ArrayArchiveState::new(self))
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(ArrayEncoder::new(self))
     }
 }
 

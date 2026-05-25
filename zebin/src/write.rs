@@ -6,7 +6,7 @@ use crate::{
     error::ZebinError,
     format::ArchiveHeader,
     traits::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, EncodeState,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, Encoder,
     },
     write::encoder::{MeasureEncoder, SliceEncoder},
 };
@@ -25,10 +25,11 @@ where
     Header {
         bytes: H::Bytes,
         cursor: usize,
-        next_state: Option<<T as Encode>::State<'a>>,
+        next_encoder: Option<<T as Encode>::Encoder<'a>>,
     },
     Body {
-        state: <T as Encode>::State<'a>,
+        encoder: <T as Encode>::Encoder<'a>,
+        started: bool,
     },
     Done {
         _phantom: PhantomData<H>,
@@ -61,7 +62,7 @@ where
             phase: EncodePhase::Header {
                 bytes: header.encode(),
                 cursor: 0,
-                next_state: Some(value.begin_encode()?),
+                next_encoder: Some(value.begin_encode()?),
             },
             archive_pos: 0,
             total_len,
@@ -85,43 +86,71 @@ where
             return Ok(0);
         }
 
-        let mut encoder = SliceEncoder::new(out, self.archive_pos);
+        let mut encoder_sink = SliceEncoder::new(out, self.archive_pos);
         loop {
             match &mut self.phase {
                 EncodePhase::Header {
                     bytes,
                     cursor,
-                    next_state,
+                    next_encoder,
                 } => {
                     let remaining = bytes.as_ref().len() - *cursor;
-                    if encoder
+                    if encoder_sink
                         .write(&bytes.as_ref()[*cursor..])?
                         .advance_cursor(cursor, remaining)
                         .is_pending()
                     {
                         break;
                     }
-                    let state = next_state.take().ok_or(ZebinError::SerializationError {
-                        pos: encoder.pos(),
-                        message: "archive writer state machine error: body state missing",
+                    let encoder = next_encoder.take().ok_or(ZebinError::SerializationError {
+                        pos: encoder_sink.pos(),
+                        message: "archive writer state machine error: body encoder missing",
                     })?;
-                    self.phase = EncodePhase::Body { state };
+                    self.phase = EncodePhase::Body {
+                        encoder,
+                        started: false,
+                    };
                 }
-                EncodePhase::Body { state } => match state.poll(&mut encoder)? {
-                    core::task::Poll::Pending => break,
-                    core::task::Poll::Ready(()) => {
-                        self.phase = EncodePhase::Done {
-                            _phantom: PhantomData,
-                        };
-                        break;
+                EncodePhase::Body { encoder, started } => {
+                    if !*started {
+                        match encoder.input((), &mut encoder_sink)? {
+                            core::task::Poll::Pending => {
+                                *started = true;
+                                break;
+                            }
+                            core::task::Poll::Ready(()) => {}
+                        }
+                    } else {
+                        match encoder.poll_pending(&mut encoder_sink)? {
+                            core::task::Poll::Pending => break,
+                            core::task::Poll::Ready(()) => {}
+                        }
                     }
-                },
+
+                    if let EncodePhase::Body { encoder, .. } = core::mem::replace(
+                        &mut self.phase,
+                        EncodePhase::Done {
+                            _phantom: PhantomData,
+                        },
+                    ) {
+                        match encoder.finish(&mut encoder_sink)? {
+                            core::task::Poll::Pending => {
+                                break;
+                            }
+                            core::task::Poll::Ready(()) => {
+                                break;
+                            }
+                        }
+                    } else {
+                        unreachable!();
+                    }
+                }
                 EncodePhase::Done { .. } => break,
             }
         }
 
-        self.archive_pos = encoder.pos();
-        Ok(encoder.written())
+        self.archive_pos = encoder_sink.pos();
+        Ok(encoder_sink.written())
     }
 
     pub fn write_all(&mut self, out: &mut [u8]) -> Result<usize, ZebinError> {
@@ -154,13 +183,11 @@ where
         let mut encoder = VecEncoder::new(0);
         encoder.write(header.encode().as_ref())?;
 
-        let mut state = value.begin_encode()?;
-        loop {
-            match state.poll(&mut encoder)? {
-                core::task::Poll::Ready(()) => break,
-                core::task::Poll::Pending => continue,
-            }
+        let mut body_encoder = value.begin_encode()?;
+        if body_encoder.input((), &mut encoder)?.is_pending() {
+            while body_encoder.poll_pending(&mut encoder)?.is_pending() {}
         }
+        let _ = body_encoder.finish(&mut encoder)?;
         Ok(encoder.into_inner())
     }
 
@@ -193,18 +220,15 @@ where
     T: Encode + Archive + ?Sized,
 {
     let mut encoder = MeasureEncoder::new(start_pos);
-    let mut state = value.begin_encode()?;
-    loop {
-        match state.poll(&mut encoder)? {
-            core::task::Poll::Pending => continue,
-            core::task::Poll::Ready(()) => {
-                return encoder
-                    .pos()
-                    .checked_sub(start_pos)
-                    .ok_or(ZebinError::ArithmeticOverflow { pos: start_pos });
-            }
-        }
+    let mut body_encoder = value.begin_encode()?;
+    if body_encoder.input((), &mut encoder)?.is_pending() {
+        while body_encoder.poll_pending(&mut encoder)?.is_pending() {}
     }
+    let _ = body_encoder.finish(&mut encoder)?;
+    encoder
+        .pos()
+        .checked_sub(start_pos)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: start_pos })
 }
 
 pub fn measure_body_len<T>(value: &T) -> Result<usize, ZebinError>

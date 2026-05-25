@@ -3,12 +3,12 @@
 use std::{
     fs,
     num::NonZeroUsize,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use zebin::{
-    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, EncodeState, Mmap,
+    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, Encoder, Mmap,
     MmapEncoder, MmapMut, Storage, ZebinArchive, ZebinEncode, ZebinError,
 };
 
@@ -42,13 +42,11 @@ where
     let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
     encoder.write(header.encode().as_ref())?;
 
-    let mut state = value.begin_encode()?;
-    loop {
-        match state.poll(encoder)? {
-            core::task::Poll::Ready(()) => break,
-            core::task::Poll::Pending => continue,
-        }
+    let mut body_encoder = value.begin_encode()?;
+    if body_encoder.input((), encoder)?.is_pending() {
+        while body_encoder.poll_pending(encoder)?.is_pending() {}
     }
+    let _ = body_encoder.finish(encoder)?;
     Ok(())
 }
 

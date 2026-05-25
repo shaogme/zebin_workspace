@@ -5,7 +5,7 @@ use crate::{
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, EncodeState, Restore,
+        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
         SchemaAware,
     },
     validation::context::ValidationContext,
@@ -233,14 +233,14 @@ where
     type Archived = ArchivedVarInt<T>;
 }
 
-pub struct VarIntArchiveState<T: VarIntNumber> {
+pub struct VarIntEncoder<'a, T: VarIntNumber> {
     bytes: [u8; 10],
     len: u8,
     cursor: u8,
-    _marker: PhantomData<T>,
+    _phantom: PhantomData<&'a T>,
 }
 
-impl<T: VarIntNumber> VarIntArchiveState<T> {
+impl<'a, T: VarIntNumber> VarIntEncoder<'a, T> {
     pub(crate) fn new(value: T) -> Self {
         let val = value.to_u64();
         let len = encoded_len_u64(val);
@@ -250,21 +250,35 @@ impl<T: VarIntNumber> VarIntArchiveState<T> {
             bytes,
             len: len as u8,
             cursor: 0,
-            _marker: PhantomData,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: VarIntNumber> EncodeState<'a> for VarIntArchiveState<T> {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+impl<'a, T: VarIntNumber> Encoder<'a> for VarIntEncoder<'a, T> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         let mut cursor = self.cursor as usize;
         let len = self.len as usize;
         let remaining = len - cursor;
-        let progress = encoder
+        let progress = sink
             .write(&self.bytes[cursor..len])?
             .advance_cursor(&mut cursor, remaining);
         self.cursor = cursor as u8;
         Ok(progress)
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -272,13 +286,13 @@ impl<T> Encode for VarInt<T>
 where
     T: VarIntNumber,
 {
-    type State<'a>
-        = VarIntArchiveState<T>
+    type Encoder<'a>
+        = VarIntEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(VarIntArchiveState::new(self.get()))
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(VarIntEncoder::new(self.get()))
     }
 }
 
@@ -286,12 +300,12 @@ impl<T> Encode for VarIntView<T>
 where
     T: VarIntNumber,
 {
-    type State<'a>
-        = VarIntArchiveState<T>
+    type Encoder<'a>
+        = VarIntEncoder<'a, T>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        Ok(VarIntArchiveState::new(self.get()))
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Ok(VarIntEncoder::new(self.get()))
     }
 }

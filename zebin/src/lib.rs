@@ -35,7 +35,7 @@ pub mod prelude {
     pub use crate::io::storage::mmap::{Mmap, MmapMut};
     pub use crate::traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-        Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware, SinkProgress,
+        Decode, Encode, Encoder, FixedLayout, Restore, SchemaAware, SinkProgress,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::validation::validator::ValidationConfig;
@@ -57,7 +57,7 @@ pub use crate::archive::{
 };
 #[cfg(feature = "alloc")]
 pub use crate::archive::{
-    packed_vec::{PackedBoolVec, PackedSequenceState, PackedU8Vec, PackedVec},
+    packed_vec::{PackedBoolVec, PackedSequenceEncoder, PackedU8Vec, PackedVec},
     varint_vec::{PackedVarIntSlice, VarIntVec},
 };
 pub use crate::core::schema::{
@@ -72,7 +72,7 @@ pub use crate::io::storage::mmap::{Mmap, MmapMut};
 pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
     Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-    Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware, SinkProgress,
+    Decode, Encode, Encoder, FixedLayout, Restore, SchemaAware, SinkProgress,
 };
 pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
 pub use crate::validation::{

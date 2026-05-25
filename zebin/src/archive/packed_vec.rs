@@ -4,7 +4,7 @@ use core::task::Poll;
 use crate::{
     archive::packed::{ArchivedPackedBoolSlice, ArchivedPackedU8Slice},
     error::ZebinError,
-    traits::{Archive, ByteSink, Encode, EncodeState, Restore},
+    traits::{Archive, ByteSink, Encode, Encoder, Restore},
 };
 
 enum PackedData<'a> {
@@ -12,9 +12,9 @@ enum PackedData<'a> {
     U8(&'a [u8]),
 }
 
-/// Packed sequence state shared by the packed APIs.
+/// Packed sequence encoder shared by the packed APIs.
 #[doc(hidden)]
-pub struct PackedSequenceState<'a> {
+pub struct PackedSequenceEncoder<'a> {
     data: PackedData<'a>,
     bits_per_value: u8,
     len_prefix: [u8; 4],
@@ -26,7 +26,7 @@ pub struct PackedSequenceState<'a> {
     buf_cursor: usize,
 }
 
-impl<'a> PackedSequenceState<'a> {
+impl<'a> PackedSequenceEncoder<'a> {
     pub fn new_bool(values: &'a [bool]) -> Result<Self, ZebinError> {
         Self::new(PackedData::Bool(values), 1, values.len())
     }
@@ -98,11 +98,21 @@ impl<'a> PackedSequenceState<'a> {
     }
 }
 
-impl<'a> EncodeState<'a> for PackedSequenceState<'a> {
-    fn poll<E: ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<Poll<()>, ZebinError> {
+impl<'a> Encoder<'a> for PackedSequenceEncoder<'a> {
+    type Input = ();
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if encoder
+            if sink
                 .write(&self.len_prefix[self.prefix_cursor..])?
                 .advance_cursor(&mut self.prefix_cursor, remaining)
                 .is_pending()
@@ -120,7 +130,7 @@ impl<'a> EncodeState<'a> for PackedSequenceState<'a> {
             }
 
             let remaining = self.buf_len - self.buf_cursor;
-            if encoder
+            if sink
                 .write(&self.buf[self.buf_cursor..self.buf_len])?
                 .advance_cursor(&mut self.buf_cursor, remaining)
                 .is_pending()
@@ -128,6 +138,10 @@ impl<'a> EncodeState<'a> for PackedSequenceState<'a> {
                 return Ok(Poll::Pending);
             }
         }
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -188,13 +202,13 @@ impl Archive for PackedVec<bool, 1> {
 }
 
 impl Encode for PackedVec<bool, 1> {
-    type State<'a>
-        = PackedSequenceState<'a>
+    type Encoder<'a>
+        = PackedSequenceEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        PackedSequenceState::new_bool(self.values.as_slice())
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        PackedSequenceEncoder::new_bool(self.values.as_slice())
     }
 }
 
@@ -203,35 +217,35 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
 }
 
 impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
-    type State<'a>
-        = PackedSequenceState<'a>
+    type Encoder<'a>
+        = PackedSequenceEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        PackedSequenceState::new_u8(self.values.as_slice(), BITS)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        PackedSequenceEncoder::new_u8(self.values.as_slice(), BITS)
     }
 }
 
 impl Encode for crate::archive::packed::PackedSlice<'_, bool, 1> {
-    type State<'a>
-        = PackedSequenceState<'a>
+    type Encoder<'a>
+        = PackedSequenceEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        PackedSequenceState::new_bool(self.values())
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        PackedSequenceEncoder::new_bool(self.values())
     }
 }
 
 impl<const BITS: u8> Encode for crate::archive::packed::PackedSlice<'_, u8, BITS> {
-    type State<'a>
-        = PackedSequenceState<'a>
+    type Encoder<'a>
+        = PackedSequenceEncoder<'a>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::State<'_>, ZebinError> {
-        PackedSequenceState::new_u8(self.values(), BITS)
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        PackedSequenceEncoder::new_u8(self.values(), BITS)
     }
 }
 
