@@ -33,14 +33,14 @@ pub mod prelude {
     pub use crate::format::ArchiveHeader;
     #[cfg(feature = "mmap")]
     pub use crate::io::storage::mmap::Mmap;
-    #[cfg(feature = "mmap")]
-    pub use crate::write::encoder::MmapEncoder;
     pub use crate::traits::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
         Decode, Encode, EncodeState, FixedLayout, Restore, SchemaAware, SinkProgress,
     };
     pub use crate::validation::context::{ArchivedDepthGuard, ValidationContext};
     pub use crate::validation::validator::ValidationConfig;
+    #[cfg(feature = "mmap")]
+    pub use crate::write::encoder::MmapEncoder;
     pub use crate::{
         Cursor, Storage, Validator, ZebinReader, ZebinWriter, decode, encode_chunked, reader,
         validate, validate_detailed, validate_with_config,
@@ -69,8 +69,6 @@ pub use crate::format::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
 pub use crate::io::storage::Storage;
 #[cfg(feature = "mmap")]
 pub use crate::io::storage::mmap::Mmap;
-#[cfg(feature = "mmap")]
-pub use crate::write::encoder::MmapEncoder;
 pub use crate::read::{Cursor, ZebinReader};
 pub use crate::traits::{
     Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
@@ -81,6 +79,8 @@ pub use crate::validation::{
     path::{ValidationPathSegment, ValidationPathStack},
     validator::{ValidationConfig, Validator},
 };
+#[cfg(feature = "mmap")]
+pub use crate::write::encoder::MmapEncoder;
 pub use crate::write::{ArchiveWriter, ZebinWriter};
 
 pub use memoffset;

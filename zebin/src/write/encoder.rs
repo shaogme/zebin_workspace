@@ -28,7 +28,7 @@ impl ByteSink for MeasureEncoder {
             .pos
             .checked_add(len)
             .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
-        debug_assert!(len <= core::isize::MAX as usize);
+        debug_assert!(len <= isize::MAX as usize);
         Ok(SinkProgress::Complete)
     }
 
@@ -40,7 +40,7 @@ impl ByteSink for MeasureEncoder {
             .pos
             .checked_add(padding)
             .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
-        debug_assert!(self.pos % alignment.get() == 0);
+        debug_assert!(self.pos.is_multiple_of(alignment.get()));
         Ok(SinkProgress::Complete)
     }
 

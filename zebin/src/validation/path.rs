@@ -121,8 +121,8 @@ impl ValidationPathStack {
 impl Clone for ValidationPathStack {
     fn clone(&self) -> Self {
         let mut segments = [core::mem::MaybeUninit::uninit(); 32];
-        for i in 0..self.len {
-            segments[i].write(unsafe { *self.segments[i].assume_init_ref() });
+        for (src, dest) in self.segments.iter().zip(segments.iter_mut()).take(self.len) {
+            dest.write(unsafe { *src.assume_init_ref() });
         }
         Self {
             segments,

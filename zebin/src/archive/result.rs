@@ -181,14 +181,13 @@ where
                 prefix_cursor,
                 state,
             } => {
-                if *prefix_cursor == 0 {
-                    if encoder
+                if *prefix_cursor == 0
+                    && encoder
                         .write(&[0])?
                         .advance_cursor(prefix_cursor, 1)
                         .is_pending()
-                    {
-                        return Ok(Poll::Pending);
-                    }
+                {
+                    return Ok(Poll::Pending);
                 }
                 state.poll(encoder)
             }
@@ -196,14 +195,13 @@ where
                 prefix_cursor,
                 state,
             } => {
-                if *prefix_cursor == 0 {
-                    if encoder
+                if *prefix_cursor == 0
+                    && encoder
                         .write(&[1])?
                         .advance_cursor(prefix_cursor, 1)
                         .is_pending()
-                    {
-                        return Ok(Poll::Pending);
-                    }
+                {
+                    return Ok(Poll::Pending);
                 }
                 state.poll(encoder)
             }

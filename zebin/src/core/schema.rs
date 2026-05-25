@@ -210,6 +210,15 @@ impl SchemaObjectHeader {
     }
 }
 
+/// A decoded field: the field entry itself, its starting position
+/// in the field table, and its payload bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NextField<'a> {
+    pub entry: FieldEntry,
+    pub entry_pos: usize,
+    pub payload: &'a [u8],
+}
+
 /// Helper for iterating over schema-aware object field tables and their payloads.
 pub struct FieldTableReader<'a> {
     table_cursor: Cursor<'a>,
@@ -239,10 +248,7 @@ impl<'a> FieldTableReader<'a> {
         })
     }
 
-    pub fn next<C>(
-        &mut self,
-        context: &mut C,
-    ) -> Result<Option<(FieldEntry, usize, &'a [u8])>, DecodeError>
+    pub fn next<C>(&mut self, context: &mut C) -> Result<Option<NextField<'a>>, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -255,7 +261,11 @@ impl<'a> FieldTableReader<'a> {
             .payload_cursor
             .read_exact(entry.payload_len as usize, context)?;
         self.remaining -= 1;
-        Ok(Some((entry, entry_pos, payload)))
+        Ok(Some(NextField {
+            entry,
+            entry_pos,
+            payload,
+        }))
     }
 }
 
@@ -272,7 +282,12 @@ where
     F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), DecodeError>,
 {
     let mut reader = FieldTableReader::new(cursor, field_count, context)?;
-    while let Some((entry, entry_pos, payload)) = reader.next(context)? {
+    while let Some(NextField {
+        entry,
+        entry_pos,
+        payload,
+    }) = reader.next(context)?
+    {
         handler(entry, entry_pos, payload, context)?;
     }
     *cursor = reader.payload_cursor;

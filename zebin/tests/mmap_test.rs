@@ -163,8 +163,7 @@ fn test_mmap_encoder_matches_vec_encode() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[test]
-fn test_mmap_encoder_overflow_returns_buffer_too_small()
--> Result<(), Box<dyn std::error::Error>> {
+fn test_mmap_encoder_overflow_returns_buffer_too_small() -> Result<(), Box<dyn std::error::Error>> {
     let user = MmapUser {
         id: 9,
         name: "overflow".to_string(),
@@ -235,4 +234,3 @@ fn test_mmap_encoder_write_past_end_errors() -> Result<(), Box<dyn std::error::E
     fs::remove_file(&path)?;
     Ok(())
 }
-

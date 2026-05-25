@@ -144,10 +144,10 @@ impl<'a, 'p> Validator<'a, 'p> {
     }
 
     pub fn record_error_path(&mut self) {
-        if self.last_error_path.is_none() {
-            if let Some(path) = self.path.as_ref() {
-                self.last_error_path = Some((*path).clone());
-            }
+        if self.last_error_path.is_none()
+            && let Some(path) = self.path.as_ref()
+        {
+            self.last_error_path = Some((*path).clone());
         }
     }
 
