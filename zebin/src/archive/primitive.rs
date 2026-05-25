@@ -315,3 +315,152 @@ impl SchemaAware for () {
         0
     }
 }
+
+pub struct Tuple2Encoder<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> {
+    key: &'a K,
+    value: &'a V,
+    key_encoder: Option<(<K as Encode>::Encoder<'a>, bool)>,
+    value_encoder: Option<(<V as Encode>::Encoder<'a>, bool)>,
+    stage: u8,
+}
+
+impl<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> Tuple2Encoder<'a, K, V> {
+    pub fn new(key: &'a K, value: &'a V) -> Result<Self, ZebinError> {
+        Ok(Self {
+            key,
+            value,
+            key_encoder: Some((key.begin_encode()?, false)),
+            value_encoder: Some((value.begin_encode()?, false)),
+            stage: 0,
+        })
+    }
+}
+
+impl<'a, K, V> Encoder<'a> for Tuple2Encoder<'a, K, V>
+where
+    K: Encode + Archive + 'a,
+    V: Encode + Archive + 'a,
+{
+    type Input = &'a (K, V);
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        if self.stage == 0 {
+            if let Some((encoder, started)) = &mut self.key_encoder {
+                let progress = if !*started {
+                    match encoder.input(self.key, sink)? {
+                        Poll::Pending => {
+                            *started = true;
+                            Poll::Pending
+                        }
+                        Poll::Ready(()) => Poll::Ready(()),
+                    }
+                } else {
+                    encoder.poll_pending(sink)?
+                };
+
+                match progress {
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(()) => {
+                        let (enc, _) = self.key_encoder.take().unwrap();
+                        let _ = enc.finish(sink)?;
+                        self.stage = 1;
+                    }
+                }
+            }
+        }
+
+        if self.stage == 1 {
+            if let Some((encoder, started)) = &mut self.value_encoder {
+                let progress = if !*started {
+                    match encoder.input(self.value, sink)? {
+                        Poll::Pending => {
+                            *started = true;
+                            Poll::Pending
+                        }
+                        Poll::Ready(()) => Poll::Ready(()),
+                    }
+                } else {
+                    encoder.poll_pending(sink)?
+                };
+
+                match progress {
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(()) => {
+                        let (enc, _) = self.value_encoder.take().unwrap();
+                        let _ = enc.finish(sink)?;
+                        self.stage = 2;
+                    }
+                }
+            }
+        }
+
+        Ok(Poll::Ready(()))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+}
+
+impl<K: Archive, V: Archive> Archive for (K, V) {
+    type Archived = (K::Archived, V::Archived);
+}
+
+impl<K, V> Encode for (K, V)
+where
+    K: Encode + Archive,
+    V: Encode + Archive,
+{
+    type Encoder<'a> = Tuple2Encoder<'a, K, V> where Self: 'a;
+
+    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
+        Tuple2Encoder::new(&self.0, &self.1)
+    }
+}
+
+impl<A: ArchivedLayout, B: ArchivedLayout> ArchivedLayout for (A, B) {
+    const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
+}
+
+impl<'a, A: Decode<'a>, B: Decode<'a>> Decode<'a> for (A, B) {
+    type View = (A::View, B::View);
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy = crate::io::ForwardSequenceStrategy;
+
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let key = A::decode(cursor, context)?;
+        let value = B::decode(cursor, context)?;
+        Ok((key, value))
+    }
+
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        A::validate(cursor, context)?;
+        B::validate(cursor, context)?;
+        Ok(())
+    }
+}
+
+impl<A, B, U, V> Restore<(U, V)> for (A, B)
+where
+    A: Restore<U>,
+    B: Restore<V>,
+{
+    fn restore(&self) -> Result<(U, V), ZebinError> {
+        Ok((self.0.restore()?, self.1.restore()?))
+    }
+}
+
