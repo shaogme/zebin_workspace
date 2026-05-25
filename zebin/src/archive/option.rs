@@ -131,6 +131,7 @@ pub struct OptionEncoder<'a, T>
 where
     T: Encode + Archive + 'a,
 {
+    value: Option<&'a T>,
     prefix: [u8; 1],
     prefix_cursor: usize,
     inner: Option<(<T as Encode>::Encoder<'a>, bool)>,
@@ -143,11 +144,13 @@ where
     fn new(value: Option<&'a T>) -> Result<Self, ZebinError> {
         match value {
             Some(inner) => Ok(Self {
+                value,
                 prefix: [1],
                 prefix_cursor: 0,
                 inner: Some((inner.begin_encode()?, false)),
             }),
             None => Ok(Self {
+                value: None,
                 prefix: [0],
                 prefix_cursor: 0,
                 inner: None,
@@ -160,7 +163,7 @@ impl<'a, T> Encoder<'a> for OptionEncoder<'a, T>
 where
     T: Encode + Archive + 'a,
 {
-    type Input = ();
+    type Input = &'a Option<T>;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -184,7 +187,8 @@ where
 
         if let Some((encoder, started)) = &mut self.inner {
             let progress = if !*started {
-                match encoder.input((), sink)? {
+                let item = self.value.expect("must be Some if inner is Some");
+                match encoder.input(item, sink)? {
                     Poll::Pending => {
                         *started = true;
                         Poll::Pending

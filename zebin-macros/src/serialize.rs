@@ -174,12 +174,20 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     }
 }
 
-fn record_state_def(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
+fn record_state_def(
+    vis: &syn::Visibility,
+    state_name: &Ident,
+    record: &RecordSpec<'_>,
+) -> proc_macro2::TokenStream {
     let fields = state_field_decls(record);
-    quote! { pub struct #state_name<'a> { pub _marker: ::core::marker::PhantomData<&'a ()>, #(#fields,)* } }
+    quote! { #vis struct #state_name<'a> { pub _marker: ::core::marker::PhantomData<&'a ()>, #(#fields,)* } }
 }
 
-fn record_state_impl(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
+fn record_state_impl(
+    state_name: &Ident,
+    input_ty: proc_macro2::TokenStream,
+    record: &RecordSpec<'_>,
+) -> proc_macro2::TokenStream {
     let logic = record_poll_logic(record);
     let finishes = record.active_fields().map(|(index, _)| {
         let state_ident = &record.fields[index].state_ident;
@@ -189,7 +197,7 @@ fn record_state_impl(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2
     });
     quote! {
         impl<'a> zebin::Encoder<'a> for #state_name<'a> {
-            type Input = ();
+            type Input = #input_ty;
             fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.poll_pending(sink)
             }
@@ -204,10 +212,14 @@ fn record_state_impl(state_name: &Ident, record: &RecordSpec<'_>) -> proc_macro2
     }
 }
 
-fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
+fn struct_impl(
+    vis: &syn::Visibility,
+    name: &Ident,
+    record: &RecordSpec<'_>,
+) -> proc_macro2::TokenStream {
     let s_name = state_name(name);
-    let state_def = record_state_def(&s_name, record);
-    let state_impl = record_state_impl(&s_name, record);
+    let state_def = record_state_def(vis, &s_name, record);
+    let state_impl = record_state_impl(&s_name, quote! { &'a #name }, record);
     let inits = state_init(record);
     quote! {
         #state_def
@@ -299,6 +311,7 @@ fn variant_state_constructor(
 }
 
 fn enum_impl(
+    vis: &syn::Visibility,
     name: &Ident,
     variants: &[crate::shared::VariantSpec<'_>],
 ) -> proc_macro2::TokenStream {
@@ -309,7 +322,7 @@ fn enum_impl(
         .filter(|variant| variant.record.style != RecordStyle::Unit)
         .map(|variant| {
             let state_ident = variant_state_name(name, variant.ident);
-            record_state_def(&state_ident, &variant.record)
+            record_state_def(vis, &state_ident, &variant.record)
         })
         .collect();
     let variant_state_impls: Vec<_> = variants
@@ -317,7 +330,7 @@ fn enum_impl(
         .filter(|variant| variant.record.style != RecordStyle::Unit)
         .map(|variant| {
             let state_ident = variant_state_name(name, variant.ident);
-            record_state_impl(&state_ident, &variant.record)
+            record_state_impl(&state_ident, quote! { () }, &variant.record)
         })
         .collect();
     let payload_variants: Vec<_> = variants
@@ -363,7 +376,7 @@ fn enum_impl(
         #(#variant_state_defs)*
         #(#variant_state_impls)*
 
-        pub enum #payload_state<'a> {
+        #vis enum #payload_state<'a> {
             __Never(::core::marker::PhantomData<&'a ()>),
             #(#payload_variants,)*
         }
@@ -387,7 +400,7 @@ fn enum_impl(
             }
         }
 
-        pub struct #enum_state<'a> {
+        #vis struct #enum_state<'a> {
             tag: [u8; 4],
             tag_cursor: usize,
             payload: Option<#payload_state<'a>>,
@@ -404,7 +417,7 @@ fn enum_impl(
         }
 
         impl<'a> zebin::Encoder<'a> for #enum_state<'a> {
-            type Input = ();
+            type Input = &'a #name;
             fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.poll_pending(sink)
             }
@@ -457,8 +470,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
     };
     let name = input.ident.clone();
     let expanded = match spec {
-        ItemSpec::Struct(record) => struct_impl(&name, &record),
-        ItemSpec::Enum(variants) => enum_impl(&name, &variants),
+        ItemSpec::Struct(record) => struct_impl(&input.vis, &name, &record),
+        ItemSpec::Enum(variants) => enum_impl(&input.vis, &name, &variants),
     };
     TokenStream::from(expanded)
 }

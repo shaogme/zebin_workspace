@@ -44,6 +44,7 @@ where
     T: Encode + Archive + 'a,
     H: ArchiveHeaderTrait,
 {
+    value: &'a T,
     phase: EncodePhase<'a, T, H>,
     archive_pos: usize,
     total_len: usize,
@@ -59,6 +60,7 @@ where
         let total_len = measure_total_len::<T, H>(value)?;
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         Ok(Self {
+            value,
             phase: EncodePhase::Header {
                 bytes: header.encode(),
                 cursor: 0,
@@ -113,7 +115,7 @@ where
                 }
                 EncodePhase::Body { encoder, started } => {
                     if !*started {
-                        match encoder.input((), &mut encoder_sink)? {
+                        match encoder.input(self.value, &mut encoder_sink)? {
                             core::task::Poll::Pending => {
                                 *started = true;
                                 break;
@@ -184,7 +186,7 @@ where
         encoder.write(header.encode().as_ref())?;
 
         let mut body_encoder = value.begin_encode()?;
-        if body_encoder.input((), &mut encoder)?.is_pending() {
+        if body_encoder.input(value, &mut encoder)?.is_pending() {
             while body_encoder.poll_pending(&mut encoder)?.is_pending() {}
         }
         let _ = body_encoder.finish(&mut encoder)?;
@@ -221,7 +223,7 @@ where
 {
     let mut encoder = MeasureEncoder::new(start_pos);
     let mut body_encoder = value.begin_encode()?;
-    if body_encoder.input((), &mut encoder)?.is_pending() {
+    if body_encoder.input(value, &mut encoder)?.is_pending() {
         while body_encoder.poll_pending(&mut encoder)?.is_pending() {}
     }
     let _ = body_encoder.finish(&mut encoder)?;

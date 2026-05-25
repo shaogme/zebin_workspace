@@ -11,13 +11,13 @@ use crate::{
 use core::{num::NonZeroUsize, task::Poll};
 
 /// Byte-oriented encoder used by fixed-width primitive encoders.
-pub struct ByteEncoder<'a, const N: usize> {
+pub struct ByteEncoder<'a, const N: usize, T = ()> {
     bytes: [u8; N],
     cursor: usize,
-    _phantom: core::marker::PhantomData<&'a ()>,
+    _phantom: core::marker::PhantomData<&'a T>,
 }
 
-impl<'a, const N: usize> ByteEncoder<'a, N> {
+impl<'a, const N: usize, T> ByteEncoder<'a, N, T> {
     pub fn new(bytes: [u8; N]) -> Self {
         Self {
             bytes,
@@ -27,8 +27,8 @@ impl<'a, const N: usize> ByteEncoder<'a, N> {
     }
 }
 
-impl<'a, const N: usize> Encoder<'a> for ByteEncoder<'a, N> {
-    type Input = ();
+impl<'a, const N: usize, T> Encoder<'a> for ByteEncoder<'a, N, T> {
+    type Input = &'a T;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -102,7 +102,7 @@ macro_rules! impl_archive_for_primitive {
             }
 
             impl Encode for $t {
-                type Encoder<'a> = ByteEncoder<'a, { core::mem::size_of::<$t>() }> where Self: 'a;
+                type Encoder<'a> = ByteEncoder<'a, { core::mem::size_of::<$t>() }, $t> where Self: 'a;
 
                 fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
                     Ok(ByteEncoder::new(self.to_le_bytes()))
@@ -185,7 +185,7 @@ impl Archive for bool {
 
 impl Encode for bool {
     type Encoder<'a>
-        = ByteEncoder<'a, 1>
+        = ByteEncoder<'a, 1, bool>
     where
         Self: 'a;
 
@@ -220,12 +220,12 @@ impl SchemaAware for bool {
     }
 }
 
-pub struct UnitEncoder<'a> {
-    _phantom: core::marker::PhantomData<&'a ()>,
+pub struct UnitEncoder<'a, T = ()> {
+    _phantom: core::marker::PhantomData<&'a T>,
 }
 
-impl<'a> Encoder<'a> for UnitEncoder<'a> {
-    type Input = ();
+impl<'a, T> Encoder<'a> for UnitEncoder<'a, T> {
+    type Input = &'a T;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -282,7 +282,7 @@ impl Archive for () {
 }
 
 impl Encode for () {
-    type Encoder<'a> = UnitEncoder<'a>;
+    type Encoder<'a> = UnitEncoder<'a, ()>;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         Ok(UnitEncoder {

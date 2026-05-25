@@ -294,22 +294,22 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
 }
 
-impl Encode for ArchivedPackedBoolSliceView<'_> {
-    type Encoder<'a>
-        = PackedViewEncoder<'a>
+impl<'a> Encode for ArchivedPackedBoolSliceView<'a> {
+    type Encoder<'b>
+        = PackedViewEncoder<'b, ArchivedPackedBoolSliceView<'a>>
     where
-        Self: 'a;
+        Self: 'b;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         Ok(PackedViewEncoder::new(self.len, self.bytes))
     }
 }
 
-impl<const BITS: u8> Encode for ArchivedPackedU8SliceView<'_, BITS> {
-    type Encoder<'a>
-        = PackedViewEncoder<'a>
+impl<'a, const BITS: u8> Encode for ArchivedPackedU8SliceView<'a, BITS> {
+    type Encoder<'b>
+        = PackedViewEncoder<'b, ArchivedPackedU8SliceView<'a, BITS>>
     where
-        Self: 'a;
+        Self: 'b;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         Ok(PackedViewEncoder::new(self.len, self.bytes))
@@ -317,26 +317,28 @@ impl<const BITS: u8> Encode for ArchivedPackedU8SliceView<'_, BITS> {
 }
 
 /// State for serializing an already-packed view.
-pub struct PackedViewEncoder<'a> {
+pub struct PackedViewEncoder<'a, I = ()> {
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     bytes: &'a [u8],
     bytes_cursor: usize,
+    _phantom: core::marker::PhantomData<&'a I>,
 }
 
-impl<'a> PackedViewEncoder<'a> {
+impl<'a, I> PackedViewEncoder<'a, I> {
     pub fn new(len: usize, bytes: &'a [u8]) -> Self {
         Self {
             len_prefix: (len as u32).to_le_bytes(),
             prefix_cursor: 0,
             bytes,
             bytes_cursor: 0,
+            _phantom: core::marker::PhantomData,
         }
     }
 }
 
-impl<'a> Encoder<'a> for PackedViewEncoder<'a> {
-    type Input = ();
+impl<'a, I> Encoder<'a> for PackedViewEncoder<'a, I> {
+    type Input = &'a I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,

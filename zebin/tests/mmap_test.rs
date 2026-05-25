@@ -43,7 +43,7 @@ where
     encoder.write(header.encode().as_ref())?;
 
     let mut body_encoder = value.begin_encode()?;
-    if body_encoder.input((), encoder)?.is_pending() {
+    if body_encoder.input(value, encoder)?.is_pending() {
         while body_encoder.poll_pending(encoder)?.is_pending() {}
     }
     let _ = body_encoder.finish(encoder)?;

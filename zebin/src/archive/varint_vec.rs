@@ -127,7 +127,7 @@ impl<T> Archive for ArchivedVarIntVec<T> {
     type Archived = Self;
 }
 
-pub struct VarIntVecEncoder<'a, T: VarIntNumber> {
+pub struct VarIntVecEncoder<'a, T: VarIntNumber, I = ()> {
     values: &'a [T],
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -135,9 +135,10 @@ pub struct VarIntVecEncoder<'a, T: VarIntNumber> {
     cursor: usize,
     current_val_buf: [u8; 10],
     current_val_len: usize,
+    _phantom: core::marker::PhantomData<&'a I>,
 }
 
-impl<'a, T: VarIntNumber> VarIntVecEncoder<'a, T> {
+impl<'a, T: VarIntNumber, I> VarIntVecEncoder<'a, T, I> {
     pub(crate) fn new(values: &'a [T]) -> Result<Self, ZebinError> {
         let len = u32::try_from(values.len()).map_err(|_| ZebinError::SerializationError {
             pos: 0,
@@ -151,12 +152,13 @@ impl<'a, T: VarIntNumber> VarIntVecEncoder<'a, T> {
             cursor: 0,
             current_val_buf: [0u8; 10],
             current_val_len: 0,
+            _phantom: core::marker::PhantomData,
         })
     }
 }
 
-impl<'a, T: VarIntNumber> Encoder<'a> for VarIntVecEncoder<'a, T> {
-    type Input = ();
+impl<'a, T: VarIntNumber, I> Encoder<'a> for VarIntVecEncoder<'a, T, I> {
+    type Input = &'a I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -209,7 +211,7 @@ impl<'a, T: VarIntNumber> Encoder<'a> for VarIntVecEncoder<'a, T> {
 
 impl<T: VarIntNumber> Encode for VarIntVec<T> {
     type Encoder<'a>
-        = VarIntVecEncoder<'a, T>
+        = VarIntVecEncoder<'a, T, VarIntVec<T>>
     where
         Self: 'a;
 
@@ -220,7 +222,7 @@ impl<T: VarIntNumber> Encode for VarIntVec<T> {
 
 impl<T: VarIntNumber> Encode for ArchivedVarIntVec<T> {
     type Encoder<'a>
-        = VarIntVecEncoder<'a, T>
+        = VarIntVecEncoder<'a, T, ArchivedVarIntVec<T>>
     where
         Self: 'a;
 
@@ -235,7 +237,7 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
 
 impl<'a, T: VarIntNumber> Encode for PackedVarIntSlice<'a, T> {
     type Encoder<'b>
-        = VarIntVecEncoder<'b, T>
+        = VarIntVecEncoder<'b, T, PackedVarIntSlice<'a, T>>
     where
         Self: 'b;
 

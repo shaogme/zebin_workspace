@@ -99,15 +99,21 @@ impl Restore<String> for ArchivedStringView<'_> {
 }
 
 /// Resumable serialization state for `String` and `str`.
-pub struct StringEncoder<'a> {
+pub struct StringEncoder<'a, T = str>
+where
+    T: ?Sized,
+{
     bytes: &'a [u8],
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     cursor: usize,
-    _marker: PhantomData<&'a str>,
+    _marker: PhantomData<&'a T>,
 }
 
-impl<'a> StringEncoder<'a> {
+impl<'a, T> StringEncoder<'a, T>
+where
+    T: ?Sized,
+{
     pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
         let len = u32::try_from(bytes.len()).map_err(|_| ZebinError::SerializationError {
             pos: 0,
@@ -123,8 +129,11 @@ impl<'a> StringEncoder<'a> {
     }
 }
 
-impl<'a> Encoder<'a> for StringEncoder<'a> {
-    type Input = ();
+impl<'a, T> Encoder<'a> for StringEncoder<'a, T>
+where
+    T: ?Sized,
+{
+    type Input = &'a T;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -163,7 +172,7 @@ impl Archive for String {
 
 impl Encode for String {
     type Encoder<'a>
-        = StringEncoder<'a>
+        = StringEncoder<'a, String>
     where
         Self: 'a;
 
@@ -178,7 +187,7 @@ impl Archive for str {
 
 impl Encode for str {
     type Encoder<'a>
-        = StringEncoder<'a>
+        = StringEncoder<'a, str>
     where
         Self: 'a;
 

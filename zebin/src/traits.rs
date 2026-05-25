@@ -178,7 +178,7 @@ pub trait Encoder<'a> {
 
 /// Trait for types that can create resumable archive states.
 pub trait Encode: Archive {
-    type Encoder<'a>: Encoder<'a, Input = ()>
+    type Encoder<'a>: Encoder<'a, Input = &'a Self>
     where
         Self: 'a;
 

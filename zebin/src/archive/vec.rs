@@ -165,7 +165,7 @@ where
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-pub struct SequenceEncoder<'a, S, T>
+pub struct SequenceEncoder<'a, S, T, I: ?Sized = S>
 where
     S: ?Sized + SequenceSource<T>,
     T: Encode + Archive + 'a,
@@ -176,9 +176,10 @@ where
     aligned: bool,
     index: usize,
     current_encoder: Option<Box<(<T as Encode>::Encoder<'a>, bool)>>,
+    _phantom: core::marker::PhantomData<&'a I>,
 }
 
-impl<'a, S, T> SequenceEncoder<'a, S, T>
+impl<'a, S, T, I: ?Sized> SequenceEncoder<'a, S, T, I>
 where
     S: ?Sized + SequenceSource<T>,
     T: Encode + Archive + 'a,
@@ -195,6 +196,7 @@ where
             aligned: false,
             index: 0,
             current_encoder: None,
+            _phantom: core::marker::PhantomData,
         })
     }
 
@@ -221,13 +223,14 @@ where
     }
 }
 
-impl<'a, S, T> Encoder<'a> for SequenceEncoder<'a, S, T>
+impl<'a, S, T, I> Encoder<'a> for SequenceEncoder<'a, S, T, I>
 where
     S: ?Sized + SequenceSource<T>,
     T: Encode + Archive + 'a,
     T::Archived: ArchivedLayout,
+    I: ?Sized,
 {
-    type Input = ();
+    type Input = &'a I;
 
     fn input<Sink: ByteSink + ?Sized>(
         &mut self,
@@ -272,7 +275,8 @@ where
                 .expect("current encoder initialized above");
 
             let progress = if !*started {
-                match encoder.input((), sink)? {
+                let item = self.source.get(self.index);
+                match encoder.input(item, sink)? {
                     Poll::Pending => {
                         *started = true;
                         Poll::Pending
@@ -327,7 +331,7 @@ impl<'a, T, const N: usize> Encoder<'a> for ArrayEncoder<'a, T, N>
 where
     T: Encode + Archive + 'a,
 {
-    type Input = ();
+    type Input = &'a [T; N];
 
     fn input<Sink: ByteSink + ?Sized>(
         &mut self,
@@ -351,7 +355,7 @@ where
                 .expect("array item encoder initialized above");
 
             let progress = if !*started {
-                match encoder.input((), sink)? {
+                match encoder.input(&self.items[self.index], sink)? {
                     Poll::Pending => {
                         *started = true;
                         Poll::Pending
@@ -379,9 +383,9 @@ where
     }
 }
 
-pub type VecEncoder<'a, T> = SequenceEncoder<'a, [T], T>;
-pub type VecDequeEncoder<'a, T> = SequenceEncoder<'a, VecDeque<T>, T>;
-pub type SliceEncoder<'a, T> = SequenceEncoder<'a, [T], T>;
+pub type VecEncoder<'a, T> = SequenceEncoder<'a, [T], T, Vec<T>>;
+pub type VecDequeEncoder<'a, T> = SequenceEncoder<'a, VecDeque<T>, T, VecDeque<T>>;
+pub type SliceEncoder<'a, T> = SequenceEncoder<'a, [T], T, [T]>;
 
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;

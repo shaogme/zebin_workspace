@@ -14,7 +14,7 @@ enum PackedData<'a> {
 
 /// Packed sequence encoder shared by the packed APIs.
 #[doc(hidden)]
-pub struct PackedSequenceEncoder<'a> {
+pub struct PackedSequenceEncoder<'a, I = ()> {
     data: PackedData<'a>,
     bits_per_value: u8,
     len_prefix: [u8; 4],
@@ -24,9 +24,10 @@ pub struct PackedSequenceEncoder<'a> {
     buf: [u8; 64],
     buf_len: usize,
     buf_cursor: usize,
+    _phantom: core::marker::PhantomData<&'a I>,
 }
 
-impl<'a> PackedSequenceEncoder<'a> {
+impl<'a, I> PackedSequenceEncoder<'a, I> {
     pub fn new_bool(values: &'a [bool]) -> Result<Self, ZebinError> {
         Self::new(PackedData::Bool(values), 1, values.len())
     }
@@ -50,6 +51,7 @@ impl<'a> PackedSequenceEncoder<'a> {
             buf: [0u8; 64],
             buf_len: 0,
             buf_cursor: 0,
+            _phantom: core::marker::PhantomData,
         })
     }
 
@@ -98,8 +100,8 @@ impl<'a> PackedSequenceEncoder<'a> {
     }
 }
 
-impl<'a> Encoder<'a> for PackedSequenceEncoder<'a> {
-    type Input = ();
+impl<'a, I> Encoder<'a> for PackedSequenceEncoder<'a, I> {
+    type Input = &'a I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -203,7 +205,7 @@ impl Archive for PackedVec<bool, 1> {
 
 impl Encode for PackedVec<bool, 1> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a>
+        = PackedSequenceEncoder<'a, PackedVec<bool, 1>>
     where
         Self: 'a;
 
@@ -218,7 +220,7 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
 
 impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a>
+        = PackedSequenceEncoder<'a, PackedVec<u8, BITS>>
     where
         Self: 'a;
 
@@ -227,9 +229,9 @@ impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
     }
 }
 
-impl Encode for crate::archive::packed::PackedSlice<'_, bool, 1> {
+impl<'b> Encode for crate::archive::packed::PackedSlice<'b, bool, 1> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a>
+        = PackedSequenceEncoder<'a, crate::archive::packed::PackedSlice<'b, bool, 1>>
     where
         Self: 'a;
 
@@ -238,9 +240,9 @@ impl Encode for crate::archive::packed::PackedSlice<'_, bool, 1> {
     }
 }
 
-impl<const BITS: u8> Encode for crate::archive::packed::PackedSlice<'_, u8, BITS> {
+impl<'b, const BITS: u8> Encode for crate::archive::packed::PackedSlice<'b, u8, BITS> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a>
+        = PackedSequenceEncoder<'a, crate::archive::packed::PackedSlice<'b, u8, BITS>>
     where
         Self: 'a;
 

@@ -233,14 +233,14 @@ where
     type Archived = ArchivedVarInt<T>;
 }
 
-pub struct VarIntEncoder<'a, T: VarIntNumber> {
+pub struct VarIntEncoder<'a, T: VarIntNumber, I = ()> {
     bytes: [u8; 10],
     len: u8,
     cursor: u8,
-    _phantom: PhantomData<&'a T>,
+    _phantom: PhantomData<&'a (T, I)>,
 }
 
-impl<'a, T: VarIntNumber> VarIntEncoder<'a, T> {
+impl<'a, T: VarIntNumber, I> VarIntEncoder<'a, T, I> {
     pub(crate) fn new(value: T) -> Self {
         let val = value.to_u64();
         let len = encoded_len_u64(val);
@@ -255,8 +255,8 @@ impl<'a, T: VarIntNumber> VarIntEncoder<'a, T> {
     }
 }
 
-impl<'a, T: VarIntNumber> Encoder<'a> for VarIntEncoder<'a, T> {
-    type Input = ();
+impl<'a, T: VarIntNumber, I> Encoder<'a> for VarIntEncoder<'a, T, I> {
+    type Input = &'a I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -287,7 +287,7 @@ where
     T: VarIntNumber,
 {
     type Encoder<'a>
-        = VarIntEncoder<'a, T>
+        = VarIntEncoder<'a, T, VarInt<T>>
     where
         Self: 'a;
 
@@ -301,7 +301,7 @@ where
     T: VarIntNumber,
 {
     type Encoder<'a>
-        = VarIntEncoder<'a, T>
+        = VarIntEncoder<'a, T, VarIntView<T>>
     where
         Self: 'a;
 

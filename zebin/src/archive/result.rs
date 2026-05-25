@@ -140,11 +140,13 @@ where
     E: Encode + Archive + 'a,
 {
     Ok {
+        val: &'a T,
         prefix_cursor: usize,
         encoder: <T as Encode>::Encoder<'a>,
         started: bool,
     },
     Err {
+        val: &'a E,
         prefix_cursor: usize,
         encoder: <E as Encode>::Encoder<'a>,
         started: bool,
@@ -159,11 +161,13 @@ where
     pub(crate) fn new(value: Result<&'a T, &'a E>) -> Result<Self, ZebinError> {
         match value {
             Ok(inner) => Ok(Self::Ok {
+                val: inner,
                 prefix_cursor: 0,
                 encoder: inner.begin_encode()?,
                 started: false,
             }),
             Err(inner) => Ok(Self::Err {
+                val: inner,
                 prefix_cursor: 0,
                 encoder: inner.begin_encode()?,
                 started: false,
@@ -177,7 +181,7 @@ where
     T: Encode + Archive + 'a,
     E: Encode + Archive + 'a,
 {
-    type Input = ();
+    type Input = &'a Result<T, E>;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -190,6 +194,7 @@ where
     fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         match self {
             ResultEncoder::Ok {
+                val,
                 prefix_cursor,
                 encoder,
                 started,
@@ -204,7 +209,7 @@ where
                 }
 
                 let progress = if !*started {
-                    match encoder.input((), sink)? {
+                    match encoder.input(*val, sink)? {
                         Poll::Pending => {
                             *started = true;
                             Poll::Pending
@@ -221,6 +226,7 @@ where
                 }
             }
             ResultEncoder::Err {
+                val,
                 prefix_cursor,
                 encoder,
                 started,
@@ -235,7 +241,7 @@ where
                 }
 
                 let progress = if !*started {
-                    match encoder.input((), sink)? {
+                    match encoder.input(*val, sink)? {
                         Poll::Pending => {
                             *started = true;
                             Poll::Pending

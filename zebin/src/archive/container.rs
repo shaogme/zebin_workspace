@@ -1,8 +1,57 @@
 use crate::{
     ZebinError,
-    traits::{Archive, Encode, Restore},
+    traits::{Archive, ByteSink, Encode, Encoder, Restore},
 };
 use alloc::{borrow::Cow, borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc};
+use core::{ops::Deref, task::Poll};
+
+/// Resumable serialization state for deref-able containers like `Box`, `Rc`, `Arc`, `Cow`.
+pub struct DerefEncoder<'a, E, I>
+where
+    E: Encoder<'a>,
+    I: ?Sized,
+{
+    encoder: E,
+    _phantom: core::marker::PhantomData<&'a I>,
+}
+
+impl<'a, E, I> DerefEncoder<'a, E, I>
+where
+    E: Encoder<'a>,
+    I: ?Sized,
+{
+    pub fn new(encoder: E) -> Self {
+        Self {
+            encoder,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, E, I> Encoder<'a> for DerefEncoder<'a, E, I>
+where
+    E: Encoder<'a>,
+    I: ?Sized + Deref,
+    &'a <I as Deref>::Target: Into<E::Input>,
+{
+    type Input = &'a I;
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.encoder.input((&**item).into(), sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        self.encoder.poll_pending(sink)
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        self.encoder.finish(sink)
+    }
+}
 
 impl<T: ?Sized> Archive for Box<T>
 where
@@ -16,12 +65,12 @@ where
     T: Encode + Archive,
 {
     type Encoder<'a>
-        = <T as Encode>::Encoder<'a>
+        = DerefEncoder<'a, <T as Encode>::Encoder<'a>, Box<T>>
     where
         Self: 'a;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        self.as_ref().begin_encode()
+        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
     }
 }
 
@@ -66,12 +115,12 @@ where
     T: Encode + Archive,
 {
     type Encoder<'a>
-        = <T as Encode>::Encoder<'a>
+        = DerefEncoder<'a, <T as Encode>::Encoder<'a>, Rc<T>>
     where
         Self: 'a;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        self.as_ref().begin_encode()
+        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
     }
 }
 
@@ -116,12 +165,12 @@ where
     T: Encode + Archive,
 {
     type Encoder<'a>
-        = <T as Encode>::Encoder<'a>
+        = DerefEncoder<'a, <T as Encode>::Encoder<'a>, Arc<T>>
     where
         Self: 'a;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        self.as_ref().begin_encode()
+        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
     }
 }
 
@@ -166,12 +215,12 @@ where
     B: ?Sized + ToOwned + Encode + Archive,
 {
     type Encoder<'b>
-        = <B as Encode>::Encoder<'b>
+        = DerefEncoder<'b, <B as Encode>::Encoder<'b>, Cow<'a, B>>
     where
         Self: 'b;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        self.as_ref().begin_encode()
+        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
     }
 }
 
