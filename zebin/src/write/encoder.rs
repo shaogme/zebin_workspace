@@ -196,3 +196,96 @@ impl ByteSink for VecEncoder {
         Ok(SinkProgress::Complete)
     }
 }
+
+#[cfg(feature = "mmap")]
+/// Encoder that writes into a pre-sized memory-mapped file.
+///
+/// The mmap must be sized to fit the entire archive before construction.
+/// All writes return `SinkProgress::Complete`; if a write would exceed the
+/// map, `ZebinError::BufferTooSmall` is returned.
+pub struct MmapEncoder {
+    mmap: memmap2::MmapMut,
+    archive_pos: usize,
+    written: usize,
+}
+
+#[cfg(feature = "mmap")]
+impl MmapEncoder {
+    pub fn new(mmap: memmap2::MmapMut, archive_pos: usize) -> Self {
+        Self {
+            mmap,
+            archive_pos,
+            written: 0,
+        }
+    }
+
+    pub fn written(&self) -> usize {
+        self.written
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.mmap.len()
+    }
+
+    pub fn into_inner(self) -> memmap2::MmapMut {
+        self.mmap
+    }
+
+    pub fn flush(&self) -> Result<(), ZebinError> {
+        self.mmap.flush().map_err(ZebinError::from)
+    }
+
+    fn prepare_range(&mut self, len: usize) -> Result<(usize, usize), ZebinError> {
+        let start = self.written;
+        let end = start
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow {
+                pos: self.archive_pos,
+            })?;
+        if end > self.mmap.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos: self.archive_pos,
+                required: end - self.mmap.len(),
+            });
+        }
+        let next_archive_pos =
+            self.archive_pos
+                .checked_add(len)
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
+        self.archive_pos = next_archive_pos;
+        self.written = end;
+        Ok((start, end))
+    }
+}
+
+#[cfg(feature = "mmap")]
+impl ByteSink for MmapEncoder {
+    fn pos(&self) -> usize {
+        self.archive_pos
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        if bytes.is_empty() {
+            return Ok(SinkProgress::Complete);
+        }
+        let (start, end) = self.prepare_range(bytes.len())?;
+        self.mmap[start..end].copy_from_slice(bytes);
+        Ok(SinkProgress::Complete)
+    }
+
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+        let padding = padding_for_alignment(self.archive_pos, alignment);
+        self.skip(padding)
+    }
+
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+        if len == 0 {
+            return Ok(SinkProgress::Complete);
+        }
+        let (start, end) = self.prepare_range(len)?;
+        byteops::fill(&mut self.mmap[start..end], 0);
+        Ok(SinkProgress::Complete)
+    }
+}

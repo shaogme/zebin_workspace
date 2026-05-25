@@ -192,6 +192,8 @@ pub enum ZebinError {
     HeaderParseError(ParseHeaderError),
     #[cfg(feature = "mmap")]
     ReadOnlyStorage,
+    #[cfg(feature = "std")]
+    Io(std::io::Error),
 }
 
 impl From<DecodeError> for ZebinError {
@@ -232,7 +234,16 @@ impl core::fmt::Display for ZebinError {
             ZebinError::HeaderParseError(err) => write!(f, "header parse error: {}", err),
             #[cfg(feature = "mmap")]
             ZebinError::ReadOnlyStorage => write!(f, "read-only storage"),
+            #[cfg(feature = "std")]
+            ZebinError::Io(err) => write!(f, "io error: {err}"),
         }
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<std::io::Error> for ZebinError {
+    fn from(error: std::io::Error) -> Self {
+        ZebinError::Io(error)
     }
 }
 
