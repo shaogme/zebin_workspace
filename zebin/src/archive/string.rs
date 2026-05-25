@@ -2,17 +2,9 @@ use core::{marker::PhantomData, ops::Deref, str, task::Poll};
 
 use alloc::string::{String, ToString};
 
-use crate::{
-    core::schema::FieldEncoding,
-    core::schema::ObjectEncoding,
-    error::{DecodeError, ZebinError},
-    read::Cursor,
-    traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
-        SchemaAware,
-    },
-    validation::context::ValidationContext,
-};
+#[cfg(feature = "alloc")]
+use crate::io::ForwardSequenceStrategy;
+use crate::prelude::*;
 
 impl SchemaAware for ArchivedStringView<'_> {
     fn pos(&self) -> usize {
@@ -59,7 +51,7 @@ impl ArchivedLayout for ArchivedString {
 
 impl<'a> Decode<'a> for ArchivedString {
     type View = ArchivedStringView<'a>;
-    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
+    type DecodeStrategy = ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where

@@ -158,14 +158,14 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
             let encoding = field_encoding(field);
 
             quote! {
-                if self.#entry_cursor_ident < zebin::FieldEntry::SIZE {
-                    let __field_entry_bytes = zebin::FieldEntry {
+                if self.#entry_cursor_ident < zebin::schema::FieldEntry::SIZE {
+                    let __field_entry_bytes = zebin::schema::FieldEntry {
                         field_id: #field_id as u16,
                         encoding: #encoding,
                         payload_len: self.#len_ident,
                     }
                     .to_bytes();
-                    let __zebin_remaining = zebin::FieldEntry::SIZE - self.#entry_cursor_ident;
+                    let __zebin_remaining = zebin::schema::FieldEntry::SIZE - self.#entry_cursor_ident;
                     if encoder.write(&__field_entry_bytes[self.#entry_cursor_ident..])?
                         .advance_cursor(&mut self.#entry_cursor_ident, __zebin_remaining)
                         .is_pending()
@@ -246,15 +246,15 @@ fn record_state_impl(
         }
     });
     quote! {
-        impl<'a> zebin::Encoder<'a> for #state_name<'a> {
+        impl<'a> zebin::io::Encoder<'a> for #state_name<'a> {
             type Input = #input_ty;
-            fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn input<S: zebin::io::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.poll_pending(sink)
             }
-            fn poll_pending<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending<E: zebin::io::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #logic
             }
-            fn finish<S: zebin::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn finish<S: zebin::io::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #(#finishes)*
                 Ok(::core::task::Poll::Ready(()))
             }
@@ -431,18 +431,18 @@ fn enum_impl(
             #(#payload_variants,)*
         }
 
-        impl<'a> zebin::Encoder<'a> for #payload_state<'a> {
+        impl<'a> zebin::io::Encoder<'a> for #payload_state<'a> {
             type Input = ();
-            fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn input<S: zebin::io::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.poll_pending(sink)
             }
-            fn poll_pending<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending<E: zebin::io::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
                     #(#payload_polls,)*
                 }
             }
-            fn finish<S: zebin::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn finish<S: zebin::io::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
                     #(#payload_finishes,)*
@@ -466,12 +466,12 @@ fn enum_impl(
             }
         }
 
-        impl<'a> zebin::Encoder<'a> for #enum_state<'a> {
+        impl<'a> zebin::io::Encoder<'a> for #enum_state<'a> {
             type Input = &'a #name;
-            fn input<S: zebin::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn input<S: zebin::io::ByteSink + ?Sized>(&mut self, _item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.poll_pending(sink)
             }
-            fn poll_pending<E: zebin::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending<E: zebin::io::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 if self.tag_cursor < self.tag.len() {
                     let __zebin_remaining = self.tag.len() - self.tag_cursor;
                     if encoder.write(&self.tag[self.tag_cursor..])?
@@ -492,7 +492,7 @@ fn enum_impl(
                     Ok(::core::task::Poll::Ready(()))
                 }
             }
-            fn finish<S: zebin::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn finish<S: zebin::io::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 if let Some(payload) = self.payload {
                     payload.finish(sink)
                 } else {

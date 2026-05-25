@@ -142,15 +142,15 @@ fn is_varint_like(ty: &Type) -> bool {
 
 pub fn field_encoding(field: &FieldSpec<'_>) -> TokenStream {
     if field.packed_bits.is_some() {
-        return quote! { zebin::FieldEncoding::PackedBits };
+        return quote! { zebin::schema::FieldEncoding::PackedBits };
     }
     if is_varint_like(field.ty) {
-        return quote! { zebin::FieldEncoding::VarInt };
+        return quote! { zebin::schema::FieldEncoding::VarInt };
     }
     if is_length_prefixed_like(field.ty) {
-        return quote! { zebin::FieldEncoding::LengthPrefixed };
+        return quote! { zebin::schema::FieldEncoding::LengthPrefixed };
     }
-    quote! { zebin::FieldEncoding::Fixed }
+    quote! { zebin::schema::FieldEncoding::Fixed }
 }
 
 pub fn field_archived_type(field: &FieldSpec<'_>) -> TokenStream {

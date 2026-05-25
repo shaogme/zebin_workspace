@@ -1,15 +1,7 @@
 use core::{marker::PhantomData, ops::Deref, task::Poll};
 
-use crate::{
-    core::schema::{FieldEncoding, ObjectEncoding},
-    error::{DecodeError, ZebinError},
-    read::Cursor,
-    traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
-        SchemaAware,
-    },
-    validation::context::ValidationContext,
-};
+use crate::io::ForwardSequenceStrategy;
+use crate::prelude::*;
 
 /// Unsigned integers that are serialized with a variable-length encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -210,7 +202,7 @@ where
 {
     type View = VarIntView<T>;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
+    type DecodeStrategy = ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where

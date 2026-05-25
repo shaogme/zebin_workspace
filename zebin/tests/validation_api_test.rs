@@ -1,7 +1,7 @@
 use zebin::{ZebinArchive, ZebinEncode};
 
 #[cfg(feature = "alloc")]
-use zebin::{
+use zebin::prelude::{
     DecodeError, ValidationConfig, ValidationPathStack, ZebinError, validate_detailed,
     validate_with_config,
 };
@@ -98,7 +98,7 @@ fn test_validate_detailed_reports_schema_field_encoding_path() {
     let mut buf = zebin::encode(&value).unwrap();
     let object_pos = 4;
     let first_entry_encoding_pos = object_pos + 12 + 8 + 2;
-    buf[first_entry_encoding_pos] = zebin::FieldEncoding::LengthPrefixed as u8;
+    buf[first_entry_encoding_pos] = zebin::schema::FieldEncoding::LengthPrefixed as u8;
 
     let mut stack = ValidationPathStack::new();
     let err = validate_detailed::<SchemaRecord>(&buf, &mut stack).unwrap_err();
@@ -145,10 +145,10 @@ fn test_validate_detailed_reports_duplicate_schema_field_path() {
     let mut buf = zebin::encode(&value).unwrap();
     let object_pos = 4;
     // Account for 8-byte payload of the fields (flag: bool = 1, name: String = 7)
-    let second_entry_id_pos = object_pos + 12 + 8 + zebin::FieldEntry::SIZE;
+    let second_entry_id_pos = object_pos + 12 + 8 + zebin::schema::FieldEntry::SIZE;
     buf[second_entry_id_pos..second_entry_id_pos + 2].copy_from_slice(&1u16.to_le_bytes());
     let second_entry_encoding_pos = second_entry_id_pos + 2;
-    buf[second_entry_encoding_pos] = zebin::FieldEncoding::Fixed as u8;
+    buf[second_entry_encoding_pos] = zebin::schema::FieldEncoding::Fixed as u8;
     let second_entry_payload_len_pos = second_entry_id_pos + 4;
     buf[second_entry_payload_len_pos..second_entry_payload_len_pos + 4]
         .copy_from_slice(&1u32.to_le_bytes());

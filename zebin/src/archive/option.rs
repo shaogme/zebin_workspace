@@ -1,14 +1,8 @@
 use core::task::Poll;
 
-use crate::{
-    core::schema::ObjectEncoding,
-    error::{DecodeError, ZebinError},
-    traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
-        SchemaAware,
-    },
-    validation::context::ValidationContext,
-};
+#[cfg(feature = "alloc")]
+use crate::io::ForwardSequenceStrategy;
+use crate::prelude::*;
 
 impl<T> SchemaAware for ArchivedOption<T> {
     fn pos(&self) -> usize {
@@ -61,12 +55,9 @@ where
 {
     type View = ArchivedOption<A::View>;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
+    type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(
-        cursor: &mut crate::read::Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View, DecodeError>
+    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -81,7 +72,7 @@ where
         }
     }
 
-    fn validate<C>(cursor: &mut crate::read::Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

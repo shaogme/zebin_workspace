@@ -1,4 +1,4 @@
-use crate::core::schema::{FieldEncoding, ObjectEncoding, SchemaRevision, StableSchemaKey};
+use crate::schema::{FieldEncoding, ObjectEncoding, SchemaRevision, StableSchemaKey};
 use core::num::NonZeroUsize;
 
 /// Errors that can occur during archive header parsing.

@@ -2,15 +2,9 @@ use alloc::vec::Vec;
 use core::task::Poll;
 
 use crate::{
-    archive::varint::{VarIntNumber, decode_u64, encode_u64, encoded_len_u64},
-    core::schema::{FieldEncoding, ObjectEncoding},
-    error::{DecodeError, ZebinError},
-    read::Cursor,
-    traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, Restore,
-        SchemaAware,
-    },
-    validation::context::ValidationContext,
+    archive_impl::varint::{VarIntNumber, decode_u64, encode_u64, encoded_len_u64},
+    io::ForwardSequenceStrategy,
+    prelude::*,
 };
 
 /// A compact vector of VarInts.
@@ -92,7 +86,7 @@ impl<T> ArchivedLayout for ArchivedVarIntVec<T> {
 
 impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
     type View = ArchivedVarIntVec<T>;
-    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
+    type DecodeStrategy = ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where

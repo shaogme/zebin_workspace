@@ -1,4 +1,5 @@
 #[cfg(feature = "mmap")]
+#[path = "storage/mmap.rs"]
 pub mod mmap;
 
 #[cfg(feature = "alloc")]

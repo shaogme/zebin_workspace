@@ -6,7 +6,7 @@ use std::{
 use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
-use crate::io::storage::Storage;
+use crate::io::Storage;
 
 /// Memory-mapped storage backend for read-only archive access.
 pub struct Mmap {

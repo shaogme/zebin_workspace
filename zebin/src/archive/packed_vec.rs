@@ -1,11 +1,7 @@
 use alloc::vec::Vec;
 use core::task::Poll;
 
-use crate::{
-    archive::packed::{ArchivedPackedBoolSlice, ArchivedPackedU8Slice},
-    error::ZebinError,
-    traits::{Archive, ByteSink, Encode, Encoder, Restore},
-};
+use crate::prelude::*;
 
 enum PackedData<'a> {
     Bool(&'a [bool]),
@@ -229,9 +225,9 @@ impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
     }
 }
 
-impl<'b> Encode for crate::archive::packed::PackedSlice<'b, bool, 1> {
+impl<'b> Encode for PackedSlice<'b, bool, 1> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, crate::archive::packed::PackedSlice<'b, bool, 1>>
+        = PackedSequenceEncoder<'a, PackedSlice<'b, bool, 1>>
     where
         Self: 'a;
 
@@ -240,9 +236,9 @@ impl<'b> Encode for crate::archive::packed::PackedSlice<'b, bool, 1> {
     }
 }
 
-impl<'b, const BITS: u8> Encode for crate::archive::packed::PackedSlice<'b, u8, BITS> {
+impl<'b, const BITS: u8> Encode for PackedSlice<'b, u8, BITS> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, crate::archive::packed::PackedSlice<'b, u8, BITS>>
+        = PackedSequenceEncoder<'a, PackedSlice<'b, u8, BITS>>
     where
         Self: 'a;
 

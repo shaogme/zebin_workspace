@@ -1,13 +1,6 @@
-use crate::{
-    ZebinError,
-    error::DecodeError,
-    read::Cursor,
-    traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Encoder, FixedLayout,
-        Restore, SchemaAware,
-    },
-    validation::context::ValidationContext,
-};
+#[cfg(feature = "alloc")]
+use crate::io::FixedSequenceStrategy;
+use crate::prelude::*;
 use core::{num::NonZeroUsize, task::Poll};
 
 /// Byte-oriented encoder used by fixed-width primitive encoders.
@@ -73,7 +66,7 @@ macro_rules! impl_archive_for_primitive {
             impl<'a> Decode<'a> for $t {
                 type View = Self;
                 #[cfg(feature = "alloc")]
-                type DecodeStrategy = crate::traits::FixedSequenceStrategy;
+                type DecodeStrategy = crate::io::FixedSequenceStrategy;
 
                 fn decode<C>(
                     cursor: &mut Cursor<'a>,
@@ -160,7 +153,7 @@ impl ArchivedLayout for bool {
 impl<'a> Decode<'a> for bool {
     type View = bool;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = crate::traits::FixedSequenceStrategy;
+    type DecodeStrategy = FixedSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
@@ -266,7 +259,7 @@ impl ArchivedLayout for () {
 impl<'a> Decode<'a> for () {
     type View = ();
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = crate::traits::FixedSequenceStrategy;
+    type DecodeStrategy = FixedSequenceStrategy;
 
     fn decode<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<Self::View, DecodeError>
     where

@@ -1,13 +1,9 @@
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use core::task::Poll;
 
-use crate::traits::Encoder;
-use crate::{Cursor, ObjectEncoding, ValidationContext};
 use crate::{
-    error::{DecodeError, ZebinError},
-    traits::{
-        Archive, ArchivedDefault, ArchivedLayout, ByteSink, Decode, Encode, Restore, SchemaAware,
-    },
+    io::{ForwardSequenceStrategy, SequenceDecodeStrategy},
+    prelude::*,
 };
 
 /// Source of indexed sequence items.
@@ -117,17 +113,16 @@ where
     A: Decode<'a>,
 {
     type View = ArchivedVec<'a, A::View>;
-    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
+    type DecodeStrategy = ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
         let len = cursor.read_u32(context)? as usize;
-        let items =
-            <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::decode_sequence(
-                cursor, len, context,
-            )?;
+        let items = <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::decode_sequence(
+            cursor, len, context,
+        )?;
         Ok(ArchivedVec::new(items))
     }
 
@@ -136,7 +131,7 @@ where
         C: ValidationContext + ?Sized,
     {
         let len = cursor.read_u32(context)? as usize;
-        <A::DecodeStrategy as crate::traits::SequenceDecodeStrategy<'a, A>>::validate_sequence(
+        <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::validate_sequence(
             cursor, len, context,
         )
     }

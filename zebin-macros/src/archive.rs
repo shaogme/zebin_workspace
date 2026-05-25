@@ -95,7 +95,7 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
             let fallback = if let Some(default_value) = &field.default_value {
                 quote! { #default_value }
             } else {
-                quote! { <#ty as zebin::ArchivedDefault>::archived_default() }
+                quote! { <#ty as zebin::io::ArchivedDefault>::archived_default() }
             };
             quote! {
                 pub fn #method(&self) -> Result<&#ty, zebin::ZebinError> {
@@ -109,7 +109,7 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
             quote! {
                 pub fn #method(&self) -> Result<&#ty, zebin::ZebinError> {
                     self.#method.as_ref().ok_or_else(|| {
-                        zebin::DecodeError::MissingField {
+                        zebin::error::DecodeError::MissingField {
                             field_id: #field_id,
                             pos: self.pos,
                         }.into()
@@ -127,7 +127,7 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
             #(#accessors)*
         }
 
-        impl<'a> zebin::SchemaAware for #view<'a> {
+        impl<'a> zebin::io::SchemaAware for #view<'a> {
             fn pos(&self) -> usize { self.pos }
             fn stable_schema_key(&self) -> u32 { self.stable_schema_key }
             fn schema_revision(&self) -> u32 { self.schema_revision }
@@ -149,7 +149,7 @@ fn decode_known_field(
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
             __entry.check_decodable(__entry_pos, #expected_encoding, #field_var.is_some(), &mut *__field_guard)?;
-            let mut __field_cursor = zebin::Cursor::new(__payload, 0);
+            let mut __field_cursor = zebin::io::Cursor::new(__payload, 0);
             let __value = <#archived_ty as zebin::Decode<'a>>::decode(&mut __field_cursor, &mut *__field_guard)?;
             __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #field_var = ::core::option::Option::Some(__value);
@@ -172,7 +172,7 @@ fn validate_known_field(
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
             __entry.check_decodable(__entry_pos, #expected_encoding, #seen_expr, &mut *__field_guard)?;
-            let mut __field_cursor = zebin::Cursor::new(__payload, 0);
+            let mut __field_cursor = zebin::io::Cursor::new(__payload, 0);
             <#archived_ty as zebin::Decode<'a>>::validate(&mut __field_cursor, &mut *__field_guard)?;
             __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #seen_expr = true;
@@ -184,13 +184,13 @@ fn validate_known_field(
 fn record_layout_impl(marker: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     if has_schema(record) {
         quote! {
-            impl zebin::ArchivedLayout for #marker {
-                const FIELD_ENCODING: zebin::FieldEncoding = zebin::FieldEncoding::SchemaAware;
+            impl zebin::io::ArchivedLayout for #marker {
+                const FIELD_ENCODING: zebin::schema::FieldEncoding = zebin::schema::FieldEncoding::SchemaAware;
             }
         }
     } else {
         quote! {
-            impl zebin::ArchivedLayout for #marker {}
+            impl zebin::io::ArchivedLayout for #marker {}
         }
     }
 }
@@ -221,49 +221,45 @@ fn record_decode_impl(
             let seen_expr = quote! { __seen[#i] };
             validate_known_field(record, index, seen_expr)
         });
-        let missing_checks =
-            record
-                .active_fields()
-                .zip(vars.iter())
-                .filter_map(|((index, field), var)| {
-                    if field.optional || field.default || field.default_value.is_some() {
-                        None
-                    } else {
-                        let field_id = field.field_id.expect("field ids validated");
-                        let field_name = field_user_ident(record, index);
-                        Some(quote! {
-                            if #var.is_none() {
-                                let mut __field_guard = __guard.push_field(stringify!(#field_name));
-                                return Err(__field_guard.error(zebin::DecodeError::MissingField {
-                                    field_id: #field_id,
-                                    pos: __object_start,
-                                }));
-                            }
-                        })
-                    }
-                });
-        let validate_missing_checks =
-            record
-                .active_fields()
-                .enumerate()
-                .filter_map(|(i, (index, field))| {
-                    if field.optional || field.default || field.default_value.is_some() {
-                        None
-                    } else {
-                        let field_id = field.field_id.expect("field ids validated");
-                        let field_name = field_user_ident(record, index);
-                        let seen_expr = quote! { __seen[#i] };
-                        Some(quote! {
-                            if !#seen_expr {
-                                let mut __field_guard = __guard.push_field(stringify!(#field_name));
-                                return Err(__field_guard.error(zebin::DecodeError::MissingField {
-                                    field_id: #field_id,
-                                    pos: __object_start,
-                                }));
-                            }
-                        })
-                    }
-                });
+        let missing_checks = record.active_fields().zip(vars.iter()).filter_map(
+            |((index, field), var)| {
+                if field.optional || field.default || field.default_value.is_some() {
+                    None
+                } else {
+                    let field_id = field.field_id.expect("field ids validated");
+                    let field_name = field_user_ident(record, index);
+                    Some(quote! {
+                        if #var.is_none() {
+                            let mut __field_guard = __guard.push_field(stringify!(#field_name));
+                            return Err(__field_guard.error(zebin::error::DecodeError::MissingField {
+                                field_id: #field_id,
+                                pos: __object_start,
+                            }));
+                        }
+                    })
+                }
+            },
+        );
+        let validate_missing_checks = record.active_fields().enumerate().filter_map(
+            |(i, (index, field))| {
+                if field.optional || field.default || field.default_value.is_some() {
+                    None
+                } else {
+                    let field_id = field.field_id.expect("field ids validated");
+                    let field_name = field_user_ident(record, index);
+                    let seen_expr = quote! { __seen[#i] };
+                    Some(quote! {
+                        if !#seen_expr {
+                            let mut __field_guard = __guard.push_field(stringify!(#field_name));
+                            return Err(__field_guard.error(zebin::error::DecodeError::MissingField {
+                                field_id: #field_id,
+                                pos: __object_start,
+                            }));
+                        }
+                    })
+                }
+            },
+        );
         let construct_fields = record
             .active_fields()
             .zip(vars.iter())
@@ -279,22 +275,22 @@ fn record_decode_impl(
             impl<'a> zebin::Decode<'a> for #marker {
                 type View = #view<'a>;
                 #[cfg(feature = "alloc")]
-                type DecodeStrategy = zebin::BackwardSequenceStrategy;
+                type DecodeStrategy = zebin::io::BackwardSequenceStrategy;
 
-                fn decode<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::DecodeError>
+                fn decode<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::error::DecodeError>
                 where
-                    C: zebin::ValidationContext + ?Sized,
+                    C: zebin::validation::ValidationContext + ?Sized,
                 {
                     let mut __guard = context.guard()?;
                     let __object_start = cursor.pos();
-                    let __header = zebin::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
+                    let __header = zebin::schema::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
                     let __stable_schema_key = __header.stable_schema_key;
                     let __schema_revision = __header.schema_revision;
                     let __field_count = __header.field_count as usize;
 
                     #(#var_decls)*
 
-                    zebin::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
+                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
                         match __entry.field_id {
                             #(#field_arms,)*
                             _ => Ok(()),
@@ -312,19 +308,19 @@ fn record_decode_impl(
                     })
                 }
 
-                fn validate<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<(), zebin::DecodeError>
+                fn validate<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
                 where
-                    C: zebin::ValidationContext + ?Sized,
+                    C: zebin::validation::ValidationContext + ?Sized,
                 {
                     let mut __guard = context.guard()?;
                     let __object_start = cursor.pos();
-                    let __header = zebin::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
+                    let __header = zebin::schema::SchemaObjectHeader::decode_and_verify(cursor, &mut *__guard, #key)?;
                     let _schema_revision = __header.schema_revision;
                     let __field_count = __header.field_count as usize;
 
                     #seen_var_decls
 
-                    zebin::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
+                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
                         match __entry.field_id {
                             #(#validate_field_arms,)*
                             _ => Ok(()),
@@ -384,19 +380,19 @@ fn record_decode_impl(
             impl<'a> zebin::Decode<'a> for #marker {
                 type View = #view<'a>;
                 #[cfg(feature = "alloc")]
-                type DecodeStrategy = zebin::ForwardSequenceStrategy;
-                fn decode<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::DecodeError>
+                type DecodeStrategy = zebin::io::ForwardSequenceStrategy;
+                fn decode<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::error::DecodeError>
                 where
-                    C: zebin::ValidationContext + ?Sized,
+                    C: zebin::validation::ValidationContext + ?Sized,
                 {
                     let mut __guard = context.guard()?;
                     #(#decodes)*
                     Ok(#construct)
                 }
 
-                fn validate<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<(), zebin::DecodeError>
+                fn validate<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
                 where
-                    C: zebin::ValidationContext + ?Sized,
+                    C: zebin::validation::ValidationContext + ?Sized,
                 {
                     let mut __guard = context.guard()?;
                     #(#validates)*
@@ -440,7 +436,7 @@ fn restore_field_expr(
             let fallback = if let Some(default_value) = &field.default_value {
                 quote! { #default_value }
             } else {
-                quote! { <#ty as zebin::ArchivedDefault>::archived_default() }
+                quote! { <#ty as zebin::io::ArchivedDefault>::archived_default() }
             };
             quote! {
                 #source.#member.as_ref().unwrap_or(#fallback).restore()?
@@ -465,7 +461,7 @@ fn restore_field_expr(
             let field_id = field.field_id.expect("field ids validated");
             quote! {
                 #source.#member.as_ref()
-                    .ok_or(zebin::DecodeError::MissingField { field_id: #field_id, pos: #source.pos })?
+                    .ok_or(zebin::error::DecodeError::MissingField { field_id: #field_id, pos: #source.pos })?
                     .restore()?
             }
         }
@@ -498,7 +494,7 @@ fn record_restore_impl(
         RecordStyle::Unit => quote! { #name },
     };
     quote! {
-        impl<'a> zebin::Restore<#name> for #view<'a> {
+        impl<'a> zebin::io::Restore<#name> for #view<'a> {
             fn restore(&self) -> Result<#name, zebin::ZebinError> {
                 Ok(#constructor)
             }
@@ -689,15 +685,15 @@ fn enum_impl(
             #(#as_methods)*
         }
 
-        impl zebin::ArchivedLayout for #marker {}
+        impl zebin::io::ArchivedLayout for #marker {}
 
         impl<'a> zebin::Decode<'a> for #marker {
             type View = #view<'a>;
             #[cfg(feature = "alloc")]
-            type DecodeStrategy = zebin::ForwardSequenceStrategy;
-            fn decode<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::DecodeError>
+            type DecodeStrategy = zebin::io::ForwardSequenceStrategy;
+            fn decode<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::error::DecodeError>
             where
-                C: zebin::ValidationContext + ?Sized,
+                C: zebin::validation::ValidationContext + ?Sized,
             {
                 let mut __guard = context.guard()?;
                 let __tag_pos = cursor.pos();
@@ -708,9 +704,9 @@ fn enum_impl(
                 }
             }
 
-            fn validate<C>(cursor: &mut zebin::Cursor<'a>, context: &mut C) -> Result<(), zebin::DecodeError>
+            fn validate<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
             where
-                C: zebin::ValidationContext + ?Sized,
+                C: zebin::validation::ValidationContext + ?Sized,
             {
                 let mut __guard = context.guard()?;
                 let __tag_pos = cursor.pos();
@@ -726,7 +722,7 @@ fn enum_impl(
             type Archived = #marker;
         }
 
-        impl<'a> zebin::Restore<#name> for #view<'a> {
+        impl<'a> zebin::io::Restore<#name> for #view<'a> {
             fn restore(&self) -> Result<#name, zebin::ZebinError> {
                 match self {
                     #view::__ZebinMarker(_) => unreachable!("marker variant is never constructed"),

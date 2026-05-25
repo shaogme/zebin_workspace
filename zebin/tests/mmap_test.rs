@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use zebin::{
+use zebin::prelude::{
     ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, Encoder, Mmap,
     MmapEncoder, MmapMut, Storage, ZebinArchive, ZebinEncode, ZebinError,
 };

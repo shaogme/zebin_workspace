@@ -1,11 +1,7 @@
+#[cfg(feature = "alloc")]
+use crate::io::ForwardSequenceStrategy;
+use crate::prelude::*;
 use core::num::NonZeroUsize;
-
-use crate::{
-    error::{DecodeError, ZebinError},
-    read::Cursor,
-    traits::{Archive, ArchivedLayout, Decode, FixedLayout, Restore},
-    validation::context::ValidationContext,
-};
 
 impl<T, const N: usize> FixedLayout for [T; N]
 where
@@ -75,7 +71,7 @@ where
 {
     type View = [A::View; N];
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = crate::traits::ForwardSequenceStrategy;
+    type DecodeStrategy = ForwardSequenceStrategy;
 
     fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
     where
@@ -121,16 +117,16 @@ where
 
 pub struct ArrayEncoder<'a, T, const N: usize>
 where
-    T: crate::traits::Encode + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     items: &'a [T; N],
     index: usize,
-    current_encoder: Option<(<T as crate::traits::Encode>::Encoder<'a>, bool)>,
+    current_encoder: Option<(<T as Encode>::Encoder<'a>, bool)>,
 }
 
 impl<'a, T, const N: usize> ArrayEncoder<'a, T, N>
 where
-    T: crate::traits::Encode + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     pub(crate) fn new(items: &'a [T; N]) -> Self {
         Self {
@@ -141,13 +137,13 @@ where
     }
 }
 
-impl<'a, T, const N: usize> crate::traits::Encoder<'a> for ArrayEncoder<'a, T, N>
+impl<'a, T, const N: usize> Encoder<'a> for ArrayEncoder<'a, T, N>
 where
-    T: crate::traits::Encode + Archive + 'a,
+    T: Encode + Archive + 'a,
 {
     type Input = &'a [T; N];
 
-    fn input<Sink: crate::traits::ByteSink + ?Sized>(
+    fn input<Sink: ByteSink + ?Sized>(
         &mut self,
         _item: Self::Input,
         sink: &mut Sink,
@@ -155,7 +151,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: crate::traits::ByteSink + ?Sized>(
+    fn poll_pending<Sink: ByteSink + ?Sized>(
         &mut self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -192,7 +188,7 @@ where
         Ok(core::task::Poll::Ready(()))
     }
 
-    fn finish<Sink: crate::traits::ByteSink + ?Sized>(
+    fn finish<Sink: ByteSink + ?Sized>(
         self,
         _sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -200,9 +196,9 @@ where
     }
 }
 
-impl<T, const N: usize> crate::traits::Encode for [T; N]
+impl<T, const N: usize> Encode for [T; N]
 where
-    T: crate::traits::Encode + Archive,
+    T: Encode + Archive,
 {
     type Encoder<'a>
         = ArrayEncoder<'a, T, N>

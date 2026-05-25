@@ -1,7 +1,8 @@
 #![cfg(feature = "alloc")]
 
 use zebin::{
-    PackedBoolSlice, PackedBoolVec, PackedU8Slice, PackedU8Vec, ZebinArchive, ZebinEncode,
+    ZebinArchive, ZebinEncode,
+    archive::{PackedBoolSlice, PackedBoolVec, PackedU8Slice, PackedU8Vec},
 };
 
 #[derive(ZebinArchive, ZebinEncode)]

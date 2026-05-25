@@ -127,24 +127,24 @@ pub fn packed_info(field: &FieldSpec<'_>) -> Option<(PackedElementKind, u8)> {
 pub fn packed_wrapper_type(field: &FieldSpec<'_>) -> Option<TokenStream> {
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
-        PackedElementKind::Bool => quote! { zebin::PackedSlice<'a, bool, 1> },
-        PackedElementKind::U8 => quote! { zebin::PackedSlice<'a, u8, #bits> },
+        PackedElementKind::Bool => quote! { zebin::archive::PackedSlice<'a, bool, 1> },
+        PackedElementKind::U8 => quote! { zebin::archive::PackedSlice<'a, u8, #bits> },
     })
 }
 
 pub fn packed_wrapper_type_expr(field: &FieldSpec<'_>) -> Option<TokenStream> {
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
-        PackedElementKind::Bool => quote! { zebin::PackedSlice<'_, bool, 1> },
-        PackedElementKind::U8 => quote! { zebin::PackedSlice<'_, u8, #bits> },
+        PackedElementKind::Bool => quote! { zebin::archive::PackedSlice<'_, bool, 1> },
+        PackedElementKind::U8 => quote! { zebin::archive::PackedSlice<'_, u8, #bits> },
     })
 }
 
 pub fn packed_archived_type(field: &FieldSpec<'_>) -> Option<TokenStream> {
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
-        PackedElementKind::Bool => quote! { zebin::ArchivedPackedBoolSlice },
-        PackedElementKind::U8 => quote! { zebin::ArchivedPackedU8Slice<#bits> },
+        PackedElementKind::Bool => quote! { zebin::archive::ArchivedPackedBoolSlice },
+        PackedElementKind::U8 => quote! { zebin::archive::ArchivedPackedU8Slice<#bits> },
     })
 }
 
@@ -152,10 +152,10 @@ pub fn packed_begin_expr(field: &FieldSpec<'_>, value: TokenStream) -> Option<To
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
         PackedElementKind::Bool => quote! {
-            zebin::PackedSequenceEncoder::new_bool(#value.as_ref())
+            zebin::archive::PackedSequenceEncoder::new_bool(#value.as_ref())
         },
         PackedElementKind::U8 => quote! {
-            zebin::PackedSequenceEncoder::new_u8(#value.as_ref(), #bits)
+            zebin::archive::PackedSequenceEncoder::new_u8(#value.as_ref(), #bits)
         },
     })
 }

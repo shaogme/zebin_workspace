@@ -1,10 +1,9 @@
 use core::num::NonZeroUsize;
 
 #[cfg(feature = "mmap")]
-use crate::io::storage::mmap::MmapMut;
+use crate::io::MmapMut;
 use crate::{
-    ZebinError,
-    traits::{ByteSink, SinkProgress},
+    prelude::*,
     utils::{byteops, padding_for_alignment},
 };
 
