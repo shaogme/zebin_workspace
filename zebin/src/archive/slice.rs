@@ -1,7 +1,6 @@
 use core::num::NonZeroUsize;
 
 use crate::{
-    core::schema::FieldEncoding,
     error::{DecodeError, ZebinError},
     read::Cursor,
     traits::{Archive, ArchivedLayout, Decode, FixedLayout, Restore},
@@ -98,7 +97,6 @@ where
         None => None,
     };
     const ALIGNMENT: NonZeroUsize = A::ALIGNMENT;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
 }
 
 impl<'a, A, const N: usize> Decode<'a> for [A; N]

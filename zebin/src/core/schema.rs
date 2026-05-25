@@ -41,7 +41,6 @@ pub enum FieldEncoding {
     PackedBits = 2,
     LengthPrefixed = 3,
     SchemaAware = 4,
-    Sequence = 5,
 }
 
 impl FieldEncoding {
@@ -52,7 +51,6 @@ impl FieldEncoding {
             2 => Some(Self::PackedBits),
             3 => Some(Self::LengthPrefixed),
             4 => Some(Self::SchemaAware),
-            5 => Some(Self::Sequence),
             _ => None,
         }
     }
@@ -285,3 +283,70 @@ where
     *cursor = reader.cursor;
     Ok(())
 }
+
+/// Helper for processing schema-aware objects with trailing field tables.
+pub fn process_trailing_field_table<'a, C, F>(
+    cursor: &mut Cursor<'a>,
+    field_count: usize,
+    context: &mut C,
+    mut handler: F,
+) -> Result<(), DecodeError>
+where
+    C: ValidationContext + ?Sized,
+    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), DecodeError>,
+{
+    let object_start = cursor.pos() - 12;
+    let object_end = cursor.bytes().len();
+
+    if object_end < object_start + 20 {
+        return Err(context.validation_error("Object too short to contain trailing table metadata", cursor.pos()));
+    }
+
+    let offset_pos = object_end - 8;
+    let mut offset_cursor = cursor.with_pos(offset_pos);
+    let table_offset = offset_cursor.read_u32(context)? as usize;
+    let _object_len = offset_cursor.read_u32(context)? as usize;
+
+    let table_abs_pos = object_start + table_offset;
+    if table_abs_pos < object_start + 12 || table_abs_pos > offset_pos {
+        return Err(context.validation_error("Invalid table offset", offset_pos));
+    }
+
+    let table_len = field_count * FieldEntry::SIZE;
+    if table_abs_pos + table_len > offset_pos {
+        return Err(context.validation_error("Field table exceeds object boundary", table_abs_pos));
+    }
+
+    if field_count > MAX_SCHEMA_FIELDS {
+        return Err(context.validation_error("Field count exceeds maximum schema fields", object_start));
+    }
+
+    let mut entries = [FieldEntry::EMPTY; MAX_SCHEMA_FIELDS];
+    let mut entry_positions = [0usize; MAX_SCHEMA_FIELDS];
+
+    let mut table_cursor = cursor.with_pos(table_abs_pos);
+    for i in 0..field_count {
+        entry_positions[i] = table_cursor.pos();
+        entries[i] = FieldEntry::decode(&mut table_cursor, context)?;
+    }
+
+    let mut payload_pos = object_start + 12;
+    for i in 0..field_count {
+        let entry = entries[i];
+        let entry_pos = entry_positions[i];
+        let payload_len = entry.payload_len as usize;
+        if payload_pos + payload_len > table_abs_pos {
+            return Err(context.validation_error("Field payload exceeds field table boundary", payload_pos));
+        }
+
+        let payload = &cursor.bytes()[payload_pos..payload_pos + payload_len];
+
+        handler(entry, entry_pos, payload, context)?;
+
+        payload_pos += payload_len;
+    }
+
+    *cursor = cursor.with_pos(object_end);
+    Ok(())
+}
+

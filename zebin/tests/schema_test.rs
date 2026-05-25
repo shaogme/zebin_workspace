@@ -31,20 +31,35 @@ fn test_vtable_generation() {
     let num_fields = u16::from_le_bytes(buf[object_pos + 8..object_pos + 10].try_into().unwrap());
     assert_eq!(num_fields, 3);
 
-    let table_pos = object_pos + 12;
+    // Read the trailing metadata from the end of the buffer
+    let trailer_pos = buf.len() - 8;
+    let table_offset = u32::from_le_bytes(buf[trailer_pos..trailer_pos + 4].try_into().unwrap()) as usize;
+    let object_len = u32::from_le_bytes(buf[trailer_pos + 4..trailer_pos + 8].try_into().unwrap()) as usize;
+
+    assert_eq!(object_len, buf.len() - object_pos);
+
+    // Locate the field table
+    let table_pos = object_pos + table_offset;
+    
     let field0_id = u16::from_le_bytes(buf[table_pos..table_pos + 2].try_into().unwrap());
     let field0_len = u32::from_le_bytes(buf[table_pos + 4..table_pos + 8].try_into().unwrap()) as usize;
 
-    let field1_pos = table_pos + 8 + field0_len;
+    let field1_pos = table_pos + 8;
     let field1_id = u16::from_le_bytes(buf[field1_pos..field1_pos + 2].try_into().unwrap());
     let field1_len = u32::from_le_bytes(buf[field1_pos + 4..field1_pos + 8].try_into().unwrap()) as usize;
 
-    let field2_pos = field1_pos + 8 + field1_len;
+    let field2_pos = field1_pos + 8;
     let field2_id = u16::from_le_bytes(buf[field2_pos..field2_pos + 2].try_into().unwrap());
+    let field2_len = u32::from_le_bytes(buf[field2_pos + 4..field2_pos + 8].try_into().unwrap()) as usize;
 
     assert_eq!(field0_id, 0);
+    assert_eq!(field0_len, 7); // String "Bob" (4 bytes len + 3 bytes chars)
+
     assert_eq!(field1_id, 1);
+    assert_eq!(field1_len, 8); // u64 id (8 bytes)
+
     assert_eq!(field2_id, 2);
+    assert_eq!(field2_len, 4); // u32 age (4 bytes)
 }
 
 #[test]

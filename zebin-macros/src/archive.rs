@@ -292,7 +292,7 @@ fn record_decode_impl(
 
                     #(#var_decls)*
 
-                    zebin::process_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
+                    zebin::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
                         match __entry.field_id {
                             #(#field_arms,)*
                             _ => Ok(()),
@@ -322,7 +322,7 @@ fn record_decode_impl(
 
                     #seen_var_decls
 
-                    zebin::process_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
+                    zebin::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
                         match __entry.field_id {
                             #(#validate_field_arms,)*
                             _ => Ok(()),

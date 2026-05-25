@@ -12,6 +12,10 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut fields = Vec::new();
     if has_schema(record) {
         fields.push(quote! { pub __zebin_header_cursor: usize });
+        fields.push(quote! { pub __zebin_object_start: usize });
+        fields.push(quote! { pub __zebin_table_start: usize });
+        fields.push(quote! { pub __zebin_table_offset_cursor: usize });
+        fields.push(quote! { pub __zebin_object_len_cursor: usize });
     }
     for (index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
@@ -72,6 +76,10 @@ fn state_init_from_values(
     let mut inits = Vec::new();
     if has_schema(record) {
         inits.push(quote! { __zebin_header_cursor: 0 });
+        inits.push(quote! { __zebin_object_start: 0 });
+        inits.push(quote! { __zebin_table_start: 0 });
+        inits.push(quote! { __zebin_table_offset_cursor: 0 });
+        inits.push(quote! { __zebin_object_len_cursor: 0 });
     }
     for (index, value) in values {
         let state_ident = &record.fields[*index].state_ident;
@@ -114,6 +122,9 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
         let field_count = fields.len();
 
         let header_write = quote! {
+            if self.__zebin_header_cursor == 0 {
+                self.__zebin_object_start = encoder.pos();
+            }
             if self.__zebin_header_cursor < 12 {
                 let mut __zebin_header = [0u8; 12];
                 __zebin_header[0..4].copy_from_slice(&(#stable_schema_key as u32).to_le_bytes());
@@ -130,8 +141,17 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
             }
         };
 
-        let polls = fields.iter().map(|(index, field)| {
+        let payload_polls = fields.iter().map(|(index, _field)| {
             let state_ident = &record.fields[*index].state_ident;
+            quote! {
+                match self.#state_ident.poll_pending(encoder)? {
+                    ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
+                    ::core::task::Poll::Ready(()) => {}
+                }
+            }
+        });
+
+        let table_polls = fields.iter().map(|(index, field)| {
             let len_ident = field_len_ident(record, *index);
             let entry_cursor_ident = format_ident!("__field_entry_cursor_{}", *index);
             let field_id = field.field_id.expect("field ids validated");
@@ -153,16 +173,38 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
                         return Ok(::core::task::Poll::Pending);
                     }
                 }
-                match self.#state_ident.poll_pending(encoder)? {
-                    ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
-                    ::core::task::Poll::Ready(()) => {}
-                }
             }
         });
 
         quote! {
             #header_write
-            #(#polls)*
+            #(#payload_polls)*
+            if self.__zebin_table_start == 0 {
+                self.__zebin_table_start = encoder.pos();
+            }
+            #(#table_polls)*
+            if self.__zebin_table_offset_cursor < 4 {
+                let __offset_val = (self.__zebin_table_start - self.__zebin_object_start) as u32;
+                let __offset_bytes = __offset_val.to_le_bytes();
+                let __zebin_remaining = 4 - self.__zebin_table_offset_cursor;
+                if encoder.write(&__offset_bytes[self.__zebin_table_offset_cursor..])?
+                    .advance_cursor(&mut self.__zebin_table_offset_cursor, __zebin_remaining)
+                    .is_pending()
+                {
+                    return Ok(::core::task::Poll::Pending);
+                }
+            }
+            if self.__zebin_object_len_cursor < 4 {
+                let __total_len = (encoder.pos() - self.__zebin_object_start + 4 - self.__zebin_object_len_cursor) as u32;
+                let __len_bytes = __total_len.to_le_bytes();
+                let __zebin_remaining = 4 - self.__zebin_object_len_cursor;
+                if encoder.write(&__len_bytes[self.__zebin_object_len_cursor..])?
+                    .advance_cursor(&mut self.__zebin_object_len_cursor, __zebin_remaining)
+                    .is_pending()
+                {
+                    return Ok(::core::task::Poll::Pending);
+                }
+            }
             Ok(::core::task::Poll::Ready(()))
         }
     } else {

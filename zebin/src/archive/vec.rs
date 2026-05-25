@@ -81,7 +81,6 @@ where
     A: ArchivedLayout,
 {
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
-    const FIELD_ENCODING: FieldEncoding = FieldEncoding::Sequence;
 }
 
 impl<'marker, 'a, A> Decode<'a> for ArchivedVec<'marker, A>
@@ -103,6 +102,40 @@ where
                 let mut guard = context.push_index(index);
                 items.push(A::decode(cursor, &mut *guard)?);
             }
+        } else if <A as ArchivedLayout>::FIELD_ENCODING == FieldEncoding::SchemaAware {
+            let start_pos = cursor.pos();
+            let total_bytes = cursor.bytes();
+            let elements_start = start_pos;
+            let elements_end = total_bytes.len();
+
+            let mut current_end = elements_end;
+            let mut temp_items = Vec::with_capacity(len);
+
+            for index in (0..len).rev() {
+                if current_end < elements_start + 8 {
+                    return Err(context.validation_error("Sequence element truncated", current_end));
+                }
+
+                let len_pos = current_end - 4;
+                let object_len = u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
+
+                if object_len < 20 || current_end - object_len < elements_start {
+                    return Err(context.validation_error("Invalid object length in sequence", len_pos));
+                }
+
+                let element_start = current_end - object_len;
+                let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
+                let mut guard = context.push_index(index);
+
+                let view = A::decode(&mut element_cursor, &mut *guard)?;
+                temp_items.push(view);
+
+                current_end = element_start;
+            }
+
+            temp_items.reverse();
+            items = temp_items;
+            *cursor = cursor.with_pos(elements_end);
         } else {
             for index in 0..len {
                 let mut guard = context.push_index(index);
@@ -123,9 +156,39 @@ where
             cursor.align(A::ALIGNMENT, context)?;
         }
 
-        for index in 0..len {
-            let mut guard = context.push_index(index);
-            A::validate(cursor, &mut *guard)?;
+        if A::FIXED_SIZE.is_none() && <A as ArchivedLayout>::FIELD_ENCODING == FieldEncoding::SchemaAware {
+            let start_pos = cursor.pos();
+            let total_bytes = cursor.bytes();
+            let elements_start = start_pos;
+            let elements_end = total_bytes.len();
+
+            let mut current_end = elements_end;
+            for index in (0..len).rev() {
+                if current_end < elements_start + 8 {
+                    return Err(context.validation_error("Sequence element truncated", current_end));
+                }
+
+                let len_pos = current_end - 4;
+                let object_len = u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
+
+                if object_len < 20 || current_end - object_len < elements_start {
+                    return Err(context.validation_error("Invalid object length in sequence", len_pos));
+                }
+
+                let element_start = current_end - object_len;
+                let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
+                let mut guard = context.push_index(index);
+
+                A::validate(&mut element_cursor, &mut *guard)?;
+
+                current_end = element_start;
+            }
+            *cursor = cursor.with_pos(elements_end);
+        } else {
+            for index in 0..len {
+                let mut guard = context.push_index(index);
+                A::validate(cursor, &mut *guard)?;
+            }
         }
 
         Ok(())
