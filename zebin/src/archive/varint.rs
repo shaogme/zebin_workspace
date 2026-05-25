@@ -1,5 +1,6 @@
 use core::{marker::PhantomData, ops::Deref, task::Poll};
 
+#[cfg(feature = "alloc")]
 use crate::io::ForwardSequenceStrategy;
 use crate::prelude::*;
 
