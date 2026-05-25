@@ -130,7 +130,8 @@ fn test_enum_layout_mismatch_rejected() {
     let mut buf = zebin::encode(&value).unwrap();
 
     let object_pos = 4 + 4;
-    let label_encoding_pos = object_pos + 12 + 8 + 2;
+    let label_encoding_pos = object_pos + 12 + 8 + 4 + 2;
+
     buf[label_encoding_pos] = zebin::FieldEncoding::Fixed as u8;
 
     let err = zebin::validate::<StructPacket>(&buf).unwrap_err();

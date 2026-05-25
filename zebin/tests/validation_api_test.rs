@@ -133,7 +133,8 @@ fn test_validate_detailed_reports_duplicate_schema_field_path() {
 
     let mut buf = zebin::encode(&value).unwrap();
     let object_pos = 4;
-    let second_entry_id_pos = object_pos + 12 + zebin::FieldEntry::SIZE;
+    // Account for 1-byte payload of the first field (flag: bool)
+    let second_entry_id_pos = object_pos + 12 + zebin::FieldEntry::SIZE + 1;
     buf[second_entry_id_pos..second_entry_id_pos + 2].copy_from_slice(&1u16.to_le_bytes());
     let second_entry_encoding_pos = second_entry_id_pos + 2;
     buf[second_entry_encoding_pos] = zebin::FieldEncoding::Fixed as u8;

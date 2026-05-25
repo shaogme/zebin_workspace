@@ -221,8 +221,7 @@ pub struct NextField<'a> {
 
 /// Helper for iterating over schema-aware object field tables and their payloads.
 pub struct FieldTableReader<'a> {
-    table_cursor: Cursor<'a>,
-    pub payload_cursor: Cursor<'a>,
+    pub cursor: Cursor<'a>,
     remaining: usize,
 }
 
@@ -230,20 +229,13 @@ impl<'a> FieldTableReader<'a> {
     pub fn new<C>(
         cursor: &mut Cursor<'a>,
         field_count: usize,
-        context: &mut C,
+        _context: &mut C,
     ) -> Result<Self, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        let table_cursor = *cursor;
-        let table_len = field_count
-            .checked_mul(FieldEntry::SIZE)
-            .ok_or_else(|| DecodeError::InvalidFieldTable { pos: cursor.pos() })?;
-        cursor.advance(table_len, context)?;
-        let payload_cursor = *cursor;
         Ok(Self {
-            table_cursor,
-            payload_cursor,
+            cursor: *cursor,
             remaining: field_count,
         })
     }
@@ -255,10 +247,10 @@ impl<'a> FieldTableReader<'a> {
         if self.remaining == 0 {
             return Ok(None);
         }
-        let entry_pos = self.table_cursor.pos();
-        let entry = FieldEntry::decode(&mut self.table_cursor, context)?;
+        let entry_pos = self.cursor.pos();
+        let entry = FieldEntry::decode(&mut self.cursor, context)?;
         let payload = self
-            .payload_cursor
+            .cursor
             .read_exact(entry.payload_len as usize, context)?;
         self.remaining -= 1;
         Ok(Some(NextField {
@@ -290,6 +282,6 @@ where
     {
         handler(entry, entry_pos, payload, context)?;
     }
-    *cursor = reader.payload_cursor;
+    *cursor = reader.cursor;
     Ok(())
 }

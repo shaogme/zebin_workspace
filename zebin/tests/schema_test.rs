@@ -33,8 +33,14 @@ fn test_vtable_generation() {
 
     let table_pos = object_pos + 12;
     let field0_id = u16::from_le_bytes(buf[table_pos..table_pos + 2].try_into().unwrap());
-    let field1_id = u16::from_le_bytes(buf[table_pos + 8..table_pos + 10].try_into().unwrap());
-    let field2_id = u16::from_le_bytes(buf[table_pos + 16..table_pos + 18].try_into().unwrap());
+    let field0_len = u32::from_le_bytes(buf[table_pos + 4..table_pos + 8].try_into().unwrap()) as usize;
+
+    let field1_pos = table_pos + 8 + field0_len;
+    let field1_id = u16::from_le_bytes(buf[field1_pos..field1_pos + 2].try_into().unwrap());
+    let field1_len = u32::from_le_bytes(buf[field1_pos + 4..field1_pos + 8].try_into().unwrap()) as usize;
+
+    let field2_pos = field1_pos + 8 + field1_len;
+    let field2_id = u16::from_le_bytes(buf[field2_pos..field2_pos + 2].try_into().unwrap());
 
     assert_eq!(field0_id, 0);
     assert_eq!(field1_id, 1);

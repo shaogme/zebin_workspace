@@ -20,6 +20,8 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
         if has_schema(record) {
             let len_ident = field_len_ident(record, index);
             fields.push(quote! { pub #len_ident: u32 });
+            let entry_cursor_ident = format_ident!("__field_entry_cursor_{}", index);
+            fields.push(quote! { pub #entry_cursor_ident: usize });
         }
     }
     fields
@@ -87,6 +89,8 @@ fn state_init_from_values(
                     })?
                 }
             });
+            let entry_cursor_ident = format_ident!("__field_entry_cursor_{}", *index);
+            inits.push(quote! { #entry_cursor_ident: 0 });
         }
     }
     inits
@@ -100,77 +104,81 @@ fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     state_init_from_values(record, &values)
 }
 
-fn schema_header_poll(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    if !has_schema(record) {
-        return quote! {};
-    }
+fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
+    if has_schema(record) {
+        let stable_schema_key = record
+            .stable_schema_key
+            .expect("schema-bearing records require key");
+        let schema_revision = record.schema_revision;
+        let fields = active_fields_by_id(record);
+        let field_count = fields.len();
 
-    let stable_schema_key = record
-        .stable_schema_key
-        .expect("schema-bearing records require key");
-    let schema_revision = record.schema_revision;
-    let fields = active_fields_by_id(record);
-    let field_count = fields.len();
-    let header_len = quote! { 12 + #field_count * zebin::FieldEntry::SIZE };
-    let entries = fields
-        .iter()
-        .enumerate()
-        .map(|(entry_index, (index, field))| {
+        let header_write = quote! {
+            if self.__zebin_header_cursor < 12 {
+                let mut __zebin_header = [0u8; 12];
+                __zebin_header[0..4].copy_from_slice(&(#stable_schema_key as u32).to_le_bytes());
+                __zebin_header[4..8].copy_from_slice(&(#schema_revision as u32).to_le_bytes());
+                __zebin_header[8..10].copy_from_slice(&(#field_count as u16).to_le_bytes());
+                __zebin_header[10..12].copy_from_slice(&0u16.to_le_bytes());
+                let __zebin_remaining = 12 - self.__zebin_header_cursor;
+                if encoder.write(&__zebin_header[self.__zebin_header_cursor..])?
+                    .advance_cursor(&mut self.__zebin_header_cursor, __zebin_remaining)
+                    .is_pending()
+                {
+                    return Ok(::core::task::Poll::Pending);
+                }
+            }
+        };
+
+        let polls = fields.iter().map(|(index, field)| {
+            let state_ident = &record.fields[*index].state_ident;
+            let len_ident = field_len_ident(record, *index);
+            let entry_cursor_ident = format_ident!("__field_entry_cursor_{}", *index);
             let field_id = field.field_id.expect("field ids validated");
             let encoding = field_encoding(field);
-            let len_ident = field_len_ident(record, *index);
-            let start = quote! { 12 + #entry_index * zebin::FieldEntry::SIZE };
+
             quote! {
-                __zebin_header[#start..#start + zebin::FieldEntry::SIZE].copy_from_slice(
-                    &zebin::FieldEntry {
+                if self.#entry_cursor_ident < zebin::FieldEntry::SIZE {
+                    let __field_entry_bytes = zebin::FieldEntry {
                         field_id: #field_id as u16,
                         encoding: #encoding,
                         payload_len: self.#len_ident,
                     }
-                    .to_bytes()
-                );
+                    .to_bytes();
+                    let __zebin_remaining = zebin::FieldEntry::SIZE - self.#entry_cursor_ident;
+                    if encoder.write(&__field_entry_bytes[self.#entry_cursor_ident..])?
+                        .advance_cursor(&mut self.#entry_cursor_ident, __zebin_remaining)
+                        .is_pending()
+                    {
+                        return Ok(::core::task::Poll::Pending);
+                    }
+                }
+                match self.#state_ident.poll_pending(encoder)? {
+                    ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
+                    ::core::task::Poll::Ready(()) => {}
+                }
             }
         });
 
-    quote! {
-        if self.__zebin_header_cursor < #header_len {
-            let mut __zebin_header = [0u8; #header_len];
-            __zebin_header[0..4].copy_from_slice(&(#stable_schema_key as u32).to_le_bytes());
-            __zebin_header[4..8].copy_from_slice(&(#schema_revision as u32).to_le_bytes());
-            __zebin_header[8..10].copy_from_slice(&(#field_count as u16).to_le_bytes());
-            __zebin_header[10..12].copy_from_slice(&0u16.to_le_bytes());
-            #(#entries)*
-            let __zebin_remaining = #header_len - self.__zebin_header_cursor;
-            if encoder.write(&__zebin_header[self.__zebin_header_cursor..])?
-                .advance_cursor(&mut self.__zebin_header_cursor, __zebin_remaining)
-                .is_pending()
-            {
-                return Ok(::core::task::Poll::Pending);
-            }
-        }
-    }
-}
-
-fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
-    let header = schema_header_poll(record);
-    let fields: Vec<_> = if has_schema(record) {
-        active_fields_by_id(record)
-    } else {
-        record.active_fields().collect()
-    };
-    let polls = fields.iter().map(|(index, _)| {
-        let state_ident = &record.fields[*index].state_ident;
         quote! {
-            match self.#state_ident.poll_pending(encoder)? {
-                ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
-                ::core::task::Poll::Ready(()) => {}
-            }
+            #header_write
+            #(#polls)*
+            Ok(::core::task::Poll::Ready(()))
         }
-    });
-    quote! {
-        #header
-        #(#polls)*
-        Ok(::core::task::Poll::Ready(()))
+    } else {
+        let polls = record.active_fields().map(|(index, _)| {
+            let state_ident = &record.fields[index].state_ident;
+            quote! {
+                match self.#state_ident.poll_pending(encoder)? {
+                    ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
+                    ::core::task::Poll::Ready(()) => {}
+                }
+            }
+        });
+        quote! {
+            #(#polls)*
+            Ok(::core::task::Poll::Ready(()))
+        }
     }
 }
 
