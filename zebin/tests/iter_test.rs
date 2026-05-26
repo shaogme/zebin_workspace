@@ -95,7 +95,7 @@ fn test_chunked_index_random_access() {
 
     // Verify every element through random access.
     for i in 0..200 {
-        let val = archived.get(i).expect(&format!("get({i})"));
+        let val = archived.get(i).unwrap_or_else(|_| panic!("get({i})"));
         assert_eq!(val, i as u64, "mismatch at index {i}");
     }
 
