@@ -41,7 +41,7 @@ where
     S: StorageMut,
     H: ArchiveHeaderTrait,
 {
-    sink: S,
+    storage_mut: S,
     value: Option<<T as Encode>::Input<'a>>,
     phase: EncodePhase<'a, T, H>,
 }
@@ -53,10 +53,10 @@ where
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {
-    pub fn new(sink: S) -> Result<Self, ZebinError> {
+    pub fn new(storage_mut: S) -> Result<Self, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         Ok(Self {
-            sink,
+            storage_mut,
             value: None,
             phase: EncodePhase::Header {
                 bytes: header.encode(),
@@ -76,7 +76,7 @@ where
     }
 
     pub fn written(&self) -> usize {
-        self.sink.pos()
+        self.storage_mut.pos()
     }
 
     pub fn is_finished(&self) -> bool {
@@ -84,7 +84,7 @@ where
     }
 
     fn drive(&mut self) -> Result<usize, ZebinError> {
-        let start_pos = self.sink.pos();
+        let start_pos = self.storage_mut.pos();
         loop {
             match &mut self.phase {
                 EncodePhase::Header {
@@ -94,7 +94,7 @@ where
                 } => {
                     let remaining = bytes.as_ref().len() - *cursor;
                     if self
-                        .sink
+                        .storage_mut
                         .write(&bytes.as_ref()[*cursor..])?
                         .advance_cursor(cursor, remaining)
                         .is_pending()
@@ -102,7 +102,7 @@ where
                         break;
                     }
                     let encoder = next_encoder.take().ok_or(ZebinError::SerializationError {
-                        pos: self.sink.pos(),
+                        pos: self.storage_mut.pos(),
                         message: "archive writer state machine error: body encoder missing",
                     })?;
                     self.phase = EncodePhase::Body {
@@ -113,10 +113,10 @@ where
                 EncodePhase::Body { encoder, started } => {
                     if !*started {
                         let value = self.value.take().ok_or(ZebinError::SerializationError {
-                            pos: self.sink.pos(),
+                            pos: self.storage_mut.pos(),
                             message: "archive writer used after value taken",
                         })?;
-                        match encoder.input(value, &mut self.sink)? {
+                        match encoder.input(value, &mut self.storage_mut)? {
                             core::task::Poll::Pending => {
                                 *started = true;
                                 break;
@@ -126,7 +126,7 @@ where
                             }
                         }
                     } else {
-                        match encoder.poll_pending(&mut self.sink)? {
+                        match encoder.poll_pending(&mut self.storage_mut)? {
                             core::task::Poll::Pending => break,
                             core::task::Poll::Ready(()) => {}
                         }
@@ -138,7 +138,7 @@ where
                             _phantom: PhantomData,
                         },
                     ) {
-                        match encoder.finish(&mut self.sink)? {
+                        match encoder.finish(&mut self.storage_mut)? {
                             core::task::Poll::Pending => {
                                 break;
                             }
@@ -153,7 +153,7 @@ where
                 EncodePhase::Done { .. } => break,
             }
         }
-        Ok(self.sink.pos().saturating_sub(start_pos))
+        Ok(self.storage_mut.pos().saturating_sub(start_pos))
     }
 
     pub fn write(&mut self, value: <T as Encode>::Input<'a>) -> Result<usize, ZebinError> {
@@ -173,11 +173,11 @@ where
             self.value = Some(value);
         }
 
-        let start_pos = self.sink.pos();
+        let start_pos = self.storage_mut.pos();
         while !self.is_finished() {
-            let before = self.sink.pos();
+            let before = self.storage_mut.pos();
             let _ = self.drive()?;
-            let after = self.sink.pos();
+            let after = self.storage_mut.pos();
             if before == after && !self.is_finished() {
                 return Err(ZebinError::BufferTooSmall {
                     pos: after,
@@ -185,7 +185,7 @@ where
                 });
             }
         }
-        Ok(self.sink.pos().saturating_sub(start_pos))
+        Ok(self.storage_mut.pos().saturating_sub(start_pos))
     }
 }
 
