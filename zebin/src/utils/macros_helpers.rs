@@ -132,6 +132,14 @@ impl<E: Encoder> FieldState<E> {
         }
         Ok(core::task::Poll::Ready(()))
     }
+
+    #[inline]
+    pub fn finish<S: ByteSink + ?Sized>(
+        self,
+        sink: &mut S,
+    ) -> Result<core::task::Poll<()>, ZebinError> {
+        self.encoder.finish(sink)
+    }
 }
 
 impl<E: Encoder + Default> Default for FieldState<E> {
@@ -205,6 +213,22 @@ impl<E: Encoder> SchemaFieldState<E> {
     ) -> Result<core::task::Poll<()>, ZebinError> {
         self.entry_encoder
             .poll_write(sink, field_id, encoding, self.len)
+    }
+
+    #[inline]
+    pub fn poll_write<S: ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<core::task::Poll<()>, ZebinError> {
+        self.state.poll_write(sink)
+    }
+
+    #[inline]
+    pub fn finish<S: ByteSink + ?Sized>(
+        self,
+        sink: &mut S,
+    ) -> Result<core::task::Poll<()>, ZebinError> {
+        self.state.encoder.finish(sink)
     }
 }
 

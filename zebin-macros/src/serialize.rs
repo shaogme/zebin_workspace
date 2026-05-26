@@ -158,17 +158,9 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
 
     let payload_polls = fields.iter().map(|(_, field)| {
         let state_ident = &field.state_ident;
-        if has_schema(record) {
-            quote! {
-                if self.#state_ident.state.poll_write(encoder)?.is_pending() {
-                    return Ok(::core::task::Poll::Pending);
-                }
-            }
-        } else {
-            quote! {
-                if self.#state_ident.poll_write(encoder)?.is_pending() {
-                    return Ok(::core::task::Poll::Pending);
-                }
+        quote! {
+            if self.#state_ident.poll_write(encoder)?.is_pending() {
+                return Ok(::core::task::Poll::Pending);
             }
         }
     });
@@ -265,14 +257,8 @@ fn record_state_input_impl(
 
     let finishes = record.active_fields().map(|(_, field)| {
         let state_ident = &field.state_ident;
-        if has_schema(record) {
-            quote! {
-                let _ = self.#state_ident.state.encoder.finish(sink)?;
-            }
-        } else {
-            quote! {
-                let _ = self.#state_ident.encoder.finish(sink)?;
-            }
+        quote! {
+            let _ = self.#state_ident.finish(sink)?;
         }
     });
     quote! {
