@@ -79,3 +79,29 @@ fn test_basic_no_alloc() {
     let archived = zebin::reader::<SimpleUser>(&buf[..written]).unwrap();
     assert_eq!(archived.id, 42);
 }
+
+#[test]
+fn test_iter_archive_no_alloc() {
+    use zebin::archive::IterArchive;
+    let arr = [10u64, 20u64, 30u64];
+    let wrapped = IterArchive::new(arr);
+    let mut buf = [0u8; 128];
+    let mut writer = zebin::encode_chunked(wrapped).unwrap();
+    let mut written = 0;
+    while !writer.is_finished() {
+        let n = writer.write(&mut buf[written..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        written += n;
+    }
+    let reader = zebin::reader::<IterArchive<[u64; 3], u64>>(&buf[..written]).unwrap();
+    let archived_iter = reader.root();
+    assert_eq!(archived_iter.len(), 3);
+    let mut iter = archived_iter.iter();
+    assert_eq!(iter.next().unwrap().unwrap(), 10);
+    assert_eq!(iter.next().unwrap().unwrap(), 20);
+    assert_eq!(iter.next().unwrap().unwrap(), 30);
+    assert!(iter.next().is_none());
+}
+

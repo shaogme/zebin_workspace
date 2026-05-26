@@ -18,7 +18,6 @@ mod restore;
 pub use decode::ArchivedIter;
 #[cfg(feature = "alloc")]
 pub(crate) use decode::skip_block_index;
-#[cfg(feature = "alloc")]
 pub(crate) use encode::OwnedIterEncoder;
 pub use encode::{IterEncoder, SeqEncoder, measure_block_index_overhead};
 
@@ -100,7 +99,6 @@ where
     type Archived = ArchivedIter<'static, T::Archived>;
 }
 
-#[cfg(feature = "alloc")]
 impl<I, T> Encode for IterArchive<I, T>
 where
     I: IntoIterator<Item = T>,
@@ -122,7 +120,14 @@ where
     where
         Self: 'a,
     {
-        OwnedIterEncoder::new_indexed()
+        #[cfg(feature = "alloc")]
+        {
+            OwnedIterEncoder::new_indexed()
+        }
+        #[cfg(not(feature = "alloc"))]
+        {
+            OwnedIterEncoder::new()
+        }
     }
 }
 
