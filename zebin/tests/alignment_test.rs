@@ -25,7 +25,8 @@ fn test_aligned_containers_round_trip() {
     };
 
     let buf = zebin::encode(value.clone()).unwrap();
-    let archived = reader::<AlignedContainers>(&buf).unwrap();
+    let mut reader_obj = reader::<AlignedContainers>(&buf).unwrap();
+    let archived = reader_obj.read().unwrap();
 
     assert_eq!(unsafe { archived.values.as_slice() }, &[11, 22, 33, 44]);
     assert_eq!(archived.fixed, [55, 66, 77]);
@@ -97,7 +98,8 @@ fn test_aligned_containers_chunked_writer_matches_full_encode() {
     }
 
     assert_eq!(sink.buf, expected);
-    reader::<AlignedContainers>(&sink.buf).unwrap();
+    let mut reader_obj = reader::<AlignedContainers>(&sink.buf).unwrap();
+    let _ = reader_obj.read().unwrap();
 }
 
 #[cfg(feature = "alloc")]
@@ -106,7 +108,8 @@ fn test_root_vec_u64_round_trip() {
     let value = vec![7u64, 14, 21, 28];
 
     let buf = zebin::encode(value.clone()).unwrap();
-    let archived = reader::<Vec<u64>>(&buf).unwrap();
+    let mut reader_obj = reader::<Vec<u64>>(&buf).unwrap();
+    let archived = reader_obj.read().unwrap();
 
     assert_eq!(unsafe { archived.as_slice() }, &[7, 14, 21, 28]);
 }
@@ -121,7 +124,8 @@ fn test_root_array_u64_round_trip() {
     writer_obj.write_all(value).unwrap();
     let written = encoder.written();
 
-    let archived = reader::<[u64; 3]>(&buf[..written]).unwrap();
+    let mut reader_obj = reader::<[u64; 3]>(&buf[..written]).unwrap();
+    let archived = reader_obj.read().unwrap();
 
-    assert_eq!(archived.root(), &[8, 16, 32]);
+    assert_eq!(archived, &[8, 16, 32]);
 }

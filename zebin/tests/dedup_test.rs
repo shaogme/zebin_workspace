@@ -23,8 +23,8 @@ fn test_vtable_deduplication() {
 
     assert_eq!(&buf[0..2], b"ZB");
 
-    let reader = zebin::reader::<Parent>(&buf).unwrap();
-    let archived = reader.root();
+    let mut reader = zebin::reader::<Parent>(&buf).unwrap();
+    let archived = reader.read().unwrap();
     for child_raw in unsafe { archived.children.as_slice() }.iter() {
         assert!(child_raw.value().is_ok());
     }

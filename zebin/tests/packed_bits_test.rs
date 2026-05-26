@@ -44,7 +44,8 @@ fn test_packed_bool_slice_round_trip() {
 
     assert!(packed_buf.len() < regular_buf.len());
 
-    let archived = zebin::reader::<PackedBoolSlice<'static>>(&packed_buf).unwrap();
+    let mut reader_obj = zebin::reader::<PackedBoolSlice<'static>>(&packed_buf).unwrap();
+    let archived = reader_obj.read().unwrap();
     assert_eq!(archived.len(), values.len());
     for (index, expected) in values.iter().enumerate() {
         assert_eq!(archived.get(index), Some(*expected));
@@ -62,7 +63,8 @@ fn test_packed_nibble_slice_round_trip() {
 
     assert!(packed_buf.len() < regular_buf.len());
 
-    let archived = zebin::reader::<PackedU8Slice<'static, 4>>(&packed_buf).unwrap();
+    let mut reader_obj = zebin::reader::<PackedU8Slice<'static, 4>>(&packed_buf).unwrap();
+    let archived = reader_obj.read().unwrap();
     assert_eq!(archived.len(), values.len());
     for (index, expected) in values.iter().enumerate() {
         assert_eq!(archived.get(index), Some(*expected));
@@ -88,7 +90,8 @@ fn test_packed_vec_round_trip() {
     let bools = vec![true, false, true, false, true, true, false, false];
     let packed_bools = PackedBoolVec::from(&bools);
     let packed_bools_buf = zebin::encode(packed_bools).unwrap();
-    let archived_bools = zebin::reader::<PackedBoolVec>(&packed_bools_buf).unwrap();
+    let mut reader_obj = zebin::reader::<PackedBoolVec>(&packed_bools_buf).unwrap();
+    let archived_bools = reader_obj.read().unwrap();
     assert_eq!(archived_bools.len(), bools.len());
     for (index, expected) in bools.iter().enumerate() {
         assert_eq!(archived_bools.get(index), Some(*expected));
@@ -97,7 +100,8 @@ fn test_packed_vec_round_trip() {
     let nibbles = vec![0u8, 3, 7, 15, 1, 2, 4, 8];
     let packed_nibbles = PackedU8Vec::<4>::from(&nibbles);
     let packed_nibbles_buf = zebin::encode(packed_nibbles).unwrap();
-    let archived_nibbles = zebin::reader::<PackedU8Vec<4>>(&packed_nibbles_buf).unwrap();
+    let mut reader_obj2 = zebin::reader::<PackedU8Vec<4>>(&packed_nibbles_buf).unwrap();
+    let archived_nibbles = reader_obj2.read().unwrap();
     assert_eq!(archived_nibbles.len(), nibbles.len());
     for (index, expected) in nibbles.iter().enumerate() {
         assert_eq!(archived_nibbles.get(index), Some(*expected));
@@ -113,7 +117,8 @@ fn test_packed_attr_round_trip() {
     };
 
     let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::reader::<PackedAttrStruct>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<PackedAttrStruct>(&buf).unwrap();
+    let archived = reader_obj.read().unwrap();
 
     assert_eq!(archived.plain, 42);
     assert_eq!(archived.flags.len(), value.flags.len());
@@ -142,7 +147,8 @@ fn test_packed_tuple_struct_round_trip() {
     );
 
     let buf = zebin::encode(&value).unwrap();
-    let archived = zebin::reader::<PackedTupleStruct>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<PackedTupleStruct>(&buf).unwrap();
+    let archived = reader_obj.read().unwrap();
 
     assert_eq!(archived.2, 99);
     assert_eq!(archived.0.len(), value.0.len());
@@ -159,7 +165,8 @@ fn test_packed_tuple_struct_round_trip() {
 fn test_packed_enum_variant_round_trip() {
     let empty = PackedVariantEnum::Empty;
     let empty_buf = zebin::encode(empty).unwrap();
-    let empty_archived = zebin::reader::<PackedVariantEnum>(&empty_buf).unwrap();
+    let mut reader_obj = zebin::reader::<PackedVariantEnum>(&empty_buf).unwrap();
+    let empty_archived = reader_obj.read().unwrap();
     assert_eq!(empty_archived.tag(), 0);
     assert!(empty_archived.is_empty());
 
@@ -170,7 +177,8 @@ fn test_packed_enum_variant_round_trip() {
     );
 
     let buf = zebin::encode(value).unwrap();
-    let archived = zebin::reader::<PackedVariantEnum>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<PackedVariantEnum>(&buf).unwrap();
+    let archived = reader_obj.read().unwrap();
 
     assert_eq!(archived.tag(), 1);
     let packed = archived.as_packed().unwrap();

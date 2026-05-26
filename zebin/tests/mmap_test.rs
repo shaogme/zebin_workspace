@@ -67,7 +67,8 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(mmap.len(), buf.len());
     assert_eq!(mmap.as_slice(), buf.as_slice());
 
-    let archived = reader::<MmapUser>(&mmap)?;
+    let mut reader_obj = reader::<MmapUser>(&mmap)?;
+    let archived = reader_obj.read()?;
     assert_eq!(archived.id, 7);
     unsafe {
         assert_eq!(archived.name.as_str(), "Mika");
@@ -116,7 +117,8 @@ fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::er
 
     let mmap = Mmap::open(&path)?;
     assert_eq!(mmap.as_slice(), expected.as_slice());
-    let archived = reader::<MmapUser>(&mmap)?;
+    let mut reader_obj = reader::<MmapUser>(&mmap)?;
+    let archived = reader_obj.read()?;
     assert_eq!(archived.id, 42);
     unsafe {
         assert_eq!(archived.name.as_str(), "Aurora");
@@ -243,7 +245,8 @@ fn test_mmap_encoder_with_writer() -> Result<(), Box<dyn std::error::Error>> {
 
     let mmap = Mmap::open(&path)?;
     assert_eq!(mmap.as_slice(), expected.as_slice());
-    let archived = reader::<MmapUser>(&mmap)?;
+    let mut reader_obj = reader::<MmapUser>(&mmap)?;
+    let archived = reader_obj.read()?;
     assert_eq!(archived.id, 99);
     unsafe {
         assert_eq!(archived.name.as_str(), "MmapMutWriter");

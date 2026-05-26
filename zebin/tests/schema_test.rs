@@ -79,7 +79,8 @@ fn test_safe_access() {
     };
     let buf = zebin::encode(user).unwrap();
 
-    let reader = zebin::reader::<VersionedUser>(&buf).expect("Failed to validate archive");
+    let mut reader_obj = zebin::reader::<VersionedUser>(&buf).expect("Failed to validate archive");
+    let reader = reader_obj.read().unwrap();
     assert_eq!(reader.stable_schema_key(), 324478056);
     assert_eq!(reader.id().unwrap(), &101);
     assert_eq!(reader.age().unwrap(), &30);
@@ -154,8 +155,9 @@ fn test_safe_access_no_alloc() {
     writer.write_all(sensor).unwrap();
     let written = encoder.written();
 
-    let reader =
+    let mut reader_obj =
         zebin::reader::<VersionedSensor>(&buf[..written]).expect("Failed to validate archive");
+    let reader = reader_obj.read().unwrap();
     assert_eq!(reader.stable_schema_key(), 987654321);
     assert_eq!(reader.id().unwrap(), &101);
     assert_eq!(reader.value().unwrap(), &30);

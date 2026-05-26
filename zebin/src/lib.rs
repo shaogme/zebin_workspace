@@ -42,10 +42,10 @@ pub mod prelude {
         },
         error::{ArchiveError, DecodeError, ZebinError},
         io::{
-            Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-            ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
-            SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut, ZebinIter, ZebinReader,
-            ZebinWriter, decode, iter_reader, reader, writer,
+            Archive, ArchiveHeader, ArchiveHeaderTrait, ArchiveReader, ArchivedDefault,
+            ArchivedField, ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout,
+            MeasureBody, Restore, SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut,
+            ZebinReader, ZebinWriter, decode, reader, writer,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -104,10 +104,10 @@ pub mod io {
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
     pub use crate::io_impl::storage::{Storage, StorageMut};
-    pub use crate::pub_fn::{decode, iter_reader, reader, writer};
+    pub use crate::pub_fn::{decode, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};
-    pub use crate::read_impl::{ZebinIter, ZebinReader};
+    pub use crate::read_impl::{ArchiveReader, ZebinReader};
     pub use crate::traits_impl::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
         ArchivedLayout, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware,
@@ -129,7 +129,7 @@ pub mod error {
 
 pub use crate::archive_impl::ArchivedOption;
 pub use crate::error::ZebinError;
-pub use crate::read_impl::{ZebinIter, ZebinReader};
+pub use crate::read_impl::{ArchiveReader, ZebinReader};
 pub use crate::traits_impl::{Archive, Decode, Encode, MeasureBody};
 pub use crate::write::ZebinWriter;
 
@@ -143,12 +143,12 @@ mod pub_fn {
     /// Create a reader for the archived root object using the default header.
     pub fn reader<'a, T>(
         storage: &'a (impl Storage + ?Sized),
-    ) -> Result<ZebinReader<'a, T>, ZebinError>
+    ) -> Result<ZebinReader<'a, T, [u8]>, ZebinError>
     where
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::new(storage, ValidationConfig::default())
+        ZebinReader::new(storage.as_slice(), ValidationConfig::default())
     }
 
     /// Decode and validate the archived root object using the default header directly into T.
@@ -158,7 +158,7 @@ mod pub_fn {
         T::Archived: Decode<'a>,
         <T::Archived as Decode<'a>>::View: Restore<T>,
     {
-        ZebinReader::<T>::decode(storage)
+        ZebinReader::<T, [u8]>::decode(storage.as_slice())
     }
 
     /// Validate an archive without exposing the archived view using the default header.
@@ -167,7 +167,7 @@ mod pub_fn {
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T>::validate(storage, ValidationConfig::default(), None)
+        ZebinReader::<T, [u8]>::validate(storage.as_slice(), ValidationConfig::default(), None)
     }
 
     /// Validate an archive with explicit runtime validation limits.
@@ -180,7 +180,7 @@ mod pub_fn {
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T>::validate(storage, config, stack)
+        ZebinReader::<T, [u8]>::validate(storage.as_slice(), config, stack)
     }
 
     /// Validate an archive and capture the logical field/index path on failure.
@@ -192,7 +192,11 @@ mod pub_fn {
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T>::validate(storage, ValidationConfig::default(), Some(stack))
+        ZebinReader::<T, [u8]>::validate(
+            storage.as_slice(),
+            ValidationConfig::default(),
+            Some(stack),
+        )
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.
@@ -203,15 +207,6 @@ mod pub_fn {
         T::Archived: ArchivedLayout,
     {
         ZebinWriter::new(sink)
-    }
-
-    /// Create an iterator reader for reading consecutive archived objects from the storage.
-    pub fn iter_reader<'a, T>(storage: &'a (impl Storage + ?Sized)) -> ZebinIter<'a, T>
-    where
-        T: Archive,
-        T::Archived: Decode<'a>,
-    {
-        ZebinReader::iter(storage)
     }
 
     #[cfg(feature = "alloc")]

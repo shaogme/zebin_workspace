@@ -196,7 +196,8 @@ fn test_reader_rejects_invalid_sequence_marker_before_building_view() {
     let mut buf = zebin::encode(value).unwrap();
     buf[4] = 2;
 
-    let err = match zebin::reader::<Parent>(&buf) {
+    let mut reader_obj = zebin::reader::<Parent>(&buf).unwrap();
+    let err = match reader_obj.read() {
         Ok(_) => panic!("reader accepted invalid sequence marker"),
         Err(error) => error,
     };

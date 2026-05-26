@@ -47,7 +47,8 @@ fn test_unit_enum_round_trip() {
     writer_obj.write_all(value).unwrap();
     let written = encoder.written();
 
-    let archived = reader::<UnitMode>(&buf[..written]).unwrap();
+    let mut reader_obj = reader::<UnitMode>(&buf[..written]).unwrap();
+    let archived = reader_obj.read().unwrap();
     assert!(archived.is_busy());
     assert!(!archived.is_idle());
     assert_eq!(archived.tag(), 1);
@@ -60,13 +61,13 @@ fn test_tuple_enum_round_trip() {
     assert!(matches!(empty, TuplePacket::Empty));
     let value = TuplePacket::Data(7, "packet".to_string());
     let buf = zebin::encode(value).unwrap();
-    let reader = zebin::reader::<TuplePacket>(&buf).unwrap();
-    let archived = reader.root();
+    let mut reader = zebin::reader::<TuplePacket>(&buf).unwrap();
+    let archived = reader.read().unwrap();
     assert!(!archived.is_empty());
     assert_eq!(archived.tag(), 1);
 
     // TuplePacket::Data variant has a schema_key, so we can access it directly as a View
-    let data = reader.as_data().expect("Should be Data variant");
+    let data = archived.as_data().expect("Should be Data variant");
 
     assert_eq!(*data.field0().unwrap(), 7);
     assert_eq!(unsafe { data.field1().unwrap().as_str() }, "packet");
@@ -82,12 +83,12 @@ fn test_struct_enum_round_trip() {
         label: "hello".to_string(),
     };
     let buf = zebin::encode(value).unwrap();
-    let reader = zebin::reader::<StructPacket>(&buf).unwrap();
-    let archived = reader.root();
+    let mut reader = zebin::reader::<StructPacket>(&buf).unwrap();
+    let archived = reader.read().unwrap();
     assert_eq!(archived.tag(), 1);
 
     // StructPacket::Data variant has a schema_key
-    let data = reader.as_data().expect("Should be Data variant");
+    let data = archived.as_data().expect("Should be Data variant");
 
     assert_eq!(*data.code().unwrap(), 42);
     assert_eq!(unsafe { data.label().unwrap().as_str() }, "hello");

@@ -24,7 +24,8 @@ fn test_basic_archive() {
         username: "Alice".to_string(),
     };
     let buf = zebin::encode(user).unwrap();
-    let archived = reader::<UserProfile>(&buf).unwrap();
+    let mut reader_obj = reader::<UserProfile>(&buf).unwrap();
+    let archived = reader_obj.read().unwrap();
     assert_eq!(archived.id, 42);
     assert_eq!(unsafe { archived.username.as_str() }, "Alice");
 }
@@ -126,7 +127,8 @@ fn test_basic_no_alloc() {
     let mut writer_obj = writer::<SimpleUser, _>(&mut encoder).unwrap();
     writer_obj.write_all(user).unwrap();
     let written = encoder.written();
-    let archived = reader::<SimpleUser>(&buf[..written]).unwrap();
+    let mut reader_obj = reader::<SimpleUser>(&buf[..written]).unwrap();
+    let archived = reader_obj.read().unwrap();
     assert_eq!(archived.id, 42);
 }
 
@@ -140,8 +142,8 @@ fn test_iter_archive_no_alloc() {
     let mut writer_obj = writer::<IterArchive<[u64; 3], u64>, _>(&mut encoder).unwrap();
     writer_obj.write_all(wrapped).unwrap();
     let written = encoder.written();
-    let reader_obj = reader::<IterArchive<[u64; 3], u64>>(&buf[..written]).unwrap();
-    let archived_iter = reader_obj.root();
+    let mut reader_obj = reader::<IterArchive<[u64; 3], u64>>(&buf[..written]).unwrap();
+    let archived_iter = reader_obj.read().unwrap();
     assert_eq!(archived_iter.len(), 3);
     let mut iter = archived_iter.iter();
     assert_eq!(iter.next().unwrap().unwrap(), 10);
@@ -174,21 +176,21 @@ fn test_consecutive_values() {
         buf.extend_from_slice(&encoded);
     }
 
-    let mut iter = zebin::prelude::iter_reader::<UserProfile>(&buf);
+    let mut reader = zebin::prelude::reader::<UserProfile>(&buf).unwrap();
 
-    let u1 = iter.next().unwrap().unwrap();
+    let u1 = reader.read().unwrap();
     assert_eq!(u1.id, 101);
     assert_eq!(unsafe { u1.username.as_str() }, "Alice");
 
-    let u2 = iter.next().unwrap().unwrap();
+    let u2 = reader.read().unwrap();
     assert_eq!(u2.id, 102);
     assert_eq!(unsafe { u2.username.as_str() }, "Bob");
 
-    let u3 = iter.next().unwrap().unwrap();
+    let u3 = reader.read().unwrap();
     assert_eq!(u3.id, 103);
     assert_eq!(unsafe { u3.username.as_str() }, "Charlie");
 
-    assert!(iter.next().is_none());
+    assert!(reader.read().is_err());
 }
 
 #[cfg(feature = "alloc")]
@@ -218,19 +220,19 @@ fn test_consecutive_writer_and_reader() {
     }
 
     let buf = encoder.into_inner();
-    let mut iter = zebin::prelude::iter_reader::<UserProfile>(&buf);
+    let mut reader = zebin::prelude::reader::<UserProfile>(&buf).unwrap();
 
-    let u1 = iter.next().unwrap().unwrap();
+    let u1 = reader.read().unwrap();
     assert_eq!(u1.id, 101);
     assert_eq!(unsafe { u1.username.as_str() }, "Alice");
 
-    let u2 = iter.next().unwrap().unwrap();
+    let u2 = reader.read().unwrap();
     assert_eq!(u2.id, 102);
     assert_eq!(unsafe { u2.username.as_str() }, "Bob");
 
-    let u3 = iter.next().unwrap().unwrap();
+    let u3 = reader.read().unwrap();
     assert_eq!(u3.id, 103);
     assert_eq!(unsafe { u3.username.as_str() }, "Charlie");
 
-    assert!(iter.next().is_none());
+    assert!(reader.read().is_err());
 }

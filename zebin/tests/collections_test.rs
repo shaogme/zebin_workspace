@@ -27,8 +27,8 @@ fn test_btreeset_direct() {
         zebin::decode::<BTreeSet<u32>>(&bytes).expect("failed to decode BTreeSet");
     assert_eq!(restored, set);
 
-    let reader = zebin::reader::<BTreeSet<u32>>(&bytes).expect("failed to create reader");
-    let archived = reader.root();
+    let mut reader = zebin::reader::<BTreeSet<u32>>(&bytes).expect("failed to create reader");
+    let archived = reader.read().unwrap();
     assert_eq!(archived.len(), 3);
 }
 

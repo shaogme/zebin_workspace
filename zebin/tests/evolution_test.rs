@@ -42,7 +42,8 @@ fn test_evolution_optional_and_default() {
     };
     let buf = zebin::encode(v1).unwrap();
 
-    let reader = zebin::reader::<Version2>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<Version2>(&buf).unwrap();
+    let reader = reader_obj.read().unwrap();
 
     // Directly access fields on the reader (it derefs to the root view)
     assert_eq!(reader.id().unwrap(), &42);
@@ -69,7 +70,8 @@ fn test_version2_with_all_fields() {
         score: 95,
     };
     let buf = zebin::encode(v2).unwrap();
-    let reader = zebin::reader::<Version2>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<Version2>(&buf).unwrap();
+    let reader = reader_obj.read().unwrap();
 
     assert_eq!(reader.id().unwrap(), &1);
     assert_eq!(unsafe { reader.name().unwrap().as_str() }, "Bob");
@@ -111,7 +113,8 @@ fn test_enum_evolution() {
     };
     let buf = zebin::encode(m1).unwrap();
 
-    let reader = zebin::reader::<MessageV2>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<MessageV2>(&buf).unwrap();
+    let reader = reader_obj.read().unwrap();
 
     // Directly access variants on the reader.
     // The variant accessor on View (for enums) returns a nested View for the variant record.
