@@ -194,9 +194,9 @@ impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
                     && let Err(e) = self
                         .cursor
                         .align(<A as ArchivedLayout>::ALIGNMENT, &mut context)
-                    {
-                        return Some(Err(e));
-                    }
+                {
+                    return Some(Err(e));
+                }
                 Some(A::decode(&mut self.cursor, &mut context))
             }
             Ok(_) => Some(Err(DecodeError::ValidationError {
@@ -410,61 +410,89 @@ impl<'a, T: Encode + 'a> CurrentEncoder<'a, T> {
     }
 }
 
-pub struct IterEncoder<'a, S: ?Sized, T, I: ?Sized = S>
-where
-    for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + 'a,
-{
-    iter: <&'a S as IntoIterator>::IntoIter,
+pub struct SeqEncoder<'a, T: Encode + Archive + 'a> {
     next_item: Option<&'a T>,
     marker: [u8; 1],
     marker_cursor: usize,
     aligned: bool,
     current_encoder: Option<CurrentEncoder<'a, T>>,
-    finished_sentinel: bool,
-    _phantom: PhantomData<&'a I>,
+    finished: bool,
 }
 
-impl<'a, S: ?Sized, T, I: ?Sized> IterEncoder<'a, S, T, I>
-where
-    for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + 'a,
-{
-    pub fn new(inner: &'a S) -> Result<Self, ZebinError> {
-        let iter = inner.into_iter();
-        Ok(Self {
-            iter,
+impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T> {
+    pub fn new() -> Self {
+        Self {
             next_item: None,
             marker: [0],
             marker_cursor: 1,
             aligned: false,
             current_encoder: None,
-            finished_sentinel: false,
-            _phantom: PhantomData,
-        })
+            finished: false,
+        }
     }
 }
 
-impl<'a, S: ?Sized, T, I: ?Sized> Encoder<'a> for IterEncoder<'a, S, T, I>
+impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T>
 where
-    for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + 'a,
     T::Archived: ArchivedLayout,
 {
-    type Input = &'a I;
+    pub fn is_finished(&self) -> bool {
+        self.finished && self.marker_cursor == 1
+    }
 
-    fn input<Sink: ByteSink + ?Sized>(
+    pub fn finish_ref<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
-        sink: &mut Sink,
+        sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        if !self.finished {
+            if self.next_item.is_some() || self.current_encoder.is_some() || self.marker_cursor < 1
+            {
+                return Err(ZebinError::SerializationError {
+                    pos: sink.pos(),
+                    message: "Encoder is busy",
+                });
+            }
+            self.marker = [0];
+            self.marker_cursor = 0;
+            self.finished = true;
+        }
+        self.poll_pending(sink)
+    }
+}
+
+impl<'a, T: Encode + Archive + 'a> Encoder<'a> for SeqEncoder<'a, T>
+where
+    T::Archived: ArchivedLayout,
+{
+    type Input = &'a T;
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        if self.finished {
+            return Err(ZebinError::SerializationError {
+                pos: sink.pos(),
+                message: "Encoder already finished",
+            });
+        }
+        if self.next_item.is_some() || self.current_encoder.is_some() || self.marker_cursor < 1 {
+            return Err(ZebinError::SerializationError {
+                pos: sink.pos(),
+                message: "Encoder is busy",
+            });
+        }
+
+        self.next_item = Some(item);
+        self.marker = [1];
+        self.marker_cursor = 0;
+        self.aligned = false;
+
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: ByteSink + ?Sized>(
-        &mut self,
-        sink: &mut Sink,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         loop {
             if self.marker_cursor < 1 {
                 let remaining = 1 - self.marker_cursor;
@@ -477,7 +505,7 @@ where
                 }
             }
 
-            if self.finished_sentinel && self.marker_cursor == 1 {
+            if self.finished && self.marker_cursor == 1 {
                 return Ok(Poll::Ready(()));
             }
 
@@ -507,31 +535,19 @@ where
                 self.aligned = false;
             }
 
-            if self.next_item.is_none() && !self.finished_sentinel {
-                if let Some(item) = self.iter.next() {
-                    self.next_item = Some(item);
-                    self.marker = [1];
-                    self.marker_cursor = 0;
-                } else {
-                    self.marker = [0];
-                    self.marker_cursor = 0;
-                    self.finished_sentinel = true;
-                }
-                continue;
-            }
-
-            if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
-                if sink
-                    .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
-                    .is_complete()
-                {
-                    self.aligned = true;
-                } else {
-                    return Ok(Poll::Pending);
-                }
-            }
-
             if let Some(item) = self.next_item.take() {
+                if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
+                    if sink
+                        .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
+                        .is_complete()
+                    {
+                        self.aligned = true;
+                    } else {
+                        self.next_item = Some(item);
+                        return Ok(Poll::Pending);
+                    }
+                }
+
                 let mut encoder = item.begin_encode()?;
                 match encoder.input(item, sink)? {
                     Poll::Pending => {
@@ -540,6 +556,84 @@ where
                     }
                     Poll::Ready(()) => {
                         self.current_encoder = Some(CurrentEncoder::new(encoder, false));
+                    }
+                }
+                continue;
+            }
+
+            if !self.finished {
+                return Ok(Poll::Ready(()));
+            }
+        }
+    }
+
+    fn finish<S: ByteSink + ?Sized>(mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        self.finish_ref(sink)
+    }
+}
+
+pub struct IterEncoder<'a, S: ?Sized, T, I: ?Sized = S>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode + Archive + 'a,
+{
+    iter: <&'a S as IntoIterator>::IntoIter,
+    seq_encoder: SeqEncoder<'a, T>,
+    _phantom: PhantomData<&'a I>,
+}
+
+impl<'a, S: ?Sized, T, I: ?Sized> IterEncoder<'a, S, T, I>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode + Archive + 'a,
+{
+    pub fn new(inner: &'a S) -> Result<Self, ZebinError> {
+        let iter = inner.into_iter();
+        Ok(Self {
+            iter,
+            seq_encoder: SeqEncoder::new(),
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<'a, S: ?Sized, T, I: ?Sized> Encoder<'a> for IterEncoder<'a, S, T, I>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode + Archive + 'a,
+    T::Archived: ArchivedLayout,
+{
+    type Input = &'a I;
+
+    fn input<Sink: ByteSink + ?Sized>(
+        &mut self,
+        _item: Self::Input,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<Sink: ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
+        loop {
+            if self.seq_encoder.poll_pending(sink)?.is_pending() {
+                return Ok(Poll::Pending);
+            }
+
+            if self.seq_encoder.is_finished() {
+                return Ok(Poll::Ready(()));
+            }
+
+            if !self.seq_encoder.finished {
+                if let Some(item) = self.iter.next() {
+                    if self.seq_encoder.input(item, sink)?.is_pending() {
+                        return Ok(Poll::Pending);
+                    }
+                } else {
+                    if self.seq_encoder.finish_ref(sink)?.is_pending() {
+                        return Ok(Poll::Pending);
                     }
                 }
             }

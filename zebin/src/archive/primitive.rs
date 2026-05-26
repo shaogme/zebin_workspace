@@ -353,52 +353,54 @@ where
 
     fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         if self.stage == 0
-            && let Some((encoder, started)) = &mut self.key_encoder {
-                let progress = if !*started {
-                    match encoder.input(self.key, sink)? {
-                        Poll::Pending => {
-                            *started = true;
-                            Poll::Pending
-                        }
-                        Poll::Ready(()) => Poll::Ready(()),
+            && let Some((encoder, started)) = &mut self.key_encoder
+        {
+            let progress = if !*started {
+                match encoder.input(self.key, sink)? {
+                    Poll::Pending => {
+                        *started = true;
+                        Poll::Pending
                     }
-                } else {
-                    encoder.poll_pending(sink)?
-                };
+                    Poll::Ready(()) => Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
 
-                match progress {
-                    Poll::Pending => return Ok(Poll::Pending),
-                    Poll::Ready(()) => {
-                        let (enc, _) = self.key_encoder.take().unwrap();
-                        let _ = enc.finish(sink)?;
-                        self.stage = 1;
-                    }
+            match progress {
+                Poll::Pending => return Ok(Poll::Pending),
+                Poll::Ready(()) => {
+                    let (enc, _) = self.key_encoder.take().unwrap();
+                    let _ = enc.finish(sink)?;
+                    self.stage = 1;
                 }
             }
+        }
 
         if self.stage == 1
-            && let Some((encoder, started)) = &mut self.value_encoder {
-                let progress = if !*started {
-                    match encoder.input(self.value, sink)? {
-                        Poll::Pending => {
-                            *started = true;
-                            Poll::Pending
-                        }
-                        Poll::Ready(()) => Poll::Ready(()),
+            && let Some((encoder, started)) = &mut self.value_encoder
+        {
+            let progress = if !*started {
+                match encoder.input(self.value, sink)? {
+                    Poll::Pending => {
+                        *started = true;
+                        Poll::Pending
                     }
-                } else {
-                    encoder.poll_pending(sink)?
-                };
+                    Poll::Ready(()) => Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
 
-                match progress {
-                    Poll::Pending => return Ok(Poll::Pending),
-                    Poll::Ready(()) => {
-                        let (enc, _) = self.value_encoder.take().unwrap();
-                        let _ = enc.finish(sink)?;
-                        self.stage = 2;
-                    }
+            match progress {
+                Poll::Pending => return Ok(Poll::Pending),
+                Poll::Ready(()) => {
+                    let (enc, _) = self.value_encoder.take().unwrap();
+                    let _ = enc.finish(sink)?;
+                    self.stage = 2;
                 }
             }
+        }
 
         Ok(Poll::Ready(()))
     }
