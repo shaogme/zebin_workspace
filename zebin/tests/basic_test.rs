@@ -67,7 +67,7 @@ pub struct SimpleUser {
 fn test_basic_no_alloc() {
     let user = SimpleUser { id: 42 };
     let mut buf = [0u8; 64];
-    let mut writer = zebin::encode_chunked(user).unwrap();
+    let mut writer = zebin::writer(user).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();
@@ -86,7 +86,7 @@ fn test_iter_archive_no_alloc() {
     let arr = [10u64, 20u64, 30u64];
     let wrapped = IterArchive::new(arr);
     let mut buf = [0u8; 128];
-    let mut writer = zebin::encode_chunked(wrapped).unwrap();
+    let mut writer = zebin::writer(wrapped).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();

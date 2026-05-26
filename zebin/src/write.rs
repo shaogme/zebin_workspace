@@ -180,7 +180,7 @@ where
         Ok(total_written)
     }
 
-    pub fn encode_chunked(value: <T as Encode>::Input<'a>) -> Result<Self, ZebinError> {
+    pub fn writer(value: <T as Encode>::Input<'a>) -> Result<Self, ZebinError> {
         Self::new(value)
     }
 

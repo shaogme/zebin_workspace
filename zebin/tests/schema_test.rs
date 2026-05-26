@@ -102,7 +102,7 @@ pub struct VersionedSensor {
 fn test_vtable_generation_no_alloc() {
     let sensor = VersionedSensor { id: 101, value: 30 };
     let mut buf = [0u8; 128];
-    let mut writer = zebin::encode_chunked(sensor).unwrap();
+    let mut writer = zebin::writer(sensor).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();
@@ -154,7 +154,7 @@ fn test_vtable_generation_no_alloc() {
 fn test_safe_access_no_alloc() {
     let sensor = VersionedSensor { id: 101, value: 30 };
     let mut buf = [0u8; 128];
-    let mut writer = zebin::encode_chunked(sensor).unwrap();
+    let mut writer = zebin::writer(sensor).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();

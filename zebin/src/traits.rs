@@ -533,7 +533,7 @@ where
 /// Used by:
 /// - schema-aware records that must know each field's encoded length before
 ///   writing the field table;
-/// 
+///
 /// Implementations walk the value by reference and never consume it. They must
 /// produce a length that exactly matches what the corresponding encoder will
 /// write to a `ByteSink`.

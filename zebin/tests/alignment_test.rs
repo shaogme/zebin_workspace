@@ -63,7 +63,7 @@ fn test_root_array_u64_round_trip() {
     let value = [8u64, 16, 32];
 
     let mut buf = [0u8; 128];
-    let mut writer = zebin::encode_chunked(value).unwrap();
+    let mut writer = zebin::writer(value).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();

@@ -43,8 +43,8 @@ pub mod prelude {
         io::{
             Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
             ArchivedLayout, ByteSink, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody,
-            Restore, SchemaAware, SinkProgress, Storage, ZebinReader, ZebinWriter, decode,
-            encode_chunked, reader,
+            Restore, SchemaAware, SinkProgress, Storage, ZebinReader, ZebinWriter, decode, reader,
+            writer,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -99,7 +99,7 @@ pub mod io {
     pub use crate::io_impl::storage::Storage;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
-    pub use crate::pub_fn::{decode, encode_chunked, reader};
+    pub use crate::pub_fn::{decode, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};
     pub use crate::read_impl::{Cursor, ZebinReader};
@@ -191,13 +191,13 @@ mod pub_fn {
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.
-    pub fn encode_chunked<'a, T>(value: T) -> Result<ZebinWriter<'a, T>, ZebinError>
+    pub fn writer<'a, T>(value: T) -> Result<ZebinWriter<'a, T>, ZebinError>
     where
         T: Encode + Archive + 'a,
         T::Archived: ArchivedLayout,
         T: Encode<Input<'a> = T>,
     {
-        ZebinWriter::encode_chunked(value)
+        ZebinWriter::writer(value)
     }
 
     #[cfg(feature = "alloc")]

@@ -41,7 +41,7 @@ fn test_unit_enum_round_trip() {
     let value = UnitMode::Busy;
 
     let mut buf = [0u8; 64];
-    let mut writer = zebin::encode_chunked(value).unwrap();
+    let mut writer = zebin::writer(value).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();
@@ -102,7 +102,7 @@ fn test_invalid_enum_discriminant() {
     let value = UnitMode::Idle;
 
     let mut buf = [0u8; 64];
-    let mut writer = zebin::encode_chunked(value).unwrap();
+    let mut writer = zebin::writer(value).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();
