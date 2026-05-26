@@ -1,5 +1,13 @@
 #[cfg(feature = "alloc")]
-use zebin::{ZebinArchive, ZebinEncode};
+use core::num::NonZeroUsize;
+#[cfg(feature = "alloc")]
+use std::cell::Cell;
+use zebin::io::SliceEncoder;
+#[cfg(feature = "alloc")]
+use zebin::prelude::{ByteSink, SinkProgress, ZebinWriter};
+#[cfg(feature = "alloc")]
+use zebin::{ZebinArchive, ZebinEncode, ZebinError};
+use zebin::{reader, writer};
 
 #[cfg(feature = "alloc")]
 #[derive(Debug, PartialEq, Eq, ZebinArchive, ZebinEncode, Clone)]
@@ -17,7 +25,7 @@ fn test_aligned_containers_round_trip() {
     };
 
     let buf = zebin::encode(value.clone()).unwrap();
-    let archived = zebin::reader::<AlignedContainers>(&buf).unwrap();
+    let archived = reader::<AlignedContainers>(&buf).unwrap();
 
     assert_eq!(unsafe { archived.values.as_slice() }, &[11, 22, 33, 44]);
     assert_eq!(archived.fixed, [55, 66, 77]);
@@ -32,19 +40,64 @@ fn test_aligned_containers_chunked_writer_matches_full_encode() {
     };
 
     let expected = zebin::encode(&value).unwrap();
-    let mut writer = zebin::ZebinWriter::<&AlignedContainers>::new(&value).unwrap();
-    let mut actual = Vec::new();
-    let mut chunk = [0u8; 7];
+    let limit = Cell::new(0usize);
 
-    while !writer.is_finished() {
-        let written = writer.write(&mut chunk).unwrap();
-        if written > 0 {
-            actual.extend_from_slice(&chunk[..written]);
+    struct LimitedSink<'a> {
+        buf: Vec<u8>,
+        limit: &'a Cell<usize>,
+    }
+
+    impl ByteSink for LimitedSink<'_> {
+        fn pos(&self) -> usize {
+            self.buf.len()
+        }
+
+        fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+            if bytes.is_empty() {
+                return Ok(SinkProgress::Complete);
+            }
+            let available = self.limit.get().saturating_sub(self.buf.len());
+            if available == 0 {
+                return Ok(SinkProgress::Blocked);
+            }
+            let write_len = bytes.len().min(available);
+            self.buf.extend_from_slice(&bytes[..write_len]);
+            Ok(SinkProgress::from_accepted(bytes.len(), write_len))
+        }
+
+        fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+            let padding = (alignment.get() - (self.pos() % alignment.get())) % alignment.get();
+            self.skip(padding)
+        }
+
+        fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+            if len == 0 {
+                return Ok(SinkProgress::Complete);
+            }
+            let available = self.limit.get().saturating_sub(self.buf.len());
+            if available == 0 {
+                return Ok(SinkProgress::Blocked);
+            }
+            let skip_len = len.min(available);
+            self.buf.resize(self.buf.len() + skip_len, 0);
+            Ok(SinkProgress::from_accepted(len, skip_len))
         }
     }
 
-    assert_eq!(actual, expected);
-    zebin::reader::<AlignedContainers>(&actual).unwrap();
+    let mut sink = LimitedSink {
+        buf: Vec::new(),
+        limit: &limit,
+    };
+
+    let mut writer_obj = ZebinWriter::<&AlignedContainers, _>::new(&mut sink).unwrap();
+
+    while !writer_obj.is_finished() {
+        limit.set(limit.get() + 7);
+        let _ = writer_obj.write(&value).unwrap();
+    }
+
+    assert_eq!(sink.buf, expected);
+    reader::<AlignedContainers>(&sink.buf).unwrap();
 }
 
 #[cfg(feature = "alloc")]
@@ -53,7 +106,7 @@ fn test_root_vec_u64_round_trip() {
     let value = vec![7u64, 14, 21, 28];
 
     let buf = zebin::encode(value.clone()).unwrap();
-    let archived = zebin::reader::<Vec<u64>>(&buf).unwrap();
+    let archived = reader::<Vec<u64>>(&buf).unwrap();
 
     assert_eq!(unsafe { archived.as_slice() }, &[7, 14, 21, 28]);
 }
@@ -63,17 +116,12 @@ fn test_root_array_u64_round_trip() {
     let value = [8u64, 16, 32];
 
     let mut buf = [0u8; 128];
-    let mut writer = zebin::writer(value).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
+    let mut encoder = SliceEncoder::new(&mut buf, 0);
+    let mut writer_obj = writer::<[u64; 3], _>(&mut encoder).unwrap();
+    writer_obj.write_all(value).unwrap();
+    let written = encoder.written();
 
-    let archived = zebin::reader::<[u64; 3]>(&buf[..written]).unwrap();
+    let archived = reader::<[u64; 3]>(&buf[..written]).unwrap();
 
     assert_eq!(archived.root(), &[8, 16, 32]);
 }

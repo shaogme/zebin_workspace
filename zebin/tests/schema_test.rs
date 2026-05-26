@@ -102,15 +102,10 @@ pub struct VersionedSensor {
 fn test_vtable_generation_no_alloc() {
     let sensor = VersionedSensor { id: 101, value: 30 };
     let mut buf = [0u8; 128];
-    let mut writer = zebin::writer(sensor).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
+    let mut encoder = zebin::io::SliceEncoder::new(&mut buf, 0);
+    let mut writer = zebin::writer::<VersionedSensor, _>(&mut encoder).unwrap();
+    writer.write_all(sensor).unwrap();
+    let written = encoder.written();
 
     let object_pos = 4;
     let stable_schema_key = u32::from_le_bytes(buf[object_pos..object_pos + 4].try_into().unwrap());
@@ -154,15 +149,10 @@ fn test_vtable_generation_no_alloc() {
 fn test_safe_access_no_alloc() {
     let sensor = VersionedSensor { id: 101, value: 30 };
     let mut buf = [0u8; 128];
-    let mut writer = zebin::writer(sensor).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
+    let mut encoder = zebin::io::SliceEncoder::new(&mut buf, 0);
+    let mut writer = zebin::writer::<VersionedSensor, _>(&mut encoder).unwrap();
+    writer.write_all(sensor).unwrap();
+    let written = encoder.written();
 
     let reader =
         zebin::reader::<VersionedSensor>(&buf[..written]).expect("Failed to validate archive");

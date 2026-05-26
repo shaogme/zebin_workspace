@@ -40,7 +40,7 @@ fn field_measure_expr(
                 zebin::utils::macro_helpers::measure_packed_bool_len((#value).len())
             },
             crate::shared::packed::PackedElementKind::U8 => {
-                let bits_lit = bits as u8;
+                let bits_lit = bits;
                 quote! {
                     zebin::utils::macro_helpers::measure_packed_u8_len((#value).len(), #bits_lit)?
                 }

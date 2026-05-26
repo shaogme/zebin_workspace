@@ -1,4 +1,5 @@
-use zebin::{ZebinArchive, ZebinEncode, ZebinError};
+use zebin::io::SliceEncoder;
+use zebin::{ZebinArchive, ZebinEncode, ZebinError, reader, writer};
 
 #[derive(ZebinArchive, ZebinEncode, Clone)]
 enum UnitMode {
@@ -41,17 +42,12 @@ fn test_unit_enum_round_trip() {
     let value = UnitMode::Busy;
 
     let mut buf = [0u8; 64];
-    let mut writer = zebin::writer(value).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
+    let mut encoder = SliceEncoder::new(&mut buf, 0);
+    let mut writer_obj = writer::<UnitMode, _>(&mut encoder).unwrap();
+    writer_obj.write_all(value).unwrap();
+    let written = encoder.written();
 
-    let archived = zebin::reader::<UnitMode>(&buf[..written]).unwrap();
+    let archived = reader::<UnitMode>(&buf[..written]).unwrap();
     assert!(archived.is_busy());
     assert!(!archived.is_idle());
     assert_eq!(archived.tag(), 1);
@@ -102,15 +98,10 @@ fn test_invalid_enum_discriminant() {
     let value = UnitMode::Idle;
 
     let mut buf = [0u8; 64];
-    let mut writer = zebin::writer(value).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
+    let mut encoder = SliceEncoder::new(&mut buf, 0);
+    let mut writer_obj = writer::<UnitMode, _>(&mut encoder).unwrap();
+    writer_obj.write_all(value).unwrap();
+    let written = encoder.written();
 
     let root_offset = 4usize;
     buf[root_offset..root_offset + 4].copy_from_slice(&99u32.to_le_bytes());

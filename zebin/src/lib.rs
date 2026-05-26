@@ -25,13 +25,14 @@ mod traits_impl;
 #[path = "validation.rs"]
 mod validation_impl;
 
-mod write;
-
 pub mod utils;
+mod write;
 
 pub mod prelude {
     #[cfg(feature = "alloc")]
     pub use crate::archive::{PackedBoolVec, PackedU8Vec, PackedVarIntSlice, PackedVec, VarIntVec};
+    #[cfg(feature = "alloc")]
+    pub use crate::io::VecEncoder;
     #[cfg(feature = "mmap")]
     pub use crate::io::{Mmap, MmapEncoder, MmapMut};
     pub use crate::{
@@ -43,8 +44,8 @@ pub mod prelude {
         io::{
             Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
             ArchivedLayout, ByteSink, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody,
-            Restore, SchemaAware, SinkProgress, Storage, ZebinReader, ZebinWriter, decode, reader,
-            writer,
+            Restore, SchemaAware, SinkProgress, SliceEncoder, Storage, ZebinReader, ZebinWriter,
+            decode, reader, writer,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -57,7 +58,6 @@ pub mod prelude {
     };
     pub use zebin_macros::{ZebinArchive, ZebinEncode};
 }
-
 // --- 子模块结构 (方案 2) ---
 
 /// 底层表示与数据存储结构相关的高级 API
@@ -115,6 +115,9 @@ pub mod io {
     };
     #[cfg(feature = "mmap")]
     pub use crate::write::encoder::MmapEncoder;
+    pub use crate::write::encoder::SliceEncoder;
+    #[cfg(feature = "alloc")]
+    pub use crate::write::encoder::VecEncoder;
     pub use crate::write::{ArchiveWriter, ZebinWriter};
 }
 
@@ -123,7 +126,6 @@ pub mod error {
     pub use crate::error_impl::*;
 }
 
-// --- 根目录暴露的常用核心门面 API ---
 pub use crate::archive_impl::ArchivedOption;
 pub use crate::error::ZebinError;
 pub use crate::read_impl::ZebinReader;
@@ -191,13 +193,13 @@ mod pub_fn {
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.
-    pub fn writer<'a, T>(value: T) -> Result<ZebinWriter<'a, T>, ZebinError>
+    pub fn writer<'a, T, S>(sink: S) -> Result<ZebinWriter<'a, T, S>, ZebinError>
     where
         T: Encode + Archive + 'a,
+        S: ByteSink,
         T::Archived: ArchivedLayout,
-        T: Encode<Input<'a> = T>,
     {
-        ZebinWriter::new(value)
+        ZebinWriter::new(sink)
     }
 
     #[cfg(feature = "alloc")]
@@ -211,7 +213,7 @@ mod pub_fn {
         T::Archived: ArchivedLayout,
         T: Encode<Input<'a> = T>,
     {
-        ZebinWriter::<'a, T>::encode(value)
+        ZebinWriter::<'a, T, VecEncoder>::encode(value)
     }
 
     /// Archive a value into an existing vector using the default header.
@@ -222,6 +224,6 @@ mod pub_fn {
         T::Archived: ArchivedLayout,
         T: Encode<Input<'a> = T>,
     {
-        ZebinWriter::<'a, T>::encode_into(value, buf)
+        ZebinWriter::<'a, T, VecEncoder>::encode_into(value, buf)
     }
 }

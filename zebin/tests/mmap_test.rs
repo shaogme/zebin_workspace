@@ -11,6 +11,7 @@ use zebin::prelude::{
     ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, Encoder, Mmap,
     MmapEncoder, MmapMut, Storage, ZebinArchive, ZebinEncode, ZebinError,
 };
+use zebin::{encode, reader};
 
 #[derive(ZebinArchive, ZebinEncode, Clone)]
 pub struct MmapUser {
@@ -57,7 +58,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
         id: 7,
         name: "Mika".to_string(),
     };
-    let buf = zebin::encode(user)?;
+    let buf = encode(user)?;
 
     let path = temp_archive_path();
     fs::write(&path, &buf)?;
@@ -66,7 +67,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(mmap.len(), buf.len());
     assert_eq!(mmap.as_slice(), buf.as_slice());
 
-    let archived = zebin::reader::<MmapUser>(mmap.as_slice())?;
+    let archived = reader::<MmapUser>(mmap.as_slice())?;
     assert_eq!(archived.id, 7);
     unsafe {
         assert_eq!(archived.name.as_str(), "Mika");
@@ -79,7 +80,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_mmap_is_read_only_for_extend() -> Result<(), Box<dyn std::error::Error>> {
-    let buf = zebin::encode(MmapUser {
+    let buf = encode(MmapUser {
         id: 1,
         name: "read-only".to_string(),
     })?;
@@ -101,7 +102,7 @@ fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::er
         id: 42,
         name: "Aurora".to_string(),
     };
-    let expected = zebin::encode(&user)?;
+    let expected = encode(&user)?;
 
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, expected.len());
@@ -115,7 +116,7 @@ fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::er
 
     let mmap = Mmap::open(&path)?;
     assert_eq!(mmap.as_slice(), expected.as_slice());
-    let archived = zebin::reader::<MmapUser>(mmap.as_slice())?;
+    let archived = reader::<MmapUser>(mmap.as_slice())?;
     assert_eq!(archived.id, 42);
     unsafe {
         assert_eq!(archived.name.as_str(), "Aurora");
@@ -132,7 +133,7 @@ fn test_mmap_encoder_matches_vec_encode() -> Result<(), Box<dyn std::error::Erro
         id: u64::MAX,
         name: "byte-exact-parity".to_string(),
     };
-    let expected = zebin::encode(&user)?;
+    let expected = encode(&user)?;
 
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, expected.len());
@@ -155,7 +156,7 @@ fn test_mmap_encoder_overflow_returns_buffer_too_small() -> Result<(), Box<dyn s
         id: 9,
         name: "overflow".to_string(),
     };
-    let expected = zebin::encode(&user)?;
+    let expected = encode(&user)?;
     assert!(expected.len() > 1, "archive must be larger than 1 byte");
 
     let path = temp_archive_path();

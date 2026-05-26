@@ -1,4 +1,5 @@
-use zebin::{ZebinArchive, ZebinEncode};
+use zebin::io::SliceEncoder;
+use zebin::{ZebinArchive, ZebinEncode, decode, writer};
 
 #[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
@@ -119,16 +120,11 @@ pub struct SimpleProfile {
 fn test_struct_restore_no_alloc() {
     let profile = SimpleProfile { id: 42, val: 99 };
     let mut buf = [0u8; 128];
-    let mut writer = zebin::writer(&profile).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
-    let restored: SimpleProfile = zebin::decode::<SimpleProfile>(&buf[..written]).unwrap();
+    let mut encoder = SliceEncoder::new(&mut buf, 0);
+    let mut writer_obj = writer::<&SimpleProfile, _>(&mut encoder).unwrap();
+    writer_obj.write_all(&profile).unwrap();
+    let written = encoder.written();
+    let restored: SimpleProfile = decode::<SimpleProfile>(&buf[..written]).unwrap();
     assert_eq!(restored, profile);
 }
 
@@ -142,30 +138,20 @@ pub enum SimplePacket {
 fn test_enum_restore_no_alloc() {
     let ping = SimplePacket::Ping;
     let mut buf = [0u8; 64];
-    let mut writer = zebin::writer(&ping).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
-    let restored: SimplePacket = zebin::decode::<SimplePacket>(&buf[..written]).unwrap();
+    let mut encoder = SliceEncoder::new(&mut buf, 0);
+    let mut writer_obj = writer::<&SimplePacket, _>(&mut encoder).unwrap();
+    writer_obj.write_all(&ping).unwrap();
+    let written = encoder.written();
+    let restored: SimplePacket = decode::<SimplePacket>(&buf[..written]).unwrap();
     assert_eq!(restored, ping);
 
     let data = SimplePacket::Data(123);
     let mut buf = [0u8; 64];
-    let mut writer = zebin::writer(&data).unwrap();
-    let mut written = 0;
-    while !writer.is_finished() {
-        let n = writer.write(&mut buf[written..]).unwrap();
-        if n == 0 {
-            break;
-        }
-        written += n;
-    }
-    let restored: SimplePacket = zebin::decode::<SimplePacket>(&buf[..written]).unwrap();
+    let mut encoder = SliceEncoder::new(&mut buf, 0);
+    let mut writer_obj = writer::<&SimplePacket, _>(&mut encoder).unwrap();
+    writer_obj.write_all(&data).unwrap();
+    let written = encoder.written();
+    let restored: SimplePacket = decode::<SimplePacket>(&buf[..written]).unwrap();
     assert_eq!(restored, data);
 }
 
@@ -178,7 +164,7 @@ fn test_ref_encode_restore() {
         tags: vec!["rust".to_string(), "zebin".to_string()],
     };
     let buf = zebin::encode(&user).unwrap();
-    let restored: UserProfile = zebin::decode::<UserProfile>(&buf).unwrap();
+    let restored: UserProfile = decode::<UserProfile>(&buf).unwrap();
 
     assert_eq!(restored, user);
 }
