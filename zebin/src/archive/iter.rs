@@ -16,7 +16,6 @@ use alloc::{
 #[cfg(feature = "std")]
 use std::collections::{HashMap, HashSet};
 
-/// Validation context used during lazy decoding.
 struct DummyContext;
 
 impl ValidationContext for DummyContext {
@@ -48,6 +47,11 @@ impl ValidationContext for DummyContext {
         Ok(())
     }
 }
+
+/// Maximum number of elements accepted in a single sequence during
+/// decoding.  Prevents maliciously crafted input from triggering
+/// integer-overflow or denial-of-service via extremely large `len` fields.
+const MAX_SEQUENCE_LEN: usize = 1 << 28; // 256 Mi elements
 
 /// Wrapper to enable encoding support for arbitrary types that implement `IntoIterator`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,7 +88,6 @@ where
 }
 
 /// The archived representation of an iterator-based collection.
-/// Decodes in O(1) time without any memory allocation.
 #[derive(Clone)]
 pub struct ArchivedIter<'a, A> {
     bytes: &'a [u8],
@@ -135,24 +138,7 @@ where
         C: ValidationContext + ?Sized,
     {
         let start_pos = cursor.pos();
-        let mut len = 0;
-        loop {
-            let marker = cursor.read_u8(context)?;
-            if marker == 0 {
-                break;
-            } else if marker != 1 {
-                return Err(DecodeError::ValidationError {
-                    message: "Invalid sequence marker",
-                    pos: cursor.pos() - 1,
-                });
-            }
-            if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
-                cursor.align(<A as ArchivedLayout>::ALIGNMENT, context)?;
-            }
-            let mut guard = context.push_index(len);
-            A::validate(cursor, &mut *guard)?;
-            len += 1;
-        }
+        let len = Self::decode_sequence_body(cursor, context)?;
         Ok(ArchivedIter {
             bytes: cursor.bytes(),
             start_pos,
@@ -165,7 +151,21 @@ where
     where
         C: ValidationContext + ?Sized,
     {
-        let mut len = 0;
+        Self::decode_sequence_body(cursor, context)?;
+        Ok(())
+    }
+}
+
+impl<'marker, A> ArchivedIter<'marker, A> {
+    fn decode_sequence_body<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<usize, DecodeError>
+    where
+        A: Decode<'a>,
+        C: ValidationContext + ?Sized,
+    {
+        let mut len = 0usize;
         loop {
             let marker = cursor.read_u8(context)?;
             if marker == 0 {
@@ -176,6 +176,12 @@ where
                     pos: cursor.pos() - 1,
                 });
             }
+            if len >= MAX_SEQUENCE_LEN {
+                return Err(DecodeError::ValidationError {
+                    message: "Sequence length exceeds safety limit",
+                    pos: cursor.pos() - 1,
+                });
+            }
             if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
                 cursor.align(<A as ArchivedLayout>::ALIGNMENT, context)?;
             }
@@ -183,7 +189,7 @@ where
             A::validate(cursor, &mut *guard)?;
             len += 1;
         }
-        Ok(())
+        Ok(len)
     }
 }
 
@@ -224,11 +230,9 @@ impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
 }
 
 #[cfg(feature = "alloc")]
-fn decode_next_element<'a, T: Decode<'a>>(
-    cursor: &mut Cursor<'a>,
-    context: &mut DummyContext,
-) -> Result<T::View, ZebinError> {
-    let marker = cursor.read_u8(context)?;
+fn decode_next_element<'a, T: Decode<'a>>(cursor: &mut Cursor<'a>) -> Result<T::View, ZebinError> {
+    let mut context = DummyContext;
+    let marker = cursor.read_u8(&mut context)?;
     if marker != 1 {
         return Err(ZebinError::Decode(DecodeError::ValidationError {
             message: "Invalid sequence marker",
@@ -236,9 +240,9 @@ fn decode_next_element<'a, T: Decode<'a>>(
         }));
     }
     if <T as ArchivedLayout>::FIXED_SIZE.is_some() {
-        cursor.align(<T as ArchivedLayout>::ALIGNMENT, context)?;
+        cursor.align(<T as ArchivedLayout>::ALIGNMENT, &mut context)?;
     }
-    Ok(T::decode(cursor, context)?)
+    Ok(T::decode(cursor, &mut context)?)
 }
 
 #[cfg(feature = "alloc")]
@@ -250,9 +254,8 @@ where
     fn restore(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
-        let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor)?;
             out.push(view.restore()?);
         }
         Ok(out)
@@ -268,9 +271,8 @@ where
     fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut out = VecDeque::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
-        let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor)?;
             out.push_back(view.restore()?);
         }
         Ok(out)
@@ -287,9 +289,8 @@ where
     fn restore(&self) -> Result<BTreeSet<U>, ZebinError> {
         let mut out = BTreeSet::new();
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
-        let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor)?;
             out.insert(view.restore()?);
         }
         Ok(out)
@@ -306,9 +307,8 @@ where
     fn restore(&self) -> Result<BinaryHeap<U>, ZebinError> {
         let mut out = BinaryHeap::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
-        let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor)?;
             out.push(view.restore()?);
         }
         Ok(out)
@@ -325,9 +325,8 @@ where
     fn restore(&self) -> Result<HashSet<U>, ZebinError> {
         let mut out = HashSet::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
-        let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor)?;
             out.insert(view.restore()?);
         }
         Ok(out)
@@ -355,9 +354,8 @@ where
     fn restore(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
         let mut map = BTreeMap::new();
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
-        let mut context = DummyContext;
         for _ in 0..self.len {
-            let (k, v) = decode_next_element::<T>(&mut cursor, &mut context)?;
+            let (k, v) = decode_next_element::<T>(&mut cursor)?;
             map.insert(k.restore()?, v.restore()?);
         }
         Ok(map)
@@ -375,9 +373,8 @@ where
     fn restore(&self) -> Result<HashMap<UK, UV>, ZebinError> {
         let mut map = HashMap::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
-        let mut context = DummyContext;
         for _ in 0..self.len {
-            let (k, v) = decode_next_element::<T>(&mut cursor, &mut context)?;
+            let (k, v) = decode_next_element::<T>(&mut cursor)?;
             map.insert(k.restore()?, v.restore()?);
         }
         Ok(map)
@@ -481,6 +478,27 @@ impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T> {
     }
 }
 
+impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T>
+where
+    T::Archived: ArchivedLayout,
+{
+    #[inline]
+    fn try_align<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<bool, ZebinError> {
+        if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_none() || self.aligned {
+            return Ok(true);
+        }
+        if sink
+            .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
+            .is_complete()
+        {
+            self.aligned = true;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
 impl<'a, T: Encode + Archive + 'a> Default for SeqEncoder<'a, T> {
     fn default() -> Self {
         Self::new()
@@ -550,6 +568,7 @@ where
 
     fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         loop {
+            // ── Phase 1: flush the 1-byte sequence marker ──────────────────
             if self.marker_cursor < 1 {
                 let remaining = 1 - self.marker_cursor;
                 if sink
@@ -561,27 +580,23 @@ where
                 }
             }
 
+            // ── Phase 2: terminator byte written → we are done ─────────────
             if self.finished && self.marker_cursor == 1 {
                 return Ok(Poll::Ready(()));
             }
 
+            // ── Phase 3: resume / complete an in-progress element encoder ──
             if self.has_active_encoder {
-                if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
-                    if sink
-                        .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
-                        .is_complete()
-                    {
-                        self.aligned = true;
-                    } else {
-                        return Ok(Poll::Pending);
-                    }
+                // Shared alignment gate used by both the active-encoder and
+                // the new-item branches.  Extracted here so the logic lives
+                // in exactly one place.
+                if !self.try_align(sink)? {
+                    return Ok(Poll::Pending);
                 }
 
                 if self.encoder_started {
                     let encoder = self.item_encoder.as_mut().expect("active encoder missing");
-                    let res = encoder.poll_pending(sink)?;
-
-                    match res {
+                    match encoder.poll_pending(sink)? {
                         Poll::Pending => return Ok(Poll::Pending),
                         Poll::Ready(()) => {}
                     }
@@ -597,23 +612,16 @@ where
                 self.aligned = false;
             }
 
+            // ── Phase 4: start encoding the next queued item ───────────────
             if let Some(item) = self.next_item.take() {
-                if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
-                    if sink
-                        .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
-                        .is_complete()
-                    {
-                        self.aligned = true;
-                    } else {
-                        self.next_item = Some(item);
-                        return Ok(Poll::Pending);
-                    }
+                // Same alignment gate as Phase 3.
+                if !self.try_align(sink)? {
+                    self.next_item = Some(item);
+                    return Ok(Poll::Pending);
                 }
 
                 let encoder = self.item_encoder.get_or_insert_with(T::encoder);
-                let res = encoder.input(item, sink)?;
-
-                match res {
+                match encoder.input(item, sink)? {
                     Poll::Pending => {
                         self.has_active_encoder = true;
                         self.encoder_started = true;
@@ -764,22 +772,24 @@ where
         let alignment = <T::Archived as ArchivedLayout>::ALIGNMENT.get();
         let fixed = <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some();
         for item in (&self.0).into_iter() {
+            // 1-byte sequence marker
             pos = pos
                 .checked_add(1)
-                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+                .ok_or(ZebinError::ArithmeticOverflow { pos })?;
             if fixed {
                 let pad = (alignment - (pos % alignment)) % alignment;
                 pos = pos
                     .checked_add(pad)
-                    .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+                    .ok_or(ZebinError::ArithmeticOverflow { pos })?;
             }
             pos = pos
                 .checked_add(item.measure_body()?)
-                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+                .ok_or(ZebinError::ArithmeticOverflow { pos })?;
         }
+        // Trailing 0x00 terminator byte
         pos = pos
             .checked_add(1)
-            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
         Ok(pos)
     }
 }

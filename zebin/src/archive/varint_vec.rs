@@ -27,13 +27,17 @@ impl<T> From<Vec<T>> for VarIntVec<T> {
 
 impl<'a, T: 'a + Clone> From<&'a [T]> for VarIntVec<T> {
     fn from(values: &'a [T]) -> Self {
-        Self { values: values.to_vec() }
+        Self {
+            values: values.to_vec(),
+        }
     }
 }
 
 impl<T: Clone> From<&Vec<T>> for VarIntVec<T> {
     fn from(values: &Vec<T>) -> Self {
-        Self { values: values.clone() }
+        Self {
+            values: values.clone(),
+        }
     }
 }
 
