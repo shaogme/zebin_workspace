@@ -12,46 +12,84 @@ use crate::{
     utils::{byteops, padding_for_alignment},
 };
 
+/// Storage mode indicating if it supports stream sharding.
+pub trait StorageMode {}
+
+/// Static storage mode. Doesn't support advance_shard (or it's a no-op).
+pub struct StaticMode;
+impl StorageMode for StaticMode {}
+
+/// Stream storage mode. Supports advance_shard to load next chunks.
+pub struct StreamMode;
+impl StorageMode for StreamMode {}
+
+/// Shard controller trait.
+pub trait Sharder {
+    fn advance(&mut self) -> Result<(), ZebinError>;
+}
+
+/// No-op sharder for static storage.
+pub struct NoSharder;
+impl Sharder for NoSharder {
+    #[inline]
+    fn advance(&mut self) -> Result<(), ZebinError> {
+        Err(ZebinError::BufferTooSmall { pos: 0, required: 1 })
+    }
+}
+
 /// Unified storage layer: byte-backed read access contract.
 pub trait Storage {
+    type Mode: StorageMode;
+    type Sharder<'a>: Sharder where Self: 'a;
+
     fn as_slice(&self) -> &[u8];
-    fn advance_shard(&mut self) -> Result<bool, ZebinError>;
+    fn sharder(&mut self) -> Self::Sharder<'_>;
 }
 
 /// Unified storage layer: byte-backed write access contract.
 pub trait StorageMut {
+    type Sharder<'a>: Sharder where Self: 'a;
+
     fn pos(&self) -> usize;
     fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
     fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError>;
     fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
-    fn advance_shard(&mut self) -> Result<bool, ZebinError>;
+    fn sharder(&mut self) -> Self::Sharder<'_>;
 }
 
-impl<S: Storage + ?Sized> Storage for &S {
+impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
+    type Mode = StaticMode;
+    type Sharder<'a> = NoSharder where Self: 'a;
+
     #[inline]
     fn as_slice(&self) -> &[u8] {
         (**self).as_slice()
     }
 
     #[inline]
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        Ok(false)
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        NoSharder
     }
 }
 
 impl<S: Storage + ?Sized> Storage for &mut S {
+    type Mode = S::Mode;
+    type Sharder<'a> = S::Sharder<'a> where Self: 'a;
+
     #[inline]
     fn as_slice(&self) -> &[u8] {
         (**self).as_slice()
     }
 
     #[inline]
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        (**self).advance_shard()
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        (**self).sharder()
     }
 }
 
 impl<S: StorageMut + ?Sized> StorageMut for &mut S {
+    type Sharder<'a> = S::Sharder<'a> where Self: 'a;
+
     #[inline]
     fn pos(&self) -> usize {
         (**self).pos()
@@ -73,33 +111,39 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     }
 
     #[inline]
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        (**self).advance_shard()
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        (**self).sharder()
     }
 }
 
 impl Storage for [u8] {
+    type Mode = StaticMode;
+    type Sharder<'a> = NoSharder where Self: 'a;
+
     #[inline]
     fn as_slice(&self) -> &[u8] {
         self
     }
 
     #[inline]
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        Ok(false)
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        NoSharder
     }
 }
 
 #[cfg(feature = "alloc")]
 impl Storage for Vec<u8> {
+    type Mode = StaticMode;
+    type Sharder<'a> = NoSharder where Self: 'a;
+
     #[inline]
     fn as_slice(&self) -> &[u8] {
         self.as_slice()
     }
 
     #[inline]
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        Ok(false)
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        NoSharder
     }
 }
 
@@ -148,6 +192,8 @@ impl<'a> SliceEncoder<'a> {
 }
 
 impl StorageMut for SliceEncoder<'_> {
+    type Sharder<'b> = NoSharder where Self: 'b;
+
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -181,8 +227,8 @@ impl StorageMut for SliceEncoder<'_> {
         Ok(SinkProgress::from_accepted(len, written))
     }
 
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        Ok(false)
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        NoSharder
     }
 }
 
@@ -209,6 +255,8 @@ impl VecEncoder {
 
 #[cfg(feature = "alloc")]
 impl StorageMut for VecEncoder {
+    type Sharder<'b> = NoSharder where Self: 'b;
+
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -242,7 +290,7 @@ impl StorageMut for VecEncoder {
         Ok(SinkProgress::Complete)
     }
 
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        Ok(false)
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        NoSharder
     }
 }

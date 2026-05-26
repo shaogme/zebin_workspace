@@ -41,6 +41,8 @@ impl Mmap {
 }
 
 impl Storage for Mmap {
+    type Mode = crate::io::StaticMode;
+
     #[inline]
     fn as_slice(&self) -> &[u8] {
         &self.data
@@ -170,6 +172,8 @@ impl MmapEncoder {
 }
 
 impl StorageMut for MmapEncoder {
+    type Sharder<'a> = crate::io::NoSharder where Self: 'a;
+
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -197,7 +201,7 @@ impl StorageMut for MmapEncoder {
         Ok(SinkProgress::Complete)
     }
 
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        Ok(false)
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        crate::io::NoSharder
     }
 }

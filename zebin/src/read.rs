@@ -1,4 +1,4 @@
-use crate::io::Storage;
+use crate::io::{Storage, Sharder};
 use crate::prelude::*;
 
 /// Safe access layer output that keeps the validated byte slice alive.
@@ -42,14 +42,8 @@ where
     {
         let len = self.storage.as_slice().len();
         if self.offset >= len {
-            if self.storage.advance_shard()? {
-                self.offset = 0;
-            } else {
-                return Err(ZebinError::BufferTooSmall {
-                    pos: self.offset,
-                    required: 1,
-                });
-            }
+            self.storage.sharder().advance()?;
+            self.offset = 0;
         }
         let bytes = self.storage.as_slice();
         let remaining = &bytes[self.offset..];

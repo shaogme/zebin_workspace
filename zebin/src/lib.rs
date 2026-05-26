@@ -45,6 +45,7 @@ pub mod prelude {
             Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
             ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
             SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut, ZebinReader, ZebinWriter,
+            StorageMode, StaticMode, StreamMode, Sharder, NoSharder,
             decode, reader, writer,
         },
         schema::{
@@ -103,7 +104,7 @@ pub mod io {
     pub use crate::io_impl::storage::mmap::MmapEncoder;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
-    pub use crate::io_impl::storage::{Storage, StorageMut};
+    pub use crate::io_impl::storage::{Storage, StorageMut, StorageMode, StaticMode, StreamMode, Sharder, NoSharder};
     pub use crate::pub_fn::{decode, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};

@@ -49,6 +49,8 @@ fn test_aligned_containers_chunked_writer_matches_full_encode() {
     }
 
     impl StorageMut for LimitedSink<'_> {
+        type Sharder<'b> = zebin::io::NoSharder where Self: 'b;
+
         fn pos(&self) -> usize {
             self.buf.len()
         }
@@ -84,8 +86,8 @@ fn test_aligned_containers_chunked_writer_matches_full_encode() {
             Ok(SinkProgress::from_accepted(len, skip_len))
         }
 
-        fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-            Ok(false)
+        fn sharder(&mut self) -> Self::Sharder<'_> {
+            zebin::io::NoSharder
         }
     }
 

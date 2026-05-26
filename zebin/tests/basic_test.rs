@@ -63,6 +63,8 @@ fn test_chunked_writer_resume() {
     }
 
     impl StorageMut for LimitedSink<'_> {
+        type Sharder<'b> = zebin::io::NoSharder where Self: 'b;
+
         fn pos(&self) -> usize {
             self.buf.len()
         }
@@ -98,8 +100,8 @@ fn test_chunked_writer_resume() {
             Ok(SinkProgress::from_accepted(len, skip_len))
         }
 
-        fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-            Ok(false)
+        fn sharder(&mut self) -> Self::Sharder<'_> {
+            zebin::io::NoSharder
         }
     }
 
@@ -248,7 +250,22 @@ struct ShardedStorage {
 }
 
 #[cfg(feature = "alloc")]
+impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
+    fn advance(&mut self) -> Result<(), ZebinError> {
+        if self.current_index + 1 < self.shards.len() {
+            self.current_index += 1;
+            Ok(())
+        } else {
+            Err(ZebinError::BufferTooSmall { pos: 0, required: 1 })
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl zebin::io::Storage for ShardedStorage {
+    type Mode = zebin::io::StreamMode;
+    type Sharder<'a> = &'a mut ShardedStorage where Self: 'a;
+
     fn as_slice(&self) -> &[u8] {
         if self.current_index < self.shards.len() {
             &self.shards[self.current_index]
@@ -257,19 +274,22 @@ impl zebin::io::Storage for ShardedStorage {
         }
     }
 
-    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
-        if self.current_index + 1 < self.shards.len() {
-            self.current_index += 1;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        self
     }
 }
 
 #[cfg(feature = "alloc")]
 #[test]
 fn test_sharded_storage_stream() {
+    // Compile-time checks for Storage bounds
+    fn assert_storage<S: zebin::io::Storage + ?Sized>() {}
+    assert_storage::<[u8]>();
+    assert_storage::<&[u8]>();
+    assert_storage::<ShardedStorage>();
+    // Uncommenting the line below must fail to compile:
+    // assert_storage::<&ShardedStorage>();
+
     let u1 = UserProfile {
         id: 1,
         username: "Alice".to_string(),
