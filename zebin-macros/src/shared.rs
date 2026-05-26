@@ -135,11 +135,6 @@ pub fn field_view_type(field: &FieldSpec<'_>) -> TokenStream {
     quote! { <#archived as zebin::Decode<'a>>::View }
 }
 
-pub fn field_len_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
-    let base = field_user_ident(record, index);
-    Ident::new(&format!("{}_len", base), base.span())
-}
-
 pub fn active_fields_by_id<'a>(record: &'a RecordSpec<'a>) -> Vec<(usize, &'a FieldSpec<'a>)> {
     let mut fields: Vec<_> = record.active_fields().collect();
     fields.sort_by_key(|(_, field)| field.field_id.unwrap_or(u16::MAX));

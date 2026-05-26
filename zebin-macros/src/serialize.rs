@@ -3,41 +3,26 @@ use quote::{format_ident, quote};
 use syn::{DeriveInput, Ident};
 
 use crate::shared::{
-    ItemSpec, RecordSpec, RecordStyle, active_fields_by_id, field_encoding, field_len_ident,
-    field_state_type, has_schema, parse_item, state_name, variant_state_name,
+    ItemSpec, RecordSpec, RecordStyle, active_fields_by_id, field_encoding, field_state_type,
+    has_schema, parse_item, state_name, variant_state_name,
 };
-
-fn field_started_ident(field: &crate::shared::FieldSpec<'_>) -> Ident {
-    format_ident!("__started_{}", field.state_ident)
-}
-
-/// Identifier for the per-field `Option<FieldTy>` slot that holds destructured input.
-fn field_slot_ident(field: &crate::shared::FieldSpec<'_>) -> Ident {
-    format_ident!("__slot_{}", field.state_ident)
-}
 
 fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut fields = Vec::new();
     if has_schema(record) {
-        fields.push(quote! { pub __schema_encoder: zebin::io::SchemaObjectEncoder });
+        fields.push(
+            quote! { pub __schema_encoder: zebin::utils::macros_helpers::SchemaObjectEncoder },
+        );
     }
-    for (index, field) in record.active_fields() {
+    for (_index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
         let state_ty = field_state_type(field);
-        fields.push(quote! { pub #state_ident: #state_ty });
-        let started_ident = field_started_ident(field);
-        fields.push(quote! { pub #started_ident: bool });
-        let slot_ident = field_slot_ident(field);
-        let ty = field.ty;
-        // Always store the destructured field as Option<FieldTy>.
-        // For packed wrappers, field is consumed via .as_ref() into a wrapper
-        // each poll iteration so we keep the Option populated for the duration.
-        fields.push(quote! { pub #slot_ident: ::core::option::Option<#ty> });
         if has_schema(record) {
-            let len_ident = field_len_ident(record, index);
-            fields.push(quote! { pub #len_ident: u32 });
-            let entry_encoder_ident = format_ident!("__field_entry_encoder_{}", index);
-            fields.push(quote! { pub #entry_encoder_ident: zebin::io::FieldEntryEncoder });
+            fields.push(quote! { pub #state_ident: zebin::utils::macros_helpers::SchemaFieldState<#state_ty> });
+        } else {
+            fields.push(
+                quote! { pub #state_ident: zebin::utils::macros_helpers::FieldState<#state_ty> },
+            );
         }
     }
     fields
@@ -75,25 +60,22 @@ fn field_measure_expr(
 fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut inits = Vec::new();
     if has_schema(record) {
-        inits.push(quote! { __schema_encoder: zebin::io::SchemaObjectEncoder::new() });
+        inits.push(
+            quote! { __schema_encoder: zebin::utils::macros_helpers::SchemaObjectEncoder::new() },
+        );
     }
-    for (index, field) in record.active_fields() {
+    for (_index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
-        let started_ident = field_started_ident(field);
-        let slot_ident = field_slot_ident(field);
-        inits.push(quote! { #started_ident: false });
-        inits.push(quote! { #slot_ident: ::core::option::Option::None });
-        if let Some(_wrapper) = crate::shared::packed_wrapper_type_expr(field) {
-            inits.push(quote! { #state_ident: ::core::default::Default::default() });
+        let init_encoder = if let Some(_wrapper) = crate::shared::packed_wrapper_type_expr(field) {
+            quote! { ::core::default::Default::default() }
         } else {
             let ty = field.ty;
-            inits.push(quote! { #state_ident: <#ty as zebin::Encode>::encoder() });
-        }
+            quote! { <#ty as zebin::Encode>::encoder() }
+        };
         if has_schema(record) {
-            let len_ident = field_len_ident(record, index);
-            inits.push(quote! { #len_ident: 0 });
-            let entry_encoder_ident = format_ident!("__field_entry_encoder_{}", index);
-            inits.push(quote! { #entry_encoder_ident: zebin::io::FieldEntryEncoder::new() });
+            inits.push(quote! { #state_ident: zebin::utils::macros_helpers::SchemaFieldState::new(#init_encoder) });
+        } else {
+            inits.push(quote! { #state_ident: zebin::utils::macros_helpers::FieldState::new(#init_encoder) });
         }
     }
     inits
@@ -155,10 +137,7 @@ fn field_user_ident_for(
     }
 }
 
-/// Builds the body of `poll_pending` after the input has been destructured into
-/// per-field slots. Each field block:
-/// - if not started: `take()` from slot, call `state.input(val, encoder)`;
-/// - if started: call `state.poll_pending(encoder)`.
+/// Builds the body of `poll_pending` after the input has been destructured.
 fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let fields = active_fields_by_id(record);
     let field_count = fields.len();
@@ -179,53 +158,32 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
 
     let payload_polls = fields.iter().map(|(_, field)| {
         let state_ident = &field.state_ident;
-        let started_ident = field_started_ident(field);
-        let slot_ident = field_slot_ident(field);
-
-        // Build the value expression we hand to state.input(...). For packed
-        // wrappers we wrap the slot's owned contents into the owned wrapper
-        // (PackedBoolVec / PackedU8Vec) which is moved by value.
-        let input_val_expr = if let Some(wrapper) = crate::shared::packed_wrapper_type_expr(field) {
+        if has_schema(record) {
             quote! {
-                <#wrapper>::new(self.#slot_ident.take().expect("packed field already consumed"))
+                if self.#state_ident.state.poll_write(encoder)?.is_pending() {
+                    return Ok(::core::task::Poll::Pending);
+                }
             }
         } else {
-            quote! { self.#slot_ident.take().expect("field already consumed") }
-        };
-
-        quote! {
-            if !self.#started_ident {
-                match self.#state_ident.input(#input_val_expr, encoder)? {
-                    ::core::task::Poll::Pending => {
-                        self.#started_ident = true;
-                        return Ok(::core::task::Poll::Pending);
-                    }
-                    ::core::task::Poll::Ready(()) => {
-                        self.#started_ident = true;
-                    }
-                }
-            } else {
-                match self.#state_ident.poll_pending(encoder)? {
-                    ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
-                    ::core::task::Poll::Ready(()) => {}
+            quote! {
+                if self.#state_ident.poll_write(encoder)?.is_pending() {
+                    return Ok(::core::task::Poll::Pending);
                 }
             }
         }
     });
 
     let table_write_and_len = if has_schema(record) {
-        let table_polls = fields.iter().map(|(index, field)| {
-            let len_ident = field_len_ident(record, *index);
-            let entry_encoder_ident = format_ident!("__field_entry_encoder_{}", *index);
+        let table_polls = fields.iter().map(|(_, field)| {
+            let state_ident = &field.state_ident;
             let field_id = field.field_id.expect("field ids validated");
             let encoding = field_encoding(field);
 
             quote! {
-                if self.#entry_encoder_ident.poll_write(
+                if self.#state_ident.poll_write_entry(
                     encoder,
                     #field_id as u16,
                     #encoding,
-                    self.#len_ident,
                 )?.is_pending() {
                     return Ok(::core::task::Poll::Pending);
                 }
@@ -266,13 +224,6 @@ fn record_state_def(
 }
 
 /// Generates the `Encoder` impl for a record state struct.
-///
-/// On `input(item)`:
-/// 1. destructure `item` into per-field locals;
-/// 2. for each schema field, call `MeasureBody::measure_body` on the local
-///    (or via packed wrapper) and store into `#len_ident`;
-/// 3. move each local into its slot;
-/// 4. delegate to `poll_pending`.
 fn record_state_input_impl(
     state_name: &Ident,
     input_ty: proc_macro2::TokenStream,
@@ -286,30 +237,42 @@ fn record_state_input_impl(
     let mut measure_and_store: Vec<proc_macro2::TokenStream> = Vec::new();
     for (index, field) in record.active_fields() {
         let user_id = field_user_ident_for(record, index, field);
-        let slot_ident = field_slot_ident(field);
+        let state_ident = &field.state_ident;
+
+        // Build the value expression we hand to state.input(...). For packed
+        // wrappers we wrap the slot's owned contents into the owned wrapper
+        // (PackedBoolVec / PackedU8Vec) which is moved by value.
+        let input_val_expr = if let Some(wrapper) = crate::shared::packed_wrapper_type_expr(field) {
+            quote! {
+                <#wrapper>::new(#user_id)
+            }
+        } else {
+            quote! { #user_id }
+        };
 
         if has_schema(record) {
-            let len_ident = field_len_ident(record, index);
             let measure_expr = field_measure_expr(field, quote! { &#user_id });
             measure_and_store.push(quote! {
-                {
-                    let __zebin_len = #measure_expr;
-                    self.#len_ident = u32::try_from(__zebin_len).map_err(|_| zebin::ZebinError::SerializationError {
-                        pos: 0,
-                        message: "field payload length exceeds u32 range",
-                    })?;
-                }
+                let __measure = #measure_expr;
+                self.#state_ident.fill(#input_val_expr, __measure)?;
+            });
+        } else {
+            measure_and_store.push(quote! {
+                self.#state_ident.fill(#input_val_expr);
             });
         }
-        measure_and_store.push(quote! {
-            self.#slot_ident = ::core::option::Option::Some(#user_id);
-        });
     }
 
     let finishes = record.active_fields().map(|(_, field)| {
         let state_ident = &field.state_ident;
-        quote! {
-            let _ = self.#state_ident.finish(sink)?;
+        if has_schema(record) {
+            quote! {
+                let _ = self.#state_ident.state.encoder.finish(sink)?;
+            }
+        } else {
+            quote! {
+                let _ = self.#state_ident.encoder.finish(sink)?;
+            }
         }
     });
     quote! {
@@ -488,8 +451,7 @@ fn enum_impl(
         .collect();
 
     // For each variant, when we see this variant in `input`, set up its tag
-    // and a fresh payload state. Note: payload_assign_arms used to populate
-    // `__item: Option<&T>` — that field no longer exists, so we drop those.
+    // and a fresh payload state.
     let begin_matches: Vec<_> = variants
         .iter()
         .enumerate()
@@ -558,9 +520,7 @@ fn enum_impl(
         }
 
         #vis struct #enum_state<'a> {
-            tag_encoder: zebin::io::TagEncoder,
-            payload: Option<#payload_state<'a>>,
-            pending_item: Option<#name>,
+            inner: zebin::utils::macros_helpers::EnumEncoder<#payload_state<'a>>,
         }
 
         impl<'a> zebin::io::Encoder for #enum_state<'a> {
@@ -569,38 +529,14 @@ fn enum_impl(
                 let (tag_val, payload_val) = match &item {
                     #(#begin_matches,)*
                 };
-                self.tag_encoder.input(tag_val);
-                self.payload = payload_val;
-                self.pending_item = Some(item);
+                self.inner.fill(tag_val, payload_val, item);
                 self.poll_pending(sink)
             }
             fn poll_pending<E: zebin::io::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
-                if self.tag_encoder.poll_write(encoder)?.is_pending() {
-                    return Ok(::core::task::Poll::Pending);
-                }
-                if let Some(payload) = &mut self.payload {
-                    if let Some(item) = self.pending_item.take() {
-                        match payload.input(item, encoder)? {
-                            ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
-                            ::core::task::Poll::Ready(()) => return Ok(::core::task::Poll::Ready(())),
-                        }
-                    }
-                    match payload.poll_pending(encoder)? {
-                        ::core::task::Poll::Pending => Ok(::core::task::Poll::Pending),
-                        ::core::task::Poll::Ready(()) => {
-                            Ok(::core::task::Poll::Ready(()))
-                        }
-                    }
-                } else {
-                    Ok(::core::task::Poll::Ready(()))
-                }
+                self.inner.poll_write_pending(encoder)
             }
             fn finish<S: zebin::io::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
-                if let Some(payload) = self.payload {
-                    payload.finish(sink)
-                } else {
-                    Ok(::core::task::Poll::Ready(()))
-                }
+                self.inner.finish_inner(sink)
             }
         }
 
@@ -609,9 +545,7 @@ fn enum_impl(
             type Encoder<'a> = #enum_state<'a> where Self: 'a;
             fn encoder<'a>() -> Self::Encoder<'a> where Self: 'a {
                 #enum_state {
-                    tag_encoder: zebin::io::TagEncoder::new(),
-                    payload: None,
-                    pending_item: None,
+                    inner: zebin::utils::macros_helpers::EnumEncoder::new(),
                 }
             }
         }
