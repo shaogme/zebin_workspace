@@ -113,43 +113,12 @@ fn variant_snake_case(variant: &Ident) -> String {
 
 // --- Logic functions ---
 
-fn is_length_prefixed_like(ty: &Type) -> bool {
-    match ty {
-        Type::Path(path) => {
-            let Some(segment) = path.path.segments.last() else {
-                return false;
-            };
-            matches!(
-                segment.ident.to_string().as_str(),
-                "String" | "Vec" | "VecDeque" | "Box" | "Rc" | "Arc" | "Cow" | "VarIntVec"
-            )
-        }
-        _ => false,
-    }
-}
-
-fn is_varint_like(ty: &Type) -> bool {
-    match ty {
-        Type::Path(path) => path
-            .path
-            .segments
-            .last()
-            .is_some_and(|segment| segment.ident == "VarInt"),
-        _ => false,
-    }
-}
-
 pub fn field_encoding(field: &FieldSpec<'_>) -> TokenStream {
     if field.packed_bits.is_some() {
         return quote! { zebin::schema::FieldEncoding::PackedBits };
     }
-    if is_varint_like(field.ty) {
-        return quote! { zebin::schema::FieldEncoding::VarInt };
-    }
-    if is_length_prefixed_like(field.ty) {
-        return quote! { zebin::schema::FieldEncoding::LengthPrefixed };
-    }
-    quote! { zebin::schema::FieldEncoding::Fixed }
+    let archived_ty = field_archived_type(field);
+    quote! { <#archived_ty as zebin::io::ArchivedLayout>::FIELD_ENCODING }
 }
 
 pub fn field_archived_type(field: &FieldSpec<'_>) -> TokenStream {
