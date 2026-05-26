@@ -352,8 +352,8 @@ where
     }
 
     fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
-        if self.stage == 0 {
-            if let Some((encoder, started)) = &mut self.key_encoder {
+        if self.stage == 0
+            && let Some((encoder, started)) = &mut self.key_encoder {
                 let progress = if !*started {
                     match encoder.input(self.key, sink)? {
                         Poll::Pending => {
@@ -375,10 +375,9 @@ where
                     }
                 }
             }
-        }
 
-        if self.stage == 1 {
-            if let Some((encoder, started)) = &mut self.value_encoder {
+        if self.stage == 1
+            && let Some((encoder, started)) = &mut self.value_encoder {
                 let progress = if !*started {
                     match encoder.input(self.value, sink)? {
                         Poll::Pending => {
@@ -400,7 +399,6 @@ where
                     }
                 }
             }
-        }
 
         Ok(Poll::Ready(()))
     }

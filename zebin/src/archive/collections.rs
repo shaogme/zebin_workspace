@@ -85,10 +85,8 @@ where
     where
         C: ValidationContext + ?Sized,
     {
-        let len = cursor.read_u32(context)? as usize;
-        let items = <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::decode_sequence(
-            cursor, len, context,
-        )?;
+        let items =
+            <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::decode_sequence(cursor, context)?;
         Ok(ArchivedVec::new(items))
     }
 
@@ -96,10 +94,7 @@ where
     where
         C: ValidationContext + ?Sized,
     {
-        let len = cursor.read_u32(context)? as usize;
-        <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::validate_sequence(
-            cursor, len, context,
-        )
+        <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::validate_sequence(cursor, context)
     }
 }
 
@@ -377,8 +372,8 @@ where
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
-        if self.stage == 0 {
-            if let Some((encoder, started)) = &mut self.key_encoder {
+        if self.stage == 0
+            && let Some((encoder, started)) = &mut self.key_encoder {
                 let progress = if !*started {
                     match encoder.input(self.key, sink)? {
                         Poll::Pending => {
@@ -400,10 +395,9 @@ where
                     }
                 }
             }
-        }
 
-        if self.stage == 1 {
-            if let Some((encoder, started)) = &mut self.value_encoder {
+        if self.stage == 1
+            && let Some((encoder, started)) = &mut self.value_encoder {
                 let progress = if !*started {
                     match encoder.input(self.value, sink)? {
                         Poll::Pending => {
@@ -425,7 +419,6 @@ where
                     }
                 }
             }
-        }
 
         Ok(Poll::Ready(()))
     }
@@ -435,12 +428,14 @@ pub struct MapEncoder<'a, K, V, Iter, I: ?Sized = ()>
 where
     K: Encode + Archive + 'a,
     V: Encode + Archive + 'a,
-    Iter: Iterator<Item = (&'a K, &'a V)> + ExactSizeIterator,
+    Iter: Iterator<Item = (&'a K, &'a V)>,
 {
     iter: Iter,
-    len_prefix: [u8; 4],
-    prefix_cursor: usize,
+    next_item: Option<(&'a K, &'a V)>,
+    marker: [u8; 1],
+    marker_cursor: usize,
     current_encoder: Option<TupleRefEncoder<'a, K, V>>,
+    finished_sentinel: bool,
     _phantom: core::marker::PhantomData<&'a I>,
 }
 
@@ -448,18 +443,16 @@ impl<'a, K, V, Iter, I: ?Sized> MapEncoder<'a, K, V, Iter, I>
 where
     K: Encode + Archive + 'a,
     V: Encode + Archive + 'a,
-    Iter: Iterator<Item = (&'a K, &'a V)> + ExactSizeIterator,
+    Iter: Iterator<Item = (&'a K, &'a V)>,
 {
     pub fn new(iter: Iter) -> Result<Self, ZebinError> {
-        let len = u32::try_from(iter.len()).map_err(|_| ZebinError::SerializationError {
-            pos: 0,
-            message: "length exceeds u32 range",
-        })?;
         Ok(Self {
             iter,
-            len_prefix: len.to_le_bytes(),
-            prefix_cursor: 0,
+            next_item: None,
+            marker: [0],
+            marker_cursor: 1,
             current_encoder: None,
+            finished_sentinel: false,
             _phantom: core::marker::PhantomData,
         })
     }
@@ -469,7 +462,7 @@ impl<'a, K, V, Iter, I: ?Sized> Encoder<'a> for MapEncoder<'a, K, V, Iter, I>
 where
     K: Encode + Archive + 'a,
     V: Encode + Archive + 'a,
-    Iter: Iterator<Item = (&'a K, &'a V)> + ExactSizeIterator,
+    Iter: Iterator<Item = (&'a K, &'a V)>,
     I: 'a,
 {
     type Input = &'a I;
@@ -486,25 +479,20 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        if self.prefix_cursor < self.len_prefix.len() {
-            let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if sink
-                .write(&self.len_prefix[self.prefix_cursor..])?
-                .advance_cursor(&mut self.prefix_cursor, remaining)
-                .is_pending()
-            {
-                return Ok(core::task::Poll::Pending);
-            }
-        }
-
         loop {
-            if self.current_encoder.is_none() {
-                if let Some((k, v)) = self.iter.next() {
-                    let encoder = TupleRefEncoder::new(k, v)?;
-                    self.current_encoder = Some(encoder);
-                } else {
-                    break;
+            if self.marker_cursor < 1 {
+                let remaining = 1 - self.marker_cursor;
+                if sink
+                    .write(&self.marker[self.marker_cursor..])?
+                    .advance_cursor(&mut self.marker_cursor, remaining)
+                    .is_pending()
+                {
+                    return Ok(core::task::Poll::Pending);
                 }
+            }
+
+            if self.finished_sentinel && self.marker_cursor == 1 {
+                return Ok(core::task::Poll::Ready(()));
             }
 
             if let Some(encoder) = &mut self.current_encoder {
@@ -515,9 +503,25 @@ where
                     }
                 }
             }
-        }
 
-        Ok(core::task::Poll::Ready(()))
+            if self.next_item.is_none() && !self.finished_sentinel {
+                if let Some((k, v)) = self.iter.next() {
+                    self.next_item = Some((k, v));
+                    self.marker = [1];
+                    self.marker_cursor = 0;
+                } else {
+                    self.marker = [0];
+                    self.marker_cursor = 0;
+                    self.finished_sentinel = true;
+                }
+                continue;
+            }
+
+            if let Some((k, v)) = self.next_item.take() {
+                let encoder = TupleRefEncoder::new(k, v)?;
+                self.current_encoder = Some(encoder);
+            }
+        }
     }
 
     fn finish<Sink: ByteSink + ?Sized>(

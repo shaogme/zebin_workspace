@@ -42,7 +42,7 @@ fn test_validate_detailed_reports_logical_path() {
 
     let mut buf = zebin::encode(&value).unwrap();
     // Corrupt bool value (neither 0 nor 1)
-    buf[8] = 2;
+    buf[5] = 2;
 
     let mut stack = ValidationPathStack::new();
     let err = validate_detailed::<Parent>(&buf, &mut stack).unwrap_err();
@@ -188,21 +188,23 @@ fn test_validate_detailed_reports_trailing_bytes_at_root() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_reader_rejects_invalid_sequence_length_before_building_view() {
-    let value = Parent { children: vec![] };
+fn test_reader_rejects_invalid_sequence_marker_before_building_view() {
+    let value = Parent {
+        children: vec![Child { flag: true }],
+    };
 
     let mut buf = zebin::encode(&value).unwrap();
-    buf[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    buf[4] = 2;
 
     let err = match zebin::reader::<Parent>(&buf) {
-        Ok(_) => panic!("reader accepted invalid sequence length"),
+        Ok(_) => panic!("reader accepted invalid sequence marker"),
         Err(error) => error,
     };
 
     assert!(matches!(
         err,
         ZebinError::Decode(DecodeError::ValidationError {
-            message: "Pointer out of bounds",
+            message: "Invalid sequence marker",
             ..
         })
     ));

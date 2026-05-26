@@ -119,14 +119,24 @@ where
     where
         C: ValidationContext + ?Sized,
     {
-        let len = cursor.read_u32(context)? as usize;
-        if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
-            cursor.align(<A as ArchivedLayout>::ALIGNMENT, context)?;
-        }
         let start_pos = cursor.pos();
-        for index in 0..len {
-            let mut guard = context.push_index(index);
+        let mut len = 0;
+        loop {
+            let marker = cursor.read_u8(context)?;
+            if marker == 0 {
+                break;
+            } else if marker != 1 {
+                return Err(DecodeError::ValidationError {
+                    message: "Invalid sequence marker",
+                    pos: cursor.pos() - 1,
+                });
+            }
+            if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
+                cursor.align(<A as ArchivedLayout>::ALIGNMENT, context)?;
+            }
+            let mut guard = context.push_index(len);
             A::validate(cursor, &mut *guard)?;
+            len += 1;
         }
         Ok(ArchivedIter {
             bytes: cursor.bytes(),
@@ -140,13 +150,23 @@ where
     where
         C: ValidationContext + ?Sized,
     {
-        let len = cursor.read_u32(context)? as usize;
-        if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
-            cursor.align(<A as ArchivedLayout>::ALIGNMENT, context)?;
-        }
-        for index in 0..len {
-            let mut guard = context.push_index(index);
+        let mut len = 0;
+        loop {
+            let marker = cursor.read_u8(context)?;
+            if marker == 0 {
+                break;
+            } else if marker != 1 {
+                return Err(DecodeError::ValidationError {
+                    message: "Invalid sequence marker",
+                    pos: cursor.pos() - 1,
+                });
+            }
+            if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
+                cursor.align(<A as ArchivedLayout>::ALIGNMENT, context)?;
+            }
+            let mut guard = context.push_index(len);
             A::validate(cursor, &mut *guard)?;
+            len += 1;
         }
         Ok(())
     }
@@ -168,8 +188,41 @@ impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
         }
         self.remaining -= 1;
         let mut context = DummyContext;
-        Some(A::decode(&mut self.cursor, &mut context))
+        match self.cursor.read_u8(&mut context) {
+            Ok(1) => {
+                if <A as ArchivedLayout>::FIXED_SIZE.is_some()
+                    && let Err(e) = self
+                        .cursor
+                        .align(<A as ArchivedLayout>::ALIGNMENT, &mut context)
+                    {
+                        return Some(Err(e));
+                    }
+                Some(A::decode(&mut self.cursor, &mut context))
+            }
+            Ok(_) => Some(Err(DecodeError::ValidationError {
+                message: "Invalid sequence marker",
+                pos: self.cursor.pos() - 1,
+            })),
+            Err(e) => Some(Err(e)),
+        }
     }
+}
+
+fn decode_next_element<'a, T: Decode<'a>>(
+    cursor: &mut Cursor<'a>,
+    context: &mut DummyContext,
+) -> Result<T::View, ZebinError> {
+    let marker = cursor.read_u8(context)?;
+    if marker != 1 {
+        return Err(ZebinError::Decode(DecodeError::ValidationError {
+            message: "Invalid sequence marker",
+            pos: cursor.pos() - 1,
+        }));
+    }
+    if <T as ArchivedLayout>::FIXED_SIZE.is_some() {
+        cursor.align(<T as ArchivedLayout>::ALIGNMENT, context)?;
+    }
+    Ok(T::decode(cursor, context)?)
 }
 
 #[cfg(feature = "alloc")]
@@ -183,7 +236,7 @@ where
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = T::decode(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
             out.push(view.restore()?);
         }
         Ok(out)
@@ -201,7 +254,7 @@ where
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = T::decode(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
             out.push_back(view.restore()?);
         }
         Ok(out)
@@ -220,7 +273,7 @@ where
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = T::decode(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
             out.insert(view.restore()?);
         }
         Ok(out)
@@ -239,7 +292,7 @@ where
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = T::decode(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
             out.push(view.restore()?);
         }
         Ok(out)
@@ -258,7 +311,7 @@ where
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
-            let view = T::decode(&mut cursor, &mut context)?;
+            let view = decode_next_element::<T>(&mut cursor, &mut context)?;
             out.insert(view.restore()?);
         }
         Ok(out)
@@ -288,7 +341,7 @@ where
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
-            let (k, v) = T::decode(&mut cursor, &mut context)?;
+            let (k, v) = decode_next_element::<T>(&mut cursor, &mut context)?;
             map.insert(k.restore()?, v.restore()?);
         }
         Ok(map)
@@ -308,7 +361,7 @@ where
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
-            let (k, v) = T::decode(&mut cursor, &mut context)?;
+            let (k, v) = decode_next_element::<T>(&mut cursor, &mut context)?;
             map.insert(k.restore()?, v.restore()?);
         }
         Ok(map)
@@ -363,31 +416,30 @@ where
     T: Encode + Archive + 'a,
 {
     iter: <&'a S as IntoIterator>::IntoIter,
-    len_prefix: [u8; 4],
-    prefix_cursor: usize,
+    next_item: Option<&'a T>,
+    marker: [u8; 1],
+    marker_cursor: usize,
     aligned: bool,
     current_encoder: Option<CurrentEncoder<'a, T>>,
+    finished_sentinel: bool,
     _phantom: PhantomData<&'a I>,
 }
 
 impl<'a, S: ?Sized, T, I: ?Sized> IterEncoder<'a, S, T, I>
 where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
-    for<'b> <&'b S as IntoIterator>::IntoIter: ExactSizeIterator,
     T: Encode + Archive + 'a,
 {
     pub fn new(inner: &'a S) -> Result<Self, ZebinError> {
         let iter = inner.into_iter();
-        let len = u32::try_from(iter.len()).map_err(|_| ZebinError::SerializationError {
-            pos: 0,
-            message: "length exceeds u32 range",
-        })?;
         Ok(Self {
             iter,
-            len_prefix: len.to_le_bytes(),
-            prefix_cursor: 0,
+            next_item: None,
+            marker: [0],
+            marker_cursor: 1,
             aligned: false,
             current_encoder: None,
+            finished_sentinel: false,
             _phantom: PhantomData,
         })
     }
@@ -396,7 +448,6 @@ where
 impl<'a, S: ?Sized, T, I: ?Sized> Encoder<'a> for IterEncoder<'a, S, T, I>
 where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
-    for<'b> <&'b S as IntoIterator>::IntoIter: ExactSizeIterator,
     T: Encode + Archive + 'a,
     T::Archived: ArchivedLayout,
 {
@@ -414,48 +465,35 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
-        if self.prefix_cursor < self.len_prefix.len() {
-            let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if sink
-                .write(&self.len_prefix[self.prefix_cursor..])?
-                .advance_cursor(&mut self.prefix_cursor, remaining)
-                .is_pending()
-            {
-                return Ok(Poll::Pending);
-            }
-        }
-
-        if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
-            if sink
-                .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
-                .is_complete()
-            {
-                self.aligned = true;
-            } else {
-                return Ok(Poll::Pending);
-            }
-        }
-
         loop {
-            if self.current_encoder.is_none() {
-                if let Some(item) = self.iter.next() {
-                    let mut encoder = item.begin_encode()?;
-                    match encoder.input(item, sink)? {
-                        Poll::Pending => {
-                            self.current_encoder = Some(CurrentEncoder::new(encoder, true));
-                            return Ok(Poll::Pending);
-                        }
-                        Poll::Ready(()) => {
-                            self.current_encoder = Some(CurrentEncoder::new(encoder, false));
-                        }
-                    }
-                } else {
-                    break;
+            if self.marker_cursor < 1 {
+                let remaining = 1 - self.marker_cursor;
+                if sink
+                    .write(&self.marker[self.marker_cursor..])?
+                    .advance_cursor(&mut self.marker_cursor, remaining)
+                    .is_pending()
+                {
+                    return Ok(Poll::Pending);
                 }
+            }
+
+            if self.finished_sentinel && self.marker_cursor == 1 {
+                return Ok(Poll::Ready(()));
             }
 
             if let Some(state) = &mut self.current_encoder {
                 let (encoder, started) = state.get_mut();
+
+                if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
+                    if sink
+                        .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
+                        .is_complete()
+                    {
+                        self.aligned = true;
+                    } else {
+                        return Ok(Poll::Pending);
+                    }
+                }
 
                 if *started {
                     match encoder.poll_pending(sink)? {
@@ -465,12 +503,47 @@ where
                 }
 
                 let (encoder, _) = self.current_encoder.take().unwrap().into_inner();
-
                 let _ = encoder.finish(sink)?;
+                self.aligned = false;
+            }
+
+            if self.next_item.is_none() && !self.finished_sentinel {
+                if let Some(item) = self.iter.next() {
+                    self.next_item = Some(item);
+                    self.marker = [1];
+                    self.marker_cursor = 0;
+                } else {
+                    self.marker = [0];
+                    self.marker_cursor = 0;
+                    self.finished_sentinel = true;
+                }
+                continue;
+            }
+
+            if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
+                if sink
+                    .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
+                    .is_complete()
+                {
+                    self.aligned = true;
+                } else {
+                    return Ok(Poll::Pending);
+                }
+            }
+
+            if let Some(item) = self.next_item.take() {
+                let mut encoder = item.begin_encode()?;
+                match encoder.input(item, sink)? {
+                    Poll::Pending => {
+                        self.current_encoder = Some(CurrentEncoder::new(encoder, true));
+                        return Ok(Poll::Pending);
+                    }
+                    Poll::Ready(()) => {
+                        self.current_encoder = Some(CurrentEncoder::new(encoder, false));
+                    }
+                }
             }
         }
-
-        Ok(Poll::Ready(()))
     }
 
     fn finish<Sink: ByteSink + ?Sized>(self, _sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
@@ -481,7 +554,6 @@ where
 impl<I, T> Encode for IterArchive<I, T>
 where
     for<'a> &'a I: IntoIterator<Item = &'a T>,
-    for<'a> <&'a I as IntoIterator>::IntoIter: ExactSizeIterator,
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
 {

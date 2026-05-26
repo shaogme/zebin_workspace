@@ -62,17 +62,12 @@ pub trait Decode<'a>: ArchivedLayout + Sized {
 pub trait SequenceDecodeStrategy<'a, T: Decode<'a>> {
     fn decode_sequence<C>(
         cursor: &mut Cursor<'a>,
-        len: usize,
         context: &mut C,
     ) -> Result<Vec<T::View>, DecodeError>
     where
         C: ValidationContext + ?Sized;
 
-    fn validate_sequence<C>(
-        cursor: &mut Cursor<'a>,
-        len: usize,
-        context: &mut C,
-    ) -> Result<(), DecodeError>
+    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized;
 }
@@ -85,33 +80,44 @@ pub struct FixedSequenceStrategy;
 impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for FixedSequenceStrategy {
     fn decode_sequence<C>(
         cursor: &mut Cursor<'a>,
-        len: usize,
         context: &mut C,
     ) -> Result<Vec<T::View>, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        let mut items = Vec::with_capacity(len);
-        cursor.align(T::ALIGNMENT, context)?;
-        for index in 0..len {
+        let mut items = Vec::new();
+        let mut index = 0;
+        loop {
+            let marker = cursor.read_u8(context)?;
+            if marker == 0 {
+                break;
+            } else if marker != 1 {
+                return Err(context.validation_error("Invalid sequence marker", cursor.pos() - 1));
+            }
+            cursor.align(T::ALIGNMENT, context)?;
             let mut guard = context.push_index(index);
             items.push(T::decode(cursor, &mut *guard)?);
+            index += 1;
         }
         Ok(items)
     }
 
-    fn validate_sequence<C>(
-        cursor: &mut Cursor<'a>,
-        len: usize,
-        context: &mut C,
-    ) -> Result<(), DecodeError>
+    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        cursor.align(T::ALIGNMENT, context)?;
-        for index in 0..len {
+        let mut index = 0;
+        loop {
+            let marker = cursor.read_u8(context)?;
+            if marker == 0 {
+                break;
+            } else if marker != 1 {
+                return Err(context.validation_error("Invalid sequence marker", cursor.pos() - 1));
+            }
+            cursor.align(T::ALIGNMENT, context)?;
             let mut guard = context.push_index(index);
             T::validate(cursor, &mut *guard)?;
+            index += 1;
         }
         Ok(())
     }
@@ -125,31 +131,42 @@ pub struct ForwardSequenceStrategy;
 impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for ForwardSequenceStrategy {
     fn decode_sequence<C>(
         cursor: &mut Cursor<'a>,
-        len: usize,
         context: &mut C,
     ) -> Result<Vec<T::View>, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        let mut items = Vec::with_capacity(len);
-        for index in 0..len {
+        let mut items = Vec::new();
+        let mut index = 0;
+        loop {
+            let marker = cursor.read_u8(context)?;
+            if marker == 0 {
+                break;
+            } else if marker != 1 {
+                return Err(context.validation_error("Invalid sequence marker", cursor.pos() - 1));
+            }
             let mut guard = context.push_index(index);
             items.push(T::decode(cursor, &mut *guard)?);
+            index += 1;
         }
         Ok(items)
     }
 
-    fn validate_sequence<C>(
-        cursor: &mut Cursor<'a>,
-        len: usize,
-        context: &mut C,
-    ) -> Result<(), DecodeError>
+    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        for index in 0..len {
+        let mut index = 0;
+        loop {
+            let marker = cursor.read_u8(context)?;
+            if marker == 0 {
+                break;
+            } else if marker != 1 {
+                return Err(context.validation_error("Invalid sequence marker", cursor.pos() - 1));
+            }
             let mut guard = context.push_index(index);
             T::validate(cursor, &mut *guard)?;
+            index += 1;
         }
         Ok(())
     }
@@ -163,7 +180,6 @@ pub struct BackwardSequenceStrategy;
 impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrategy {
     fn decode_sequence<C>(
         cursor: &mut Cursor<'a>,
-        len: usize,
         context: &mut C,
     ) -> Result<Vec<T::View>, DecodeError>
     where
@@ -174,11 +190,19 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
         let elements_start = start_pos;
         let elements_end = total_bytes.len();
 
-        let mut current_end = elements_end;
-        let mut temp_items = Vec::with_capacity(len);
+        if elements_end < elements_start + 1 {
+            return Err(context.validation_error("Sequence truncated", elements_end));
+        }
+        if total_bytes[elements_end - 1] != 0 {
+            return Err(context.validation_error("Missing sequence end sentinel", elements_end - 1));
+        }
 
-        for index in (0..len).rev() {
-            if current_end < elements_start + 8 {
+        let mut current_end = elements_end - 1;
+        let mut temp_items = Vec::new();
+        let mut index = 0;
+
+        while current_end > elements_start {
+            if current_end < elements_start + 5 {
                 return Err(context.validation_error("Sequence element truncated", current_end));
             }
 
@@ -186,18 +210,23 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
             let object_len =
                 u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
 
-            if object_len < 20 || current_end - object_len < elements_start {
+            if object_len < 20 || current_end - object_len < elements_start + 1 {
                 return Err(context.validation_error("Invalid object length in sequence", len_pos));
             }
 
             let element_start = current_end - object_len;
+            if total_bytes[element_start - 1] != 1 {
+                return Err(context.validation_error("Invalid sequence marker", element_start - 1));
+            }
+
             let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
             let mut guard = context.push_index(index);
 
             let view = T::decode(&mut element_cursor, &mut *guard)?;
             temp_items.push(view);
 
-            current_end = element_start;
+            current_end = element_start - 1;
+            index += 1;
         }
 
         temp_items.reverse();
@@ -205,11 +234,7 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
         Ok(temp_items)
     }
 
-    fn validate_sequence<C>(
-        cursor: &mut Cursor<'a>,
-        len: usize,
-        context: &mut C,
-    ) -> Result<(), DecodeError>
+    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -218,9 +243,18 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
         let elements_start = start_pos;
         let elements_end = total_bytes.len();
 
-        let mut current_end = elements_end;
-        for index in (0..len).rev() {
-            if current_end < elements_start + 8 {
+        if elements_end < elements_start + 1 {
+            return Err(context.validation_error("Sequence truncated", elements_end));
+        }
+        if total_bytes[elements_end - 1] != 0 {
+            return Err(context.validation_error("Missing sequence end sentinel", elements_end - 1));
+        }
+
+        let mut current_end = elements_end - 1;
+        let mut index = 0;
+
+        while current_end > elements_start {
+            if current_end < elements_start + 5 {
                 return Err(context.validation_error("Sequence element truncated", current_end));
             }
 
@@ -228,17 +262,22 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
             let object_len =
                 u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
 
-            if object_len < 20 || current_end - object_len < elements_start {
+            if object_len < 20 || current_end - object_len < elements_start + 1 {
                 return Err(context.validation_error("Invalid object length in sequence", len_pos));
             }
 
             let element_start = current_end - object_len;
+            if total_bytes[element_start - 1] != 1 {
+                return Err(context.validation_error("Invalid sequence marker", element_start - 1));
+            }
+
             let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
             let mut guard = context.push_index(index);
 
             T::validate(&mut element_cursor, &mut *guard)?;
 
-            current_end = element_start;
+            current_end = element_start - 1;
+            index += 1;
         }
         *cursor = cursor.with_pos(elements_end);
         Ok(())
