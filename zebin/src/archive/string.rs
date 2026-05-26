@@ -91,6 +91,22 @@ impl Restore<String> for ArchivedStringView<'_> {
     }
 }
 
+pub trait ToBytesRef<'a> {
+    fn to_bytes_ref(self) -> &'a [u8];
+}
+
+impl<'a> ToBytesRef<'a> for &'a String {
+    fn to_bytes_ref(self) -> &'a [u8] {
+        self.as_bytes()
+    }
+}
+
+impl<'a> ToBytesRef<'a> for &'a str {
+    fn to_bytes_ref(self) -> &'a [u8] {
+        self.as_bytes()
+    }
+}
+
 /// Resumable serialization state for `String` and `str`.
 pub struct StringEncoder<'a, T = str>
 where
@@ -107,32 +123,35 @@ impl<'a, T> StringEncoder<'a, T>
 where
     T: ?Sized,
 {
-    pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, ZebinError> {
-        let len = u32::try_from(bytes.len()).map_err(|_| ZebinError::SerializationError {
-            pos: 0,
-            message: "String length exceeds u32 range",
-        })?;
-        Ok(Self {
-            bytes,
-            len_prefix: len.to_le_bytes(),
+    pub(crate) fn new_empty() -> Self {
+        Self {
+            bytes: &[],
+            len_prefix: [0; 4],
             prefix_cursor: 0,
             cursor: 0,
             _marker: PhantomData,
-        })
+        }
     }
 }
 
 impl<'a, T> Encoder<'a> for StringEncoder<'a, T>
 where
     T: ?Sized,
+    &'a T: ToBytesRef<'a>,
 {
     type Input = &'a T;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        let bytes = item.to_bytes_ref();
+        let len = bytes.len() as u32;
+        self.bytes = bytes;
+        self.len_prefix = len.to_le_bytes();
+        self.prefix_cursor = 0;
+        self.cursor = 0;
         self.poll_pending(sink)
     }
 
@@ -169,8 +188,11 @@ impl Encode for String {
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        StringEncoder::new(self.as_bytes())
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        StringEncoder::new_empty()
     }
 }
 
@@ -184,8 +206,11 @@ impl Encode for str {
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        StringEncoder::new(self.as_bytes())
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        StringEncoder::new_empty()
     }
 }
 

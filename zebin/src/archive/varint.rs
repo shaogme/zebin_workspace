@@ -228,6 +228,22 @@ where
     type Archived = ArchivedVarInt<T>;
 }
 
+pub trait ToVarIntNumber<T: VarIntNumber> {
+    fn to_varint_number(&self) -> T;
+}
+
+impl<T: VarIntNumber> ToVarIntNumber<T> for VarInt<T> {
+    fn to_varint_number(&self) -> T {
+        self.get()
+    }
+}
+
+impl<T: VarIntNumber> ToVarIntNumber<T> for VarIntView<T> {
+    fn to_varint_number(&self) -> T {
+        self.get()
+    }
+}
+
 pub struct VarIntEncoder<'a, T: VarIntNumber, I = ()> {
     bytes: [u8; 10],
     len: u8,
@@ -236,28 +252,33 @@ pub struct VarIntEncoder<'a, T: VarIntNumber, I = ()> {
 }
 
 impl<'a, T: VarIntNumber, I> VarIntEncoder<'a, T, I> {
-    pub(crate) fn new(value: T) -> Self {
-        let val = value.to_u64();
-        let len = encoded_len_u64(val);
-        let mut bytes = [0u8; 10];
-        encode_u64(val, &mut bytes[..len]);
+    pub(crate) fn new_empty() -> Self {
         Self {
-            bytes,
-            len: len as u8,
+            bytes: [0u8; 10],
+            len: 0,
             cursor: 0,
             _phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: VarIntNumber, I> Encoder<'a> for VarIntEncoder<'a, T, I> {
+impl<'a, T: VarIntNumber, I> Encoder<'a> for VarIntEncoder<'a, T, I>
+where
+    I: ToVarIntNumber<T>,
+{
     type Input = &'a I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        let val = item.to_varint_number().to_u64();
+        let len = encoded_len_u64(val);
+        self.bytes.fill(0);
+        encode_u64(val, &mut self.bytes[..len]);
+        self.len = len as u8;
+        self.cursor = 0;
         self.poll_pending(sink)
     }
 
@@ -286,8 +307,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(VarIntEncoder::new(self.get()))
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        VarIntEncoder::new_empty()
     }
 }
 
@@ -300,7 +324,10 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(VarIntEncoder::new(self.get()))
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        VarIntEncoder::new_empty()
     }
 }

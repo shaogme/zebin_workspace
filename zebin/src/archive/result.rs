@@ -128,12 +128,12 @@ where
     }
 }
 
-/// Resumable serialization state for `Result<T, E>`.
 pub enum ResultEncoder<'a, T, E>
 where
     T: Encode + Archive + 'a,
     E: Encode + Archive + 'a,
 {
+    Uninitialized,
     Ok {
         val: &'a T,
         prefix_cursor: usize,
@@ -153,21 +153,8 @@ where
     T: Encode + Archive + 'a,
     E: Encode + Archive + 'a,
 {
-    pub(crate) fn new(value: Result<&'a T, &'a E>) -> Result<Self, ZebinError> {
-        match value {
-            Ok(inner) => Ok(Self::Ok {
-                val: inner,
-                prefix_cursor: 0,
-                encoder: inner.begin_encode()?,
-                started: false,
-            }),
-            Err(inner) => Ok(Self::Err {
-                val: inner,
-                prefix_cursor: 0,
-                encoder: inner.begin_encode()?,
-                started: false,
-            }),
-        }
+    pub(crate) fn new_empty() -> Self {
+        Self::Uninitialized
     }
 }
 
@@ -180,14 +167,33 @@ where
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        match item {
+            Ok(inner) => {
+                *self = Self::Ok {
+                    val: inner,
+                    prefix_cursor: 0,
+                    encoder: T::encoder(),
+                    started: false,
+                };
+            }
+            Err(inner) => {
+                *self = Self::Err {
+                    val: inner,
+                    prefix_cursor: 0,
+                    encoder: E::encoder(),
+                    started: false,
+                };
+            }
+        }
         self.poll_pending(sink)
     }
 
     fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         match self {
+            ResultEncoder::Uninitialized => Ok(Poll::Ready(())),
             ResultEncoder::Ok {
                 val,
                 prefix_cursor,
@@ -257,6 +263,7 @@ where
 
     fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         match self {
+            ResultEncoder::Uninitialized => Ok(Poll::Ready(())),
             ResultEncoder::Ok { encoder, .. } => encoder.finish(sink),
             ResultEncoder::Err { encoder, .. } => encoder.finish(sink),
         }
@@ -281,7 +288,10 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        ResultEncoder::new(self.as_ref())
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        ResultEncoder::new_empty()
     }
 }

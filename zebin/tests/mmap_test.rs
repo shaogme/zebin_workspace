@@ -42,7 +42,7 @@ where
     let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
     encoder.write(header.encode().as_ref())?;
 
-    let mut body_encoder = value.begin_encode()?;
+    let mut body_encoder = T::encoder();
     if body_encoder.input(value, encoder)?.is_pending() {
         while body_encoder.poll_pending(encoder)?.is_pending() {}
     }

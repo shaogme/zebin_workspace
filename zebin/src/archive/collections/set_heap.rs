@@ -26,8 +26,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        BTreeSetEncoder::new(self)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        BTreeSetEncoder::new()
     }
 }
 
@@ -73,8 +76,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        BinaryHeapEncoder::new(self)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        BinaryHeapEncoder::new()
     }
 }
 
@@ -122,8 +128,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        HashSetEncoder::new(self)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        HashSetEncoder::new()
     }
 }
 

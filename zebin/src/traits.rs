@@ -409,5 +409,7 @@ pub trait Encode: Archive {
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError>;
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a;
 }

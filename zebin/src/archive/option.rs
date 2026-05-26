@@ -134,20 +134,12 @@ impl<'a, T> OptionEncoder<'a, T>
 where
     T: Encode + Archive + 'a,
 {
-    fn new(value: Option<&'a T>) -> Result<Self, ZebinError> {
-        match value {
-            Some(inner) => Ok(Self {
-                value,
-                prefix: [1],
-                prefix_cursor: 0,
-                inner: Some((inner.begin_encode()?, false)),
-            }),
-            None => Ok(Self {
-                value: None,
-                prefix: [0],
-                prefix_cursor: 0,
-                inner: None,
-            }),
+    pub(crate) fn new_empty() -> Self {
+        Self {
+            value: None,
+            prefix: [0],
+            prefix_cursor: 1,
+            inner: None,
         }
     }
 }
@@ -160,9 +152,23 @@ where
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        match item {
+            Some(inner) => {
+                self.value = Some(inner);
+                self.prefix = [1];
+                self.prefix_cursor = 0;
+                self.inner = Some((T::encoder(), false));
+            }
+            None => {
+                self.value = None;
+                self.prefix = [0];
+                self.prefix_cursor = 0;
+                self.inner = None;
+            }
+        }
         self.poll_pending(sink)
     }
 
@@ -226,7 +232,10 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        OptionEncoder::new(self.as_ref())
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        OptionEncoder::new_empty()
     }
 }

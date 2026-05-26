@@ -136,8 +136,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        VecEncoder::new(self.as_slice())
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        VecEncoder::new()
     }
 }
 
@@ -158,8 +161,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        VecDequeEncoder::new(self)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        VecDequeEncoder::new()
     }
 }
 

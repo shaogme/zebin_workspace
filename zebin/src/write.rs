@@ -60,7 +60,7 @@ where
             phase: EncodePhase::Header {
                 bytes: header.encode(),
                 cursor: 0,
-                next_encoder: Some(value.begin_encode()?),
+                next_encoder: Some(T::encoder()),
             },
             archive_pos: 0,
             total_len,
@@ -181,7 +181,7 @@ where
         let mut encoder = VecEncoder::new(0);
         encoder.write(header.encode().as_ref())?;
 
-        let mut body_encoder = value.begin_encode()?;
+        let mut body_encoder = T::encoder();
         if body_encoder.input(value, &mut encoder)?.is_pending() {
             while body_encoder.poll_pending(&mut encoder)?.is_pending() {}
         }
@@ -218,7 +218,7 @@ where
     T: Encode + Archive + ?Sized,
 {
     let mut encoder = MeasureEncoder::new(start_pos);
-    let mut body_encoder = value.begin_encode()?;
+    let mut body_encoder = T::encoder();
     if body_encoder.input(value, &mut encoder)?.is_pending() {
         while body_encoder.poll_pending(&mut encoder)?.is_pending() {}
     }

@@ -1,21 +1,23 @@
 use alloc::collections::BTreeMap;
 
 use crate::prelude::*;
+use core::task::Poll;
 
 use super::vec::ArchivedVec;
 
 use super::super::iter::SeqEncoder;
-use super::super::primitive::Tuple2Encoder;
 
-pub struct MapEntryRef<'a, K, V>(&'a K, &'a V);
+pub struct MapEntryRef<'a, K, V>(pub &'a K, pub &'a V);
 
 impl<'a, K: Archive, V: Archive> Archive for MapEntryRef<'a, K, V> {
     type Archived = (K::Archived, V::Archived);
 }
 
 pub struct MapEntryEncoder<'b, 'a, K: Encode + Archive + 'b, V: Encode + Archive + 'b> {
-    inner: Tuple2Encoder<'b, K, V>,
-    _phantom: core::marker::PhantomData<&'b MapEntryRef<'a, K, V>>,
+    item: Option<&'b MapEntryRef<'a, K, V>>,
+    key_encoder: Option<(<K as Encode>::Encoder<'b>, bool)>,
+    value_encoder: Option<(<V as Encode>::Encoder<'b>, bool)>,
+    stage: u8,
 }
 
 impl<'b, 'a, K, V> Encoder<'b> for MapEntryEncoder<'b, 'a, K, V>
@@ -27,24 +29,79 @@ where
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.inner.poll_pending(sink)
+        self.item = Some(item);
+        self.poll_pending(sink)
     }
 
     fn poll_pending<S: ByteSink + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.inner.poll_pending(sink)
+        let item = self.item.ok_or(ZebinError::SerializationError {
+            pos: sink.pos(),
+            message: "MapEntryEncoder polled before input",
+        })?;
+        if self.stage == 0
+            && let Some((encoder, started)) = &mut self.key_encoder
+        {
+            let progress = if !*started {
+                match encoder.input(item.0, sink)? {
+                    Poll::Pending => {
+                        *started = true;
+                        Poll::Pending
+                    }
+                    Poll::Ready(()) => Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
+
+            match progress {
+                Poll::Pending => return Ok(Poll::Pending),
+                Poll::Ready(()) => {
+                    let (enc, _) = self.key_encoder.take().unwrap();
+                    let _ = enc.finish(sink)?;
+                    self.stage = 1;
+                }
+            }
+        }
+
+        if self.stage == 1
+            && let Some((encoder, started)) = &mut self.value_encoder
+        {
+            let progress = if !*started {
+                match encoder.input(item.1, sink)? {
+                    Poll::Pending => {
+                        *started = true;
+                        Poll::Pending
+                    }
+                    Poll::Ready(()) => Poll::Ready(()),
+                }
+            } else {
+                encoder.poll_pending(sink)?
+            };
+
+            match progress {
+                Poll::Pending => return Ok(Poll::Pending),
+                Poll::Ready(()) => {
+                    let (enc, _) = self.value_encoder.take().unwrap();
+                    let _ = enc.finish(sink)?;
+                    self.stage = 2;
+                }
+            }
+        }
+
+        Ok(Poll::Ready(()))
     }
 
     fn finish<S: ByteSink + ?Sized>(
         self,
-        sink: &mut S,
+        _sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.inner.finish(sink)
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -58,11 +115,37 @@ where
     where
         Self: 'b;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(MapEntryEncoder {
-            inner: Tuple2Encoder::new(self.0, self.1)?,
-            _phantom: core::marker::PhantomData,
-        })
+    fn encoder<'b>() -> Self::Encoder<'b>
+    where
+        Self: 'b,
+    {
+        MapEntryEncoder {
+            item: None,
+            key_encoder: Some((K::encoder(), false)),
+            value_encoder: Some((V::encoder(), false)),
+            stage: 0,
+        }
+    }
+}
+
+pub trait ToMapIter<'a, K: 'a, V: 'a, Iter> {
+    fn to_map_iter(self) -> Iter;
+}
+
+impl<'a, K: 'a, V: 'a> ToMapIter<'a, K, V, alloc::collections::btree_map::Iter<'a, K, V>>
+    for &'a BTreeMap<K, V>
+{
+    fn to_map_iter(self) -> alloc::collections::btree_map::Iter<'a, K, V> {
+        self.iter()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'a, K: 'a, V: 'a> ToMapIter<'a, K, V, std::collections::hash_map::Iter<'a, K, V>>
+    for &'a std::collections::HashMap<K, V>
+{
+    fn to_map_iter(self) -> std::collections::hash_map::Iter<'a, K, V> {
+        self.iter()
     }
 }
 
@@ -72,7 +155,7 @@ where
     V: Encode + Archive + 'a,
     Iter: Iterator<Item = (&'a K, &'a V)>,
 {
-    iter: Iter,
+    iter: Option<Iter>,
     seq_encoder: SeqEncoder<'a, MapEntryRef<'a, K, V>>,
     current_entry: Option<MapEntryRef<'a, K, V>>,
     finished: bool,
@@ -85,14 +168,14 @@ where
     V: Encode + Archive + 'a,
     Iter: Iterator<Item = (&'a K, &'a V)>,
 {
-    pub fn new(iter: Iter) -> Result<Self, ZebinError> {
-        Ok(Self {
-            iter,
+    pub fn new() -> Self {
+        Self {
+            iter: None,
             seq_encoder: SeqEncoder::new(),
             current_entry: None,
             finished: false,
             _phantom: core::marker::PhantomData,
-        })
+        }
     }
 }
 
@@ -103,15 +186,16 @@ where
     K::Archived: ArchivedLayout,
     V::Archived: ArchivedLayout,
     Iter: Iterator<Item = (&'a K, &'a V)>,
-    I: 'a,
+    &'a I: ToMapIter<'a, K, V, Iter>,
 {
     type Input = &'a I;
 
-    fn input<Sink: ByteSink + ?Sized>(
+    fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
-        sink: &mut Sink,
+        item: Self::Input,
+        sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
+        self.iter = Some(item.to_map_iter());
         self.poll_pending(sink)
     }
 
@@ -119,6 +203,10 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
+        let iter = self.iter.as_mut().ok_or(ZebinError::SerializationError {
+            pos: sink.pos(),
+            message: "MapEncoder polled before input",
+        })?;
         loop {
             if self.seq_encoder.poll_pending(sink)?.is_pending() {
                 return Ok(core::task::Poll::Pending);
@@ -129,7 +217,7 @@ where
             }
 
             if !self.finished {
-                if let Some((k, v)) = self.iter.next() {
+                if let Some((k, v)) = iter.next() {
                     self.current_entry = Some(MapEntryRef(k, v));
                     let entry_ptr =
                         self.current_entry.as_ref().unwrap() as *const MapEntryRef<'a, K, V>;
@@ -174,8 +262,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(BTreeMapEncoder::new(self.iter())?)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        BTreeMapEncoder::new()
     }
 }
 
@@ -237,8 +328,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(HashMapEncoder::new(self.iter())?)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        HashMapEncoder::new()
     }
 }
 

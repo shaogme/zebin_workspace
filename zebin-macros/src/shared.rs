@@ -8,7 +8,7 @@ use syn::{
 mod attrs;
 mod packed;
 
-pub use packed::{packed_begin_expr, packed_wrapper_type_expr};
+pub use packed::packed_wrapper_type_expr;
 
 /// Represents the style of a struct or enum variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,8 +190,15 @@ pub fn is_option_type(ty: &Type) -> bool {
 }
 
 pub fn field_state_type(field: &FieldSpec<'_>) -> TokenStream {
-    if let Some(wrapper) = packed::packed_wrapper_type(field) {
-        quote! { <#wrapper as zebin::Encode>::Encoder<'a> }
+    if let Some((kind, bits)) = packed::packed_info(field) {
+        match kind {
+            packed::PackedElementKind::Bool => {
+                quote! { zebin::archive::PackedSequenceEncoder<'a, zebin::archive::PackedSlice<'a, bool, 1>> }
+            }
+            packed::PackedElementKind::U8 => {
+                quote! { zebin::archive::PackedSequenceEncoder<'a, zebin::archive::PackedSlice<'a, u8, #bits>> }
+            }
+        }
     } else {
         let ty = field.ty;
         quote! { <#ty as zebin::Encode>::Encoder<'a> }

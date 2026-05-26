@@ -208,6 +208,7 @@ impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
     }
 }
 
+#[cfg(feature = "alloc")]
 fn decode_next_element<'a, T: Decode<'a>>(
     cursor: &mut Cursor<'a>,
     context: &mut DummyContext,
@@ -548,7 +549,7 @@ where
                     }
                 }
 
-                let mut encoder = item.begin_encode()?;
+                let mut encoder = T::encoder();
                 match encoder.input(item, sink)? {
                     Poll::Pending => {
                         self.current_encoder = Some(CurrentEncoder::new(encoder, true));
@@ -572,14 +573,46 @@ where
     }
 }
 
+pub trait ToIterRef<'a, S: ?Sized> {
+    fn to_iter_ref(self) -> &'a S;
+}
+
+impl<'a, T: ?Sized> ToIterRef<'a, T> for &'a T {
+    fn to_iter_ref(self) -> &'a T {
+        self
+    }
+}
+
+impl<'a, I, T> ToIterRef<'a, I> for &'a IterArchive<I, T> {
+    fn to_iter_ref(self) -> &'a I {
+        &self.0
+    }
+}
+
+impl<'a, T> ToIterRef<'a, [T]> for &'a Vec<T> {
+    fn to_iter_ref(self) -> &'a [T] {
+        self.as_slice()
+    }
+}
+
 pub struct IterEncoder<'a, S: ?Sized, T, I: ?Sized = S>
 where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
     T: Encode + Archive + 'a,
 {
-    iter: <&'a S as IntoIterator>::IntoIter,
+    iter: Option<<&'a S as IntoIterator>::IntoIter>,
     seq_encoder: SeqEncoder<'a, T>,
     _phantom: PhantomData<&'a I>,
+}
+
+impl<'a, S: ?Sized, T, I: ?Sized> Default for IterEncoder<'a, S, T, I>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode + Archive + 'a,
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a, S: ?Sized, T, I: ?Sized> IterEncoder<'a, S, T, I>
@@ -587,13 +620,12 @@ where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
     T: Encode + Archive + 'a,
 {
-    pub fn new(inner: &'a S) -> Result<Self, ZebinError> {
-        let iter = inner.into_iter();
-        Ok(Self {
-            iter,
+    pub fn new() -> Self {
+        Self {
+            iter: None,
             seq_encoder: SeqEncoder::new(),
             _phantom: PhantomData,
-        })
+        }
     }
 }
 
@@ -602,14 +634,16 @@ where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
     T: Encode + Archive + 'a,
     T::Archived: ArchivedLayout,
+    &'a I: ToIterRef<'a, S>,
 {
     type Input = &'a I;
 
     fn input<Sink: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
+        self.iter = Some(item.to_iter_ref().into_iter());
         self.poll_pending(sink)
     }
 
@@ -617,6 +651,10 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
+        let iter = self.iter.as_mut().ok_or(ZebinError::SerializationError {
+            pos: sink.pos(),
+            message: "IterEncoder polled before input",
+        })?;
         loop {
             if self.seq_encoder.poll_pending(sink)?.is_pending() {
                 return Ok(Poll::Pending);
@@ -627,7 +665,7 @@ where
             }
 
             if !self.seq_encoder.finished {
-                if let Some(item) = self.iter.next() {
+                if let Some(item) = iter.next() {
                     if self.seq_encoder.input(item, sink)?.is_pending() {
                         return Ok(Poll::Pending);
                     }
@@ -656,7 +694,10 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        IterEncoder::new(&self.0)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        IterEncoder::new()
     }
 }

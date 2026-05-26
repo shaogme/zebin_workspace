@@ -119,7 +119,7 @@ pub struct ArrayEncoder<'a, T, const N: usize>
 where
     T: Encode + Archive + 'a,
 {
-    items: &'a [T; N],
+    items: Option<&'a [T; N]>,
     index: usize,
     current_encoder: Option<(<T as Encode>::Encoder<'a>, bool)>,
 }
@@ -128,9 +128,9 @@ impl<'a, T, const N: usize> ArrayEncoder<'a, T, N>
 where
     T: Encode + Archive + 'a,
 {
-    pub(crate) fn new(items: &'a [T; N]) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            items,
+            items: None,
             index: 0,
             current_encoder: None,
         }
@@ -145,9 +145,10 @@ where
 
     fn input<Sink: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
+        self.items = Some(item);
         self.poll_pending(sink)
     }
 
@@ -155,9 +156,13 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
+        let items = self.items.ok_or(ZebinError::SerializationError {
+            pos: sink.pos(),
+            message: "ArrayEncoder polled before input",
+        })?;
         while self.index < N {
             if self.current_encoder.is_none() {
-                self.current_encoder = Some((self.items[self.index].begin_encode()?, false));
+                self.current_encoder = Some((T::encoder(), false));
             }
             let (encoder, started) = self
                 .current_encoder
@@ -165,7 +170,7 @@ where
                 .expect("array item encoder initialized above");
 
             let progress = if !*started {
-                match encoder.input(&self.items[self.index], sink)? {
+                match encoder.input(&items[self.index], sink)? {
                     core::task::Poll::Pending => {
                         *started = true;
                         core::task::Poll::Pending
@@ -205,8 +210,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(ArrayEncoder::new(self))
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        ArrayEncoder::new()
     }
 }
 
@@ -229,7 +237,10 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        crate::archive::IterEncoder::new(self)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        crate::archive::IterEncoder::new()
     }
 }

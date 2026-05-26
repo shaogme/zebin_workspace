@@ -3,9 +3,14 @@ use core::task::Poll;
 
 use crate::prelude::*;
 
-enum PackedData<'a> {
+pub enum PackedData<'a> {
+    Empty,
     Bool(&'a [bool]),
     U8(&'a [u8]),
+}
+
+pub trait ToPackedData<'a> {
+    fn to_packed_data(self) -> (PackedData<'a>, u8);
 }
 
 /// Packed sequence encoder shared by the packed APIs.
@@ -24,20 +29,32 @@ pub struct PackedSequenceEncoder<'a, I = ()> {
 }
 
 impl<'a, I> PackedSequenceEncoder<'a, I> {
-    pub fn new_bool(values: &'a [bool]) -> Result<Self, ZebinError> {
+    pub fn new_bool(values: &'a [bool]) -> Self {
         Self::new(PackedData::Bool(values), 1, values.len())
     }
 
-    pub fn new_u8(values: &'a [u8], bits_per_value: u8) -> Result<Self, ZebinError> {
+    pub fn new_u8(values: &'a [u8], bits_per_value: u8) -> Self {
         Self::new(PackedData::U8(values), bits_per_value, values.len())
     }
 
-    fn new(data: PackedData<'a>, bits_per_value: u8, len: usize) -> Result<Self, ZebinError> {
-        let len_u32 = u32::try_from(len).map_err(|_| ZebinError::SerializationError {
-            pos: 0,
-            message: "Packed length exceeds u32 range",
-        })?;
-        Ok(Self {
+    pub fn new_empty() -> Self {
+        Self {
+            data: PackedData::Empty,
+            bits_per_value: 0,
+            len_prefix: [0; 4],
+            prefix_cursor: 0,
+            index: 0,
+            len: 0,
+            buf: [0u8; 64],
+            buf_len: 0,
+            buf_cursor: 0,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    fn new(data: PackedData<'a>, bits_per_value: u8, len: usize) -> Self {
+        let len_u32 = len as u32;
+        Self {
             data,
             bits_per_value,
             len_prefix: len_u32.to_le_bytes(),
@@ -48,7 +65,7 @@ impl<'a, I> PackedSequenceEncoder<'a, I> {
             buf_len: 0,
             buf_cursor: 0,
             _phantom: core::marker::PhantomData,
-        })
+        }
     }
 
     fn fill_buf(&mut self) -> Result<(), ZebinError> {
@@ -58,6 +75,7 @@ impl<'a, I> PackedSequenceEncoder<'a, I> {
 
         while self.index < self.len && bit_offset + bits_per_value <= 64 * 8 {
             match self.data {
+                PackedData::Empty => {}
                 PackedData::Bool(values) => {
                     if values[self.index] {
                         let byte_idx = bit_offset / 8;
@@ -96,14 +114,32 @@ impl<'a, I> PackedSequenceEncoder<'a, I> {
     }
 }
 
-impl<'a, I> Encoder<'a> for PackedSequenceEncoder<'a, I> {
-    type Input = &'a I;
+impl<'a, I> Encoder<'a> for PackedSequenceEncoder<'a, I>
+where
+    I: ToPackedData<'a>,
+{
+    type Input = I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        let (data, bits) = item.to_packed_data();
+        let len = match data {
+            PackedData::Empty => 0,
+            PackedData::Bool(v) => v.len(),
+            PackedData::U8(v) => v.len(),
+        };
+        let len_u32 = len as u32;
+        self.data = data;
+        self.bits_per_value = bits;
+        self.len = len;
+        self.len_prefix = len_u32.to_le_bytes();
+        self.prefix_cursor = 0;
+        self.index = 0;
+        self.buf_len = 0;
+        self.buf_cursor = 0;
         self.poll_pending(sink)
     }
 
@@ -195,18 +231,63 @@ impl<'a, T, const BITS: u8> IntoIterator for &'a PackedVec<T, BITS> {
     }
 }
 
+impl<'a> ToPackedData<'a> for &'a PackedVec<bool, 1> {
+    fn to_packed_data(self) -> (PackedData<'a>, u8) {
+        (PackedData::Bool(self.values.as_slice()), 1)
+    }
+}
+
+impl<'a, const BITS: u8> ToPackedData<'a> for &'a PackedVec<u8, BITS> {
+    fn to_packed_data(self) -> (PackedData<'a>, u8) {
+        (PackedData::U8(self.values.as_slice()), BITS)
+    }
+}
+
+impl<'a, 'b> ToPackedData<'a> for PackedSlice<'b, bool, 1>
+where
+    'b: 'a,
+{
+    fn to_packed_data(self) -> (PackedData<'a>, u8) {
+        (PackedData::Bool(self.values()), 1)
+    }
+}
+
+impl<'a, 'b, const BITS: u8> ToPackedData<'a> for PackedSlice<'b, u8, BITS>
+where
+    'b: 'a,
+{
+    fn to_packed_data(self) -> (PackedData<'a>, u8) {
+        (PackedData::U8(self.values()), BITS)
+    }
+}
+
+impl<'a, 'b> ToPackedData<'a> for &'a PackedSlice<'b, bool, 1> {
+    fn to_packed_data(self) -> (PackedData<'a>, u8) {
+        (PackedData::Bool(self.values()), 1)
+    }
+}
+
+impl<'a, 'b, const BITS: u8> ToPackedData<'a> for &'a PackedSlice<'b, u8, BITS> {
+    fn to_packed_data(self) -> (PackedData<'a>, u8) {
+        (PackedData::U8(self.values()), BITS)
+    }
+}
+
 impl Archive for PackedVec<bool, 1> {
     type Archived = ArchivedPackedBoolSlice;
 }
 
 impl Encode for PackedVec<bool, 1> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, PackedVec<bool, 1>>
+        = PackedSequenceEncoder<'a, &'a PackedVec<bool, 1>>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        PackedSequenceEncoder::new_bool(self.values.as_slice())
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        PackedSequenceEncoder::new_empty()
     }
 }
 
@@ -216,34 +297,43 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
 
 impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, PackedVec<u8, BITS>>
+        = PackedSequenceEncoder<'a, &'a PackedVec<u8, BITS>>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        PackedSequenceEncoder::new_u8(self.values.as_slice(), BITS)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        PackedSequenceEncoder::new_empty()
     }
 }
 
 impl<'b> Encode for PackedSlice<'b, bool, 1> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, PackedSlice<'b, bool, 1>>
+        = PackedSequenceEncoder<'a, &'a PackedSlice<'b, bool, 1>>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        PackedSequenceEncoder::new_bool(self.values())
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        PackedSequenceEncoder::new_empty()
     }
 }
 
 impl<'b, const BITS: u8> Encode for PackedSlice<'b, u8, BITS> {
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, PackedSlice<'b, u8, BITS>>
+        = PackedSequenceEncoder<'a, &'a PackedSlice<'b, u8, BITS>>
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        PackedSequenceEncoder::new_u8(self.values(), BITS)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        PackedSequenceEncoder::new_empty()
     }
 }
 

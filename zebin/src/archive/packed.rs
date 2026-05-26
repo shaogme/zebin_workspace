@@ -291,14 +291,33 @@ impl<const BITS: u8> Archive for PackedSlice<'_, u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
 }
 
+pub trait ToPackedViewInfo<'a> {
+    fn to_packed_view_info(self) -> (usize, &'a [u8]);
+}
+
+impl<'a, 'b> ToPackedViewInfo<'b> for &'b ArchivedPackedBoolSliceView<'a> {
+    fn to_packed_view_info(self) -> (usize, &'b [u8]) {
+        (self.len, self.bytes)
+    }
+}
+
+impl<'a, 'b, const BITS: u8> ToPackedViewInfo<'b> for &'b ArchivedPackedU8SliceView<'a, BITS> {
+    fn to_packed_view_info(self) -> (usize, &'b [u8]) {
+        (self.len, self.bytes)
+    }
+}
+
 impl<'a> Encode for ArchivedPackedBoolSliceView<'a> {
     type Encoder<'b>
         = PackedViewEncoder<'b, ArchivedPackedBoolSliceView<'a>>
     where
         Self: 'b;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(PackedViewEncoder::new(self.len, self.bytes))
+    fn encoder<'b>() -> Self::Encoder<'b>
+    where
+        Self: 'b,
+    {
+        PackedViewEncoder::new_empty()
     }
 }
 
@@ -308,8 +327,11 @@ impl<'a, const BITS: u8> Encode for ArchivedPackedU8SliceView<'a, BITS> {
     where
         Self: 'b;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(PackedViewEncoder::new(self.len, self.bytes))
+    fn encoder<'b>() -> Self::Encoder<'b>
+    where
+        Self: 'b,
+    {
+        PackedViewEncoder::new_empty()
     }
 }
 
@@ -323,25 +345,33 @@ pub struct PackedViewEncoder<'a, I = ()> {
 }
 
 impl<'a, I> PackedViewEncoder<'a, I> {
-    pub fn new(len: usize, bytes: &'a [u8]) -> Self {
+    pub fn new_empty() -> Self {
         Self {
-            len_prefix: (len as u32).to_le_bytes(),
+            len_prefix: [0; 4],
             prefix_cursor: 0,
-            bytes,
+            bytes: &[],
             bytes_cursor: 0,
             _phantom: core::marker::PhantomData,
         }
     }
 }
 
-impl<'a, I> Encoder<'a> for PackedViewEncoder<'a, I> {
+impl<'a, I> Encoder<'a> for PackedViewEncoder<'a, I>
+where
+    &'a I: ToPackedViewInfo<'a>,
+{
     type Input = &'a I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        let (len, bytes) = item.to_packed_view_info();
+        self.len_prefix = (len as u32).to_le_bytes();
+        self.prefix_cursor = 0;
+        self.bytes = bytes;
+        self.bytes_cursor = 0;
         self.poll_pending(sink)
     }
 

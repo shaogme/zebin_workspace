@@ -124,14 +124,6 @@ pub fn packed_info(field: &FieldSpec<'_>) -> Option<(PackedElementKind, u8)> {
     Some((kind, bits))
 }
 
-pub fn packed_wrapper_type(field: &FieldSpec<'_>) -> Option<TokenStream> {
-    let (kind, bits) = packed_info(field)?;
-    Some(match kind {
-        PackedElementKind::Bool => quote! { zebin::archive::PackedSlice<'a, bool, 1> },
-        PackedElementKind::U8 => quote! { zebin::archive::PackedSlice<'a, u8, #bits> },
-    })
-}
-
 pub fn packed_wrapper_type_expr(field: &FieldSpec<'_>) -> Option<TokenStream> {
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
@@ -145,17 +137,5 @@ pub fn packed_archived_type(field: &FieldSpec<'_>) -> Option<TokenStream> {
     Some(match kind {
         PackedElementKind::Bool => quote! { zebin::archive::ArchivedPackedBoolSlice },
         PackedElementKind::U8 => quote! { zebin::archive::ArchivedPackedU8Slice<#bits> },
-    })
-}
-
-pub fn packed_begin_expr(field: &FieldSpec<'_>, value: TokenStream) -> Option<TokenStream> {
-    let (kind, bits) = packed_info(field)?;
-    Some(match kind {
-        PackedElementKind::Bool => quote! {
-            zebin::archive::PackedSequenceEncoder::new_bool(#value.as_ref())
-        },
-        PackedElementKind::U8 => quote! {
-            zebin::archive::PackedSequenceEncoder::new_u8(#value.as_ref(), #bits)
-        },
     })
 }

@@ -122,6 +122,28 @@ impl<T> Archive for ArchivedVarIntVec<T> {
     type Archived = Self;
 }
 
+pub trait ToVarIntSlice<'a, T: VarIntNumber> {
+    fn to_varint_slice(self) -> &'a [T];
+}
+
+impl<'a, T: VarIntNumber> ToVarIntSlice<'a, T> for &'a VarIntVec<T> {
+    fn to_varint_slice(self) -> &'a [T] {
+        self.values.as_slice()
+    }
+}
+
+impl<'a, T: VarIntNumber> ToVarIntSlice<'a, T> for &'a ArchivedVarIntVec<T> {
+    fn to_varint_slice(self) -> &'a [T] {
+        self.values.as_slice()
+    }
+}
+
+impl<'a, 'b, T: VarIntNumber> ToVarIntSlice<'a, T> for &'a PackedVarIntSlice<'b, T> {
+    fn to_varint_slice(self) -> &'a [T] {
+        self.values
+    }
+}
+
 pub struct VarIntVecEncoder<'a, T: VarIntNumber, I = ()> {
     values: &'a [T],
     len_prefix: [u8; 4],
@@ -134,32 +156,39 @@ pub struct VarIntVecEncoder<'a, T: VarIntNumber, I = ()> {
 }
 
 impl<'a, T: VarIntNumber, I> VarIntVecEncoder<'a, T, I> {
-    pub(crate) fn new(values: &'a [T]) -> Result<Self, ZebinError> {
-        let len = u32::try_from(values.len()).map_err(|_| ZebinError::SerializationError {
-            pos: 0,
-            message: "VarIntVec length exceeds u32 range",
-        })?;
-        Ok(Self {
-            values,
-            len_prefix: len.to_le_bytes(),
+    pub(crate) fn new_empty() -> Self {
+        Self {
+            values: &[],
+            len_prefix: [0; 4],
             prefix_cursor: 0,
             index: 0,
             cursor: 0,
             current_val_buf: [0u8; 10],
             current_val_len: 0,
             _phantom: core::marker::PhantomData,
-        })
+        }
     }
 }
 
-impl<'a, T: VarIntNumber, I> Encoder<'a> for VarIntVecEncoder<'a, T, I> {
+impl<'a, T: VarIntNumber, I> Encoder<'a> for VarIntVecEncoder<'a, T, I>
+where
+    &'a I: ToVarIntSlice<'a, T>,
+{
     type Input = &'a I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
-        _item: Self::Input,
+        item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
+        let values = item.to_varint_slice();
+        let len = values.len() as u32;
+        self.values = values;
+        self.len_prefix = len.to_le_bytes();
+        self.prefix_cursor = 0;
+        self.index = 0;
+        self.cursor = 0;
+        self.current_val_len = 0;
         self.poll_pending(sink)
     }
 
@@ -210,8 +239,11 @@ impl<T: VarIntNumber> Encode for VarIntVec<T> {
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        VarIntVecEncoder::new(&self.values)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        VarIntVecEncoder::new_empty()
     }
 }
 
@@ -221,8 +253,11 @@ impl<T: VarIntNumber> Encode for ArchivedVarIntVec<T> {
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        VarIntVecEncoder::new(&self.values)
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        VarIntVecEncoder::new_empty()
     }
 }
 
@@ -236,8 +271,11 @@ impl<'a, T: VarIntNumber> Encode for PackedVarIntSlice<'a, T> {
     where
         Self: 'b;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        VarIntVecEncoder::new(self.values)
+    fn encoder<'b>() -> Self::Encoder<'b>
+    where
+        Self: 'b,
+    {
+        VarIntVecEncoder::new_empty()
     }
 }
 

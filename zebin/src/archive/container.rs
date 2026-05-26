@@ -66,8 +66,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        DerefEncoder::new(T::encoder())
     }
 }
 
@@ -116,8 +119,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        DerefEncoder::new(T::encoder())
     }
 }
 
@@ -166,8 +172,11 @@ where
     where
         Self: 'a;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        DerefEncoder::new(T::encoder())
     }
 }
 
@@ -216,8 +225,11 @@ where
     where
         Self: 'b;
 
-    fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
-        Ok(DerefEncoder::new(self.as_ref().begin_encode()?))
+    fn encoder<'b>() -> Self::Encoder<'b>
+    where
+        Self: 'b,
+    {
+        DerefEncoder::new(B::encoder())
     }
 }
 
