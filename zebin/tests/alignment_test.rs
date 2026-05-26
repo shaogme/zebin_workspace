@@ -127,5 +127,5 @@ fn test_root_array_u64_round_trip() {
     let mut reader_obj = reader::<[u64; 3], _>(&buf[..written]).unwrap();
     let archived = reader_obj.read().unwrap();
 
-    assert_eq!(archived, &[8, 16, 32]);
+    assert_eq!(archived, [8, 16, 32]);
 }

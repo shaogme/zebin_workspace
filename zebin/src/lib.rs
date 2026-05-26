@@ -153,10 +153,10 @@ mod pub_fn {
     /// Decode and validate the archived root object using the default header directly into T.
     pub fn decode<'a, T, S>(storage: S) -> Result<T, ZebinError>
     where
-        T: Archive,
+        T: Archive + 'a,
         S: Storage + 'a,
         T::Archived: Decode + 'a,
-        <T::Archived as Decode>::View<'a>: Restore<T>,
+        for<'b> <T::Archived as Decode>::View<'b>: Restore<T>,
     {
         ZebinReader::<T, S>::decode(storage)
     }

@@ -4,22 +4,17 @@ use crate::prelude::*;
 /// Safe access layer output that keeps the validated byte slice alive.
 pub struct ZebinReader<'a, T, S, H = ArchiveHeader>
 where
-    T: Archive,
-    T::Archived: Decode + 'a,
     S: Storage,
     H: ArchiveHeaderTrait,
 {
     storage: S,
     offset: usize,
     config: ValidationConfig,
-    current_view: Option<<T::Archived as Decode>::View<'a>>,
     _phantom: core::marker::PhantomData<(T, H, &'a S)>,
 }
 
 impl<'a, T, S, H> ZebinReader<'a, T, S, H>
 where
-    T: Archive,
-    T::Archived: Decode + 'a,
     S: Storage,
     H: ArchiveHeaderTrait,
 {
@@ -28,7 +23,6 @@ where
             storage,
             offset: 0,
             config,
-            current_view: None,
             _phantom: core::marker::PhantomData,
         })
     }
@@ -41,11 +35,12 @@ where
         self.offset >= self.storage.as_slice().len()
     }
 
-    pub fn read(&mut self) -> Result<&<T::Archived as Decode>::View<'a>, ZebinError> {
-        let bytes: &'a [u8] = unsafe {
-            let slice = self.storage.as_slice();
-            core::slice::from_raw_parts(slice.as_ptr(), slice.len())
-        };
+    pub fn read(&mut self) -> Result<<T::Archived as Decode>::View<'_>, ZebinError>
+    where
+        T: Archive,
+        T::Archived: Decode,
+    {
+        let bytes = self.storage.as_slice();
         if self.offset >= bytes.len() {
             return Err(ZebinError::BufferTooSmall {
                 pos: self.offset,
@@ -60,13 +55,14 @@ where
         let mut cursor = Cursor::new(remaining, H::SIZE);
         let root = T::Archived::decode(&mut cursor, &mut validator)?;
         self.offset += cursor.pos();
-        self.current_view = Some(root);
-        Ok(self.current_view.as_ref().unwrap())
+        Ok(root)
     }
 
     pub fn decode(storage: S) -> Result<T, ZebinError>
     where
-        <T::Archived as Decode>::View<'a>: Restore<T>,
+        T: Archive,
+        T::Archived: Decode,
+        for<'b> <T::Archived as Decode>::View<'b>: Restore<T>,
     {
         let mut reader = Self::new(storage, ValidationConfig::default())?;
         let view = reader.read()?;
@@ -77,7 +73,11 @@ where
         storage: &'a S,
         config: ValidationConfig,
         stack: Option<&mut ValidationPathStack>,
-    ) -> Result<(), ZebinError> {
+    ) -> Result<(), ZebinError>
+    where
+        T: Archive,
+        T::Archived: Decode,
+    {
         let bytes = storage.as_slice();
         let header = H::parse(bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
