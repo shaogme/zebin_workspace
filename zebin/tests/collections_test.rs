@@ -24,10 +24,10 @@ fn test_btreeset_direct() {
 
     let bytes = zebin::encode(&set).expect("failed to encode BTreeSet");
     let restored: BTreeSet<u32> =
-        zebin::decode::<BTreeSet<u32>>(&bytes).expect("failed to decode BTreeSet");
+        zebin::decode::<BTreeSet<u32>, _>(&bytes).expect("failed to decode BTreeSet");
     assert_eq!(restored, set);
 
-    let mut reader = zebin::reader::<BTreeSet<u32>>(&bytes).expect("failed to create reader");
+    let mut reader = zebin::reader::<BTreeSet<u32>, _>(&bytes).expect("failed to create reader");
     let archived = reader.read().unwrap();
     assert_eq!(archived.len(), 3);
 }
@@ -40,7 +40,7 @@ fn test_hashset_direct() {
 
     let bytes = zebin::encode(&set).expect("failed to encode HashSet");
     let restored: HashSet<String> =
-        zebin::decode::<HashSet<String>>(&bytes).expect("failed to decode HashSet");
+        zebin::decode::<HashSet<String>, _>(&bytes).expect("failed to decode HashSet");
     assert_eq!(restored, set);
 }
 
@@ -53,7 +53,7 @@ fn test_binary_heap_direct() {
 
     let bytes = zebin::encode(&heap).expect("failed to encode BinaryHeap");
     let restored: BinaryHeap<i32> =
-        zebin::decode::<BinaryHeap<i32>>(&bytes).expect("failed to decode BinaryHeap");
+        zebin::decode::<BinaryHeap<i32>, _>(&bytes).expect("failed to decode BinaryHeap");
 
     let restored_sorted: Vec<i32> = restored.into_sorted_vec();
     let expected_sorted: Vec<i32> = heap.into_sorted_vec();
@@ -68,7 +68,7 @@ fn test_btreemap_direct() {
 
     let bytes = zebin::encode(&map).expect("failed to encode BTreeMap");
     let restored: BTreeMap<String, u32> =
-        zebin::decode::<BTreeMap<String, u32>>(&bytes).expect("failed to decode BTreeMap");
+        zebin::decode::<BTreeMap<String, u32>, _>(&bytes).expect("failed to decode BTreeMap");
     assert_eq!(restored, map);
 }
 
@@ -80,7 +80,7 @@ fn test_hashmap_direct() {
 
     let bytes = zebin::encode(&map).expect("failed to encode HashMap");
     let restored: HashMap<u32, String> =
-        zebin::decode::<HashMap<u32, String>>(&bytes).expect("failed to decode HashMap");
+        zebin::decode::<HashMap<u32, String>, _>(&bytes).expect("failed to decode HashMap");
     assert_eq!(restored, map);
 }
 
@@ -108,6 +108,6 @@ fn test_collections_container() {
 
     let bytes = zebin::encode(&container).expect("failed to encode container");
     let restored: CollectionContainer =
-        zebin::decode::<CollectionContainer>(&bytes).expect("failed to decode container");
+        zebin::decode::<CollectionContainer, _>(&bytes).expect("failed to decode container");
     assert_eq!(restored, container);
 }

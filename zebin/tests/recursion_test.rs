@@ -24,7 +24,7 @@ fn test_recursion_limit() {
     let buf = zebin::encode(current.clone()).unwrap();
 
     // Validation should fail due to recursion limit (default 256)
-    let result = zebin::validate::<Node>(&buf);
+    let result = zebin::validate::<Node, _>(&buf);
     match result {
         Err(ZebinError::Decode(zebin::error::DecodeError::RecursionLimitExceeded)) => {}
         Err(e) => panic!("Expected RecursionLimitExceeded, got {:?}", e),
@@ -52,7 +52,7 @@ fn test_recursion_limit_iter() {
 
     let buf = zebin::encode(current.clone()).unwrap();
 
-    let result = zebin::validate::<IterNode>(&buf);
+    let result = zebin::validate::<IterNode, _>(&buf);
     match result {
         Err(ZebinError::Decode(zebin::error::DecodeError::RecursionLimitExceeded)) => {}
         Err(e) => panic!("Expected RecursionLimitExceeded, got {:?}", e),

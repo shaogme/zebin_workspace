@@ -25,10 +25,10 @@ pub trait StorageMut {
     fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
 }
 
-impl Storage for &[u8] {
+impl<S: Storage + ?Sized> Storage for &S {
     #[inline]
     fn as_slice(&self) -> &[u8] {
-        self
+        (**self).as_slice()
     }
 }
 

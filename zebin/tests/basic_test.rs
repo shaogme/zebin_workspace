@@ -24,7 +24,7 @@ fn test_basic_archive() {
         username: "Alice".to_string(),
     };
     let buf = zebin::encode(user).unwrap();
-    let mut reader_obj = reader::<UserProfile>(&buf).unwrap();
+    let mut reader_obj = reader::<UserProfile, _>(&buf).unwrap();
     let archived = reader_obj.read().unwrap();
     assert_eq!(archived.id, 42);
     assert_eq!(unsafe { archived.username.as_str() }, "Alice");
@@ -127,7 +127,7 @@ fn test_basic_no_alloc() {
     let mut writer_obj = writer::<SimpleUser, _>(&mut encoder).unwrap();
     writer_obj.write_all(user).unwrap();
     let written = encoder.written();
-    let mut reader_obj = reader::<SimpleUser>(&buf[..written]).unwrap();
+    let mut reader_obj = reader::<SimpleUser, _>(&buf[..written]).unwrap();
     let archived = reader_obj.read().unwrap();
     assert_eq!(archived.id, 42);
 }
@@ -142,7 +142,7 @@ fn test_iter_archive_no_alloc() {
     let mut writer_obj = writer::<IterArchive<[u64; 3], u64>, _>(&mut encoder).unwrap();
     writer_obj.write_all(wrapped).unwrap();
     let written = encoder.written();
-    let mut reader_obj = reader::<IterArchive<[u64; 3], u64>>(&buf[..written]).unwrap();
+    let mut reader_obj = reader::<IterArchive<[u64; 3], u64>, _>(&buf[..written]).unwrap();
     let archived_iter = reader_obj.read().unwrap();
     assert_eq!(archived_iter.len(), 3);
     let mut iter = archived_iter.iter();
@@ -176,7 +176,7 @@ fn test_consecutive_values() {
         buf.extend_from_slice(&encoded);
     }
 
-    let mut reader = zebin::prelude::reader::<UserProfile>(&buf).unwrap();
+    let mut reader = zebin::prelude::reader::<UserProfile, _>(&buf).unwrap();
 
     let u1 = reader.read().unwrap();
     assert_eq!(u1.id, 101);
@@ -220,7 +220,7 @@ fn test_consecutive_writer_and_reader() {
     }
 
     let buf = encoder.into_inner();
-    let mut reader = zebin::prelude::reader::<UserProfile>(&buf).unwrap();
+    let mut reader = zebin::prelude::reader::<UserProfile, _>(&buf).unwrap();
 
     let u1 = reader.read().unwrap();
     assert_eq!(u1.id, 101);

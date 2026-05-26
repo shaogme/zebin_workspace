@@ -2,28 +2,28 @@ use crate::io::Storage;
 use crate::prelude::*;
 
 /// Safe access layer output that keeps the validated byte slice alive.
-pub struct ZebinReader<'a, T, S = [u8], H = ArchiveHeader>
+pub struct ZebinReader<'a, T, S, H = ArchiveHeader>
 where
     T: Archive,
     T::Archived: Decode<'a>,
-    S: Storage + ?Sized,
+    S: Storage,
     H: ArchiveHeaderTrait,
 {
-    storage: &'a S,
+    storage: S,
     offset: usize,
     config: ValidationConfig,
     current_view: Option<<T::Archived as Decode<'a>>::View>,
-    _phantom: core::marker::PhantomData<(T, H)>,
+    _phantom: core::marker::PhantomData<(T, H, &'a S)>,
 }
 
 impl<'a, T, S, H> ZebinReader<'a, T, S, H>
 where
     T: Archive,
     T::Archived: Decode<'a>,
-    S: Storage + ?Sized,
+    S: Storage,
     H: ArchiveHeaderTrait,
 {
-    pub fn new(storage: &'a S, config: ValidationConfig) -> Result<Self, ZebinError> {
+    pub fn new(storage: S, config: ValidationConfig) -> Result<Self, ZebinError> {
         Ok(Self {
             storage,
             offset: 0,
@@ -42,7 +42,10 @@ where
     }
 
     pub fn read(&mut self) -> Result<&<T::Archived as Decode<'a>>::View, ZebinError> {
-        let bytes: &'a [u8] = self.storage.as_slice();
+        let bytes: &'a [u8] = unsafe {
+            let slice = self.storage.as_slice();
+            core::slice::from_raw_parts(slice.as_ptr(), slice.len())
+        };
         if self.offset >= bytes.len() {
             return Err(ZebinError::BufferTooSmall {
                 pos: self.offset,
@@ -61,7 +64,7 @@ where
         Ok(self.current_view.as_ref().unwrap())
     }
 
-    pub fn decode(storage: &'a S) -> Result<T, ZebinError>
+    pub fn decode(storage: S) -> Result<T, ZebinError>
     where
         <T::Archived as Decode<'a>>::View: Restore<T>,
     {

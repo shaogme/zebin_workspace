@@ -31,7 +31,7 @@ fn test_varint_struct_round_trip() {
     };
 
     let buf = zebin::encode(s).unwrap();
-    let mut reader_obj = zebin::reader::<VarIntStruct>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<VarIntStruct, _>(&buf).unwrap();
     let archived = reader_obj.read().unwrap();
 
     assert_eq!(archived.a, 10);
@@ -49,7 +49,7 @@ fn test_varint_boundaries() {
             c: 2,
         };
         let buf = zebin::encode(s).unwrap();
-        let mut reader_obj = zebin::reader::<VarIntStruct>(&buf).unwrap();
+        let mut reader_obj = zebin::reader::<VarIntStruct, _>(&buf).unwrap();
         let archived = reader_obj.read().unwrap();
         assert_eq!(archived.b.get(), val);
     }
@@ -63,7 +63,7 @@ fn test_varint_u64_large() {
         c: 2,
     };
     let buf = zebin::encode(s).unwrap();
-    let mut reader_obj = zebin::reader::<VarIntStruct>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<VarIntStruct, _>(&buf).unwrap();
     let archived = reader_obj.read().unwrap();
     assert_eq!(archived.b.get(), u32::MAX);
 }
@@ -79,7 +79,7 @@ fn test_varint_usize() {
         count: VarInt::new(12345678),
     };
     let buf = zebin::encode(s).unwrap();
-    let mut reader_obj = zebin::reader::<NestedVarInt>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<NestedVarInt, _>(&buf).unwrap();
     let archived = reader_obj.read().unwrap();
     assert_eq!(archived.count.get(), 12345678);
 }
@@ -88,7 +88,7 @@ fn test_varint_usize() {
 fn test_varint_enum_round_trip() {
     let e = VarIntEnum::Large(VarInt::new(0x123456789ABCDEF0));
     let buf = zebin::encode(e).unwrap();
-    let mut reader_obj = zebin::reader::<VarIntEnum>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<VarIntEnum, _>(&buf).unwrap();
     let archived = reader_obj.read().unwrap();
 
     assert_eq!(archived.tag(), 1);
@@ -100,7 +100,7 @@ fn test_varint_enum_round_trip() {
 fn test_varint_in_varint_vec() {
     let v = VarIntVec::new(vec![1u32, 300, 100000]);
     let buf = zebin::encode(v).unwrap();
-    let mut reader_obj = zebin::reader::<VarIntVec<u32>>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<VarIntVec<u32>, _>(&buf).unwrap();
     let archived = reader_obj.read().unwrap();
 
     assert_eq!(archived.len(), 3);
@@ -120,7 +120,7 @@ fn test_varint_vec_compact() {
     // Header (12) + Data (1+2+3+1+1=8) + Alignment + Offsets (6*4=24) + Layouts...
     // It should be much smaller than fixed 5-byte elements in a large vector.
 
-    let mut reader_obj = zebin::reader::<VarIntVec<u32>>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<VarIntVec<u32>, _>(&buf).unwrap();
     let archived = reader_obj.read().unwrap();
     assert_eq!(archived.len(), 5);
 

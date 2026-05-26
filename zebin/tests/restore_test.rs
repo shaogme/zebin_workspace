@@ -35,7 +35,7 @@ fn test_struct_restore() {
         tags: vec!["rust".to_string(), "zebin".to_string()],
     };
     let buf = zebin::encode(&user).unwrap();
-    let restored: UserProfile = zebin::decode::<UserProfile>(&buf).unwrap();
+    let restored: UserProfile = zebin::decode::<UserProfile, _>(&buf).unwrap();
 
     assert_eq!(restored, user);
 }
@@ -45,7 +45,7 @@ fn test_struct_restore() {
 fn test_enum_restore() {
     let ping = Packet::Ping;
     let buf_ping = zebin::encode(&ping).unwrap();
-    let restored_ping: Packet = zebin::decode::<Packet>(&buf_ping).unwrap();
+    let restored_ping: Packet = zebin::decode::<Packet, _>(&buf_ping).unwrap();
     assert_eq!(restored_ping, ping);
 
     let data = Packet::Data {
@@ -53,7 +53,7 @@ fn test_enum_restore() {
         label: "test".to_string(),
     };
     let buf_data = zebin::encode(&data).unwrap();
-    let restored_data: Packet = zebin::decode::<Packet>(&buf_data).unwrap();
+    let restored_data: Packet = zebin::decode::<Packet, _>(&buf_data).unwrap();
     assert_eq!(restored_data, data);
 }
 
@@ -75,7 +75,7 @@ fn test_nested_restore() {
         },
     };
     let buf = zebin::encode(&container).unwrap();
-    let restored: Container = zebin::decode::<Container>(&buf).unwrap();
+    let restored: Container = zebin::decode::<Container, _>(&buf).unwrap();
     assert_eq!(restored, container);
 }
 
@@ -97,7 +97,7 @@ fn test_optional_option_restore() {
         maybe_u32: Some(100),
     };
     let buf = zebin::encode(&obj).unwrap();
-    let restored: OptionalStruct = zebin::decode::<OptionalStruct>(&buf).unwrap();
+    let restored: OptionalStruct = zebin::decode::<OptionalStruct, _>(&buf).unwrap();
     assert_eq!(restored, obj);
 
     // Test with None
@@ -106,7 +106,7 @@ fn test_optional_option_restore() {
         maybe_u32: None,
     };
     let buf_none = zebin::encode(&obj_none).unwrap();
-    let restored_none: OptionalStruct = zebin::decode::<OptionalStruct>(&buf_none).unwrap();
+    let restored_none: OptionalStruct = zebin::decode::<OptionalStruct, _>(&buf_none).unwrap();
     assert_eq!(restored_none, obj_none);
 }
 
@@ -124,7 +124,7 @@ fn test_struct_restore_no_alloc() {
     let mut writer_obj = writer::<&SimpleProfile, _>(&mut encoder).unwrap();
     writer_obj.write_all(&profile).unwrap();
     let written = encoder.written();
-    let restored: SimpleProfile = decode::<SimpleProfile>(&buf[..written]).unwrap();
+    let restored: SimpleProfile = decode::<SimpleProfile, _>(&buf[..written]).unwrap();
     assert_eq!(restored, profile);
 }
 
@@ -142,7 +142,7 @@ fn test_enum_restore_no_alloc() {
     let mut writer_obj = writer::<&SimplePacket, _>(&mut encoder).unwrap();
     writer_obj.write_all(&ping).unwrap();
     let written = encoder.written();
-    let restored: SimplePacket = decode::<SimplePacket>(&buf[..written]).unwrap();
+    let restored: SimplePacket = decode::<SimplePacket, _>(&buf[..written]).unwrap();
     assert_eq!(restored, ping);
 
     let data = SimplePacket::Data(123);
@@ -151,7 +151,7 @@ fn test_enum_restore_no_alloc() {
     let mut writer_obj = writer::<&SimplePacket, _>(&mut encoder).unwrap();
     writer_obj.write_all(&data).unwrap();
     let written = encoder.written();
-    let restored: SimplePacket = decode::<SimplePacket>(&buf[..written]).unwrap();
+    let restored: SimplePacket = decode::<SimplePacket, _>(&buf[..written]).unwrap();
     assert_eq!(restored, data);
 }
 
@@ -164,7 +164,7 @@ fn test_ref_encode_restore() {
         tags: vec!["rust".to_string(), "zebin".to_string()],
     };
     let buf = zebin::encode(&user).unwrap();
-    let restored: UserProfile = decode::<UserProfile>(&buf).unwrap();
+    let restored: UserProfile = decode::<UserProfile, _>(&buf).unwrap();
 
     assert_eq!(restored, user);
 }

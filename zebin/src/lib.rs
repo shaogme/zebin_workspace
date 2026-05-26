@@ -141,62 +141,61 @@ pub use pub_fn::*;
 mod pub_fn {
     use super::prelude::*;
     /// Create a reader for the archived root object using the default header.
-    pub fn reader<'a, T>(
-        storage: &'a (impl Storage + ?Sized),
-    ) -> Result<ZebinReader<'a, T, [u8]>, ZebinError>
+    pub fn reader<'a, T, S>(storage: S) -> Result<ZebinReader<'a, T, S>, ZebinError>
     where
         T: Archive,
+        S: Storage,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::new(storage.as_slice(), ValidationConfig::default())
+        ZebinReader::new(storage, ValidationConfig::default())
     }
 
     /// Decode and validate the archived root object using the default header directly into T.
-    pub fn decode<'a, T>(storage: &'a (impl Storage + ?Sized)) -> Result<T, ZebinError>
+    pub fn decode<'a, T, S>(storage: S) -> Result<T, ZebinError>
     where
         T: Archive,
+        S: Storage + 'a,
         T::Archived: Decode<'a>,
         <T::Archived as Decode<'a>>::View: Restore<T>,
     {
-        ZebinReader::<T, [u8]>::decode(storage.as_slice())
+        ZebinReader::<T, S>::decode(storage)
     }
 
     /// Validate an archive without exposing the archived view using the default header.
-    pub fn validate<'a, T>(storage: &'a (impl Storage + ?Sized)) -> Result<(), ZebinError>
+    pub fn validate<'a, T, S>(storage: &'a S) -> Result<(), ZebinError>
     where
         T: Archive,
+        S: Storage + 'a,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T, [u8]>::validate(storage.as_slice(), ValidationConfig::default(), None)
+        ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), None)
     }
 
     /// Validate an archive with explicit runtime validation limits.
-    pub fn validate_with_config<'a, T>(
-        storage: &'a (impl Storage + ?Sized),
+    pub fn validate_with_config<'a, T, S>(
+        storage: &'a S,
         config: ValidationConfig,
         stack: Option<&mut ValidationPathStack>,
     ) -> Result<(), ZebinError>
     where
         T: Archive,
+        S: Storage + 'a,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T, [u8]>::validate(storage.as_slice(), config, stack)
+        ZebinReader::<T, S>::validate(storage, config, stack)
     }
 
     /// Validate an archive and capture the logical field/index path on failure.
-    pub fn validate_detailed<'a, T>(
-        storage: &'a (impl Storage + ?Sized),
+    pub fn validate_detailed<'a, T, S>(
+        storage: &'a S,
         stack: &mut ValidationPathStack,
     ) -> Result<(), ZebinError>
     where
         T: Archive,
+        S: Storage + 'a,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T, [u8]>::validate(
-            storage.as_slice(),
-            ValidationConfig::default(),
-            Some(stack),
-        )
+        ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), Some(stack))
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.

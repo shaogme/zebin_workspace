@@ -46,7 +46,10 @@ impl FixedLayout for ArchiveHeader {
     const SIZE: usize = 4;
 
     fn write_fixed(archived: &Self, out: &mut [u8]) {
-        byteops::copy_exact(&mut out[..<Self as FixedLayout>::SIZE], &Self::to_bytes(archived.flags));
+        byteops::copy_exact(
+            &mut out[..<Self as FixedLayout>::SIZE],
+            &Self::to_bytes(archived.flags),
+        );
     }
 }
 

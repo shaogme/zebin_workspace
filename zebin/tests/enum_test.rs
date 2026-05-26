@@ -47,7 +47,7 @@ fn test_unit_enum_round_trip() {
     writer_obj.write_all(value).unwrap();
     let written = encoder.written();
 
-    let mut reader_obj = reader::<UnitMode>(&buf[..written]).unwrap();
+    let mut reader_obj = reader::<UnitMode, _>(&buf[..written]).unwrap();
     let archived = reader_obj.read().unwrap();
     assert!(archived.is_busy());
     assert!(!archived.is_idle());
@@ -61,7 +61,7 @@ fn test_tuple_enum_round_trip() {
     assert!(matches!(empty, TuplePacket::Empty));
     let value = TuplePacket::Data(7, "packet".to_string());
     let buf = zebin::encode(value).unwrap();
-    let mut reader = zebin::reader::<TuplePacket>(&buf).unwrap();
+    let mut reader = zebin::reader::<TuplePacket, _>(&buf).unwrap();
     let archived = reader.read().unwrap();
     assert!(!archived.is_empty());
     assert_eq!(archived.tag(), 1);
@@ -83,7 +83,7 @@ fn test_struct_enum_round_trip() {
         label: "hello".to_string(),
     };
     let buf = zebin::encode(value).unwrap();
-    let mut reader = zebin::reader::<StructPacket>(&buf).unwrap();
+    let mut reader = zebin::reader::<StructPacket, _>(&buf).unwrap();
     let archived = reader.read().unwrap();
     assert_eq!(archived.tag(), 1);
 
@@ -107,7 +107,7 @@ fn test_invalid_enum_discriminant() {
     let root_offset = 4usize;
     buf[root_offset..root_offset + 4].copy_from_slice(&99u32.to_le_bytes());
 
-    let err = zebin::validate::<UnitMode>(&buf[..written]).unwrap_err();
+    let err = zebin::validate::<UnitMode, _>(&&buf[..written]).unwrap_err();
     match err {
         ZebinError::Decode(zebin::error::DecodeError::ValidationError { .. }) => {}
         other => panic!("expected validation error, got {other:?}"),
@@ -121,7 +121,7 @@ fn test_truncated_enum_payload_rejected() {
     let mut buf = zebin::encode(value).unwrap();
     buf.pop();
 
-    assert!(zebin::validate::<TuplePacket>(&buf).is_err());
+    assert!(zebin::validate::<TuplePacket, _>(&buf).is_err());
 }
 
 #[cfg(feature = "alloc")]
@@ -135,7 +135,7 @@ fn test_recursive_enum_depth_limit() {
     }
 
     let buf = zebin::encode(current).unwrap();
-    let err = zebin::validate::<RecursiveNode>(&buf).unwrap_err();
+    let err = zebin::validate::<RecursiveNode, _>(&buf).unwrap_err();
     assert!(matches!(
         err,
         ZebinError::Decode(zebin::error::DecodeError::RecursionLimitExceeded)
@@ -156,7 +156,7 @@ fn test_enum_layout_mismatch_rejected() {
 
     buf[label_encoding_pos] = zebin::schema::FieldEncoding::Fixed as u8;
 
-    let err = zebin::validate::<StructPacket>(&buf).unwrap_err();
+    let err = zebin::validate::<StructPacket, _>(&buf).unwrap_err();
     assert!(matches!(
         err,
         ZebinError::Decode(zebin::error::DecodeError::UnexpectedFieldEncoding { .. })

@@ -45,7 +45,7 @@ fn test_validate_detailed_reports_logical_path() {
     buf[5] = 2;
 
     let mut stack = ValidationPathStack::new();
-    let err = validate_detailed::<Parent>(&buf, &mut stack).unwrap_err();
+    let err = validate_detailed::<Parent, _>(&buf, &mut stack).unwrap_err();
 
     // The path should be written back to the provided stack
     assert_eq!(stack.to_string(), "children[0].flag");
@@ -71,7 +71,7 @@ fn test_validate_with_config_uses_custom_depth_limit() {
 
     let buf = zebin::encode(current).unwrap();
     // Pass None as we don't need path tracking here
-    let err = validate_with_config::<Node>(
+    let err = validate_with_config::<Node, _>(
         &buf,
         ValidationConfig {
             max_depth: 2,
@@ -101,7 +101,7 @@ fn test_validate_detailed_reports_schema_field_encoding_path() {
     buf[first_entry_encoding_pos] = zebin::schema::FieldEncoding::LengthPrefixed as u8;
 
     let mut stack = ValidationPathStack::new();
-    let err = validate_detailed::<SchemaRecord>(&buf, &mut stack).unwrap_err();
+    let err = validate_detailed::<SchemaRecord, _>(&buf, &mut stack).unwrap_err();
 
     assert_eq!(stack.to_string(), "flag");
     assert!(matches!(
@@ -125,7 +125,7 @@ fn test_validate_detailed_reports_schema_field_length_path() {
         .copy_from_slice(&2u32.to_le_bytes());
 
     let mut stack = ValidationPathStack::new();
-    let err = validate_detailed::<SchemaRecord>(&buf, &mut stack).unwrap_err();
+    let err = validate_detailed::<SchemaRecord, _>(&buf, &mut stack).unwrap_err();
 
     assert_eq!(stack.to_string(), "flag");
     assert!(matches!(
@@ -154,7 +154,7 @@ fn test_validate_detailed_reports_duplicate_schema_field_path() {
         .copy_from_slice(&1u32.to_le_bytes());
 
     let mut stack = ValidationPathStack::new();
-    let err = validate_detailed::<SchemaRecord>(&buf, &mut stack).unwrap_err();
+    let err = validate_detailed::<SchemaRecord, _>(&buf, &mut stack).unwrap_err();
 
     assert_eq!(stack.to_string(), "flag");
     assert!(matches!(
@@ -174,7 +174,7 @@ fn test_validate_detailed_reports_trailing_bytes_at_root() {
     buf.push(0);
 
     let mut stack = ValidationPathStack::new();
-    let err = validate_detailed::<Parent>(&buf, &mut stack).unwrap_err();
+    let err = validate_detailed::<Parent, _>(&buf, &mut stack).unwrap_err();
 
     assert_eq!(stack.to_string(), "<root>");
     assert!(matches!(
@@ -196,7 +196,7 @@ fn test_reader_rejects_invalid_sequence_marker_before_building_view() {
     let mut buf = zebin::encode(value).unwrap();
     buf[4] = 2;
 
-    let mut reader_obj = zebin::reader::<Parent>(&buf).unwrap();
+    let mut reader_obj = zebin::reader::<Parent, _>(&buf).unwrap();
     let err = match reader_obj.read() {
         Ok(_) => panic!("reader accepted invalid sequence marker"),
         Err(error) => error,
