@@ -45,6 +45,11 @@ impl Storage for Mmap {
     fn as_slice(&self) -> &[u8] {
         &self.data
     }
+
+    #[inline]
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        Ok(false)
+    }
 }
 
 /// Writable memory-mapped storage backend used by [`MmapEncoder`].
@@ -190,5 +195,9 @@ impl StorageMut for MmapEncoder {
         let (start, end) = self.prepare_range(len)?;
         byteops::fill(&mut self.mmap[start..end], 0);
         Ok(SinkProgress::Complete)
+    }
+
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        Ok(false)
     }
 }

@@ -388,28 +388,6 @@ impl SinkProgress {
     }
 }
 
-impl<S: StorageMut + ?Sized> StorageMut for &mut S {
-    #[inline]
-    fn pos(&self) -> usize {
-        (**self).pos()
-    }
-
-    #[inline]
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        (**self).write(bytes)
-    }
-
-    #[inline]
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-        (**self).align(alignment)
-    }
-
-    #[inline]
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        (**self).skip(len)
-    }
-}
-
 /// Unified encoder protocol, supporting one-off or incremental step-by-step input.
 ///
 /// The trait carries no lifetime. Encoders that work over borrowed inputs (DST

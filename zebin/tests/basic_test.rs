@@ -97,6 +97,10 @@ fn test_chunked_writer_resume() {
             self.buf.resize(self.buf.len() + skip_len, 0);
             Ok(SinkProgress::from_accepted(len, skip_len))
         }
+
+        fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+            Ok(false)
+        }
     }
 
     let mut sink = LimitedSink {
@@ -233,6 +237,65 @@ fn test_consecutive_writer_and_reader() {
     let u3 = reader.read().unwrap();
     assert_eq!(u3.id, 103);
     assert_eq!(unsafe { u3.username.as_str() }, "Charlie");
+
+    assert!(reader.read().is_err());
+}
+
+#[cfg(feature = "alloc")]
+struct ShardedStorage {
+    shards: Vec<Vec<u8>>,
+    current_index: usize,
+}
+
+#[cfg(feature = "alloc")]
+impl zebin::io::Storage for ShardedStorage {
+    fn as_slice(&self) -> &[u8] {
+        if self.current_index < self.shards.len() {
+            &self.shards[self.current_index]
+        } else {
+            &[]
+        }
+    }
+
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        if self.current_index + 1 < self.shards.len() {
+            self.current_index += 1;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn test_sharded_storage_stream() {
+    let u1 = UserProfile {
+        id: 1,
+        username: "Alice".to_string(),
+    };
+    let u2 = UserProfile {
+        id: 2,
+        username: "Bob".to_string(),
+    };
+
+    let shard1 = zebin::encode(&u1).unwrap();
+    let shard2 = zebin::encode(&u2).unwrap();
+
+    let storage = ShardedStorage {
+        shards: vec![shard1, shard2],
+        current_index: 0,
+    };
+
+    let mut reader = reader::<UserProfile, _>(storage).unwrap();
+
+    let r1 = reader.read().unwrap();
+    assert_eq!(r1.id, 1);
+    assert_eq!(unsafe { r1.username.as_str() }, "Alice");
+
+    let r2 = reader.read().unwrap();
+    assert_eq!(r2.id, 2);
+    assert_eq!(unsafe { r2.username.as_str() }, "Bob");
 
     assert!(reader.read().is_err());
 }

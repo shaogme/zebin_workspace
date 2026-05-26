@@ -40,13 +40,18 @@ where
         T: Archive,
         T::Archived: Decode,
     {
-        let bytes = self.storage.as_slice();
-        if self.offset >= bytes.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos: self.offset,
-                required: 1,
-            });
+        let len = self.storage.as_slice().len();
+        if self.offset >= len {
+            if self.storage.advance_shard()? {
+                self.offset = 0;
+            } else {
+                return Err(ZebinError::BufferTooSmall {
+                    pos: self.offset,
+                    required: 1,
+                });
+            }
         }
+        let bytes = self.storage.as_slice();
         let remaining = &bytes[self.offset..];
         let header = H::parse(remaining)?;
         validate_root_object_encoding::<T, H>(&header)?;

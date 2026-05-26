@@ -15,6 +15,7 @@ use crate::{
 /// Unified storage layer: byte-backed read access contract.
 pub trait Storage {
     fn as_slice(&self) -> &[u8];
+    fn advance_shard(&mut self) -> Result<bool, ZebinError>;
 }
 
 /// Unified storage layer: byte-backed write access contract.
@@ -23,12 +24,57 @@ pub trait StorageMut {
     fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
     fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError>;
     fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
+    fn advance_shard(&mut self) -> Result<bool, ZebinError>;
 }
 
 impl<S: Storage + ?Sized> Storage for &S {
     #[inline]
     fn as_slice(&self) -> &[u8] {
         (**self).as_slice()
+    }
+
+    #[inline]
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        Ok(false)
+    }
+}
+
+impl<S: Storage + ?Sized> Storage for &mut S {
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        (**self).as_slice()
+    }
+
+    #[inline]
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        (**self).advance_shard()
+    }
+}
+
+impl<S: StorageMut + ?Sized> StorageMut for &mut S {
+    #[inline]
+    fn pos(&self) -> usize {
+        (**self).pos()
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        (**self).write(bytes)
+    }
+
+    #[inline]
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+        (**self).align(alignment)
+    }
+
+    #[inline]
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+        (**self).skip(len)
+    }
+
+    #[inline]
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        (**self).advance_shard()
     }
 }
 
@@ -37,6 +83,11 @@ impl Storage for [u8] {
     fn as_slice(&self) -> &[u8] {
         self
     }
+
+    #[inline]
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        Ok(false)
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -44,6 +95,11 @@ impl Storage for Vec<u8> {
     #[inline]
     fn as_slice(&self) -> &[u8] {
         self.as_slice()
+    }
+
+    #[inline]
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        Ok(false)
     }
 }
 
@@ -124,6 +180,10 @@ impl StorageMut for SliceEncoder<'_> {
         }
         Ok(SinkProgress::from_accepted(len, written))
     }
+
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        Ok(false)
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -180,5 +240,9 @@ impl StorageMut for VecEncoder {
         self.buf.resize(self.buf.len() + len, 0);
         self.archive_pos = next_pos;
         Ok(SinkProgress::Complete)
+    }
+
+    fn advance_shard(&mut self) -> Result<bool, ZebinError> {
+        Ok(false)
     }
 }
