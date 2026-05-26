@@ -103,7 +103,7 @@ impl StorageMut for SliceEncoder<'_> {
         let (start, end) = self.prepare_range(bytes.len())?;
         let len = end - start;
         if len > 0 {
-            self.buf[start..end].copy_from_slice(&bytes[..len]);
+            byteops::copy_exact(&mut self.buf[start..end], &bytes[..len]);
         }
         Ok(SinkProgress::from_accepted(bytes.len(), len))
     }

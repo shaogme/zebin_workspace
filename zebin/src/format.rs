@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use crate::{error_impl::ParseHeaderError, prelude::*};
+use crate::{error_impl::ParseHeaderError, prelude::*, utils::byteops};
 
 /// Archive format constants and header utilities.
 pub const ARCHIVE_MAGIC: [u8; 2] = *b"ZB";
@@ -27,7 +27,7 @@ impl ArchiveHeader {
 
     pub fn to_bytes(flags: u8) -> [u8; 4] {
         let mut bytes = [0u8; 4];
-        bytes[0..2].copy_from_slice(&ARCHIVE_MAGIC);
+        byteops::copy_exact(&mut bytes[0..2], &ARCHIVE_MAGIC);
         bytes[2] = ARCHIVE_VERSION;
         bytes[3] = flags;
         bytes
@@ -46,7 +46,7 @@ impl FixedLayout for ArchiveHeader {
     const SIZE: usize = 4;
 
     fn write_fixed(archived: &Self, out: &mut [u8]) {
-        out[..<Self as FixedLayout>::SIZE].copy_from_slice(&Self::to_bytes(archived.flags));
+        byteops::copy_exact(&mut out[..<Self as FixedLayout>::SIZE], &Self::to_bytes(archived.flags));
     }
 }
 

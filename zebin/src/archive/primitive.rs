@@ -1,6 +1,6 @@
 #[cfg(feature = "alloc")]
 use crate::io::FixedSequenceStrategy;
-use crate::prelude::*;
+use crate::{prelude::*, utils::byteops};
 use core::{num::NonZeroUsize, task::Poll};
 
 pub trait ToBytes<const N: usize> {
@@ -118,7 +118,7 @@ macro_rules! impl_archive_for_primitive {
                 {
                     let bytes = cursor.read_exact(core::mem::size_of::<Self>(), context)?;
                     let mut fixed = [0u8; core::mem::size_of::<Self>()];
-                    fixed.copy_from_slice(bytes);
+                    byteops::copy_exact(&mut fixed, bytes);
                     Ok(<$t>::from_le_bytes(fixed))
                 }
 

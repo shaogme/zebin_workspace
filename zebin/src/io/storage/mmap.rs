@@ -174,7 +174,7 @@ impl StorageMut for MmapEncoder {
             return Ok(SinkProgress::Complete);
         }
         let (start, end) = self.prepare_range(bytes.len())?;
-        self.mmap[start..end].copy_from_slice(bytes);
+        byteops::copy_exact(&mut self.mmap[start..end], bytes);
         Ok(SinkProgress::Complete)
     }
 
