@@ -7,11 +7,11 @@ use zebin::{ZebinArchive, ZebinEncode};
 pub struct CollectionContainer {
     #[zebin(id = 0)]
     pub btree_set: BTreeSet<u32>,
-    #[zebin(id = 1, optional)]
+    #[zebin(id = 1)]
     pub hash_set: Option<HashSet<String>>,
     #[zebin(id = 2)]
     pub btree_map: BTreeMap<String, u32>,
-    #[zebin(id = 3, optional)]
+    #[zebin(id = 3)]
     pub hash_map: Option<HashMap<u32, String>>,
 }
 

@@ -8,7 +8,6 @@ pub struct FieldAttrs {
     pub packed_bits: Option<u8>,
     pub skip: bool,
     pub rename: Option<Ident>,
-    pub optional: bool,
     pub default: bool,
     pub default_value: Option<syn::Expr>,
 }
@@ -17,7 +16,6 @@ pub fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
     let mut field_id = None;
     let mut skip = false;
     let mut rename = None;
-    let mut optional = false;
     let mut default = false;
     let mut default_value = None;
 
@@ -42,9 +40,6 @@ pub fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
                 if part == "skip" || part == "skip_serializing" {
                     skip = true;
                 }
-                if part == "optional" {
-                    optional = true;
-                }
                 if part == "default" {
                     default = true;
                 }
@@ -58,7 +53,6 @@ pub fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
         packed_bits,
         skip,
         rename,
-        optional,
         default,
         default_value,
     })

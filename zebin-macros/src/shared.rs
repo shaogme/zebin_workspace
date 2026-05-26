@@ -27,7 +27,6 @@ pub struct FieldSpec<'a> {
     pub packed_bits: Option<u8>,
     pub skip: bool,
     pub rename: Option<Ident>,
-    pub optional: bool,
     pub default: bool,
     pub default_value: Option<syn::Expr>,
 }
@@ -291,7 +290,6 @@ fn parse_fields(fields: &Fields) -> Result<RecordSpec<'_>> {
                     packed_bits: attrs.packed_bits,
                     skip: attrs.skip,
                     rename: attrs.rename,
-                    optional: attrs.optional,
                     default: attrs.default,
                     default_value: attrs.default_value,
                 });
@@ -315,7 +313,6 @@ fn parse_fields(fields: &Fields) -> Result<RecordSpec<'_>> {
                     packed_bits: attrs.packed_bits,
                     skip: attrs.skip,
                     rename: attrs.rename,
-                    optional: attrs.optional,
                     default: attrs.default,
                     default_value: attrs.default_value,
                 });

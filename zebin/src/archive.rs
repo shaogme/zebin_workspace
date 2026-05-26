@@ -4,6 +4,7 @@ mod container;
 
 #[path = "archive/option.rs"]
 mod option;
+pub use option::ArchivedOption;
 
 #[path = "archive/packed.rs"]
 mod packed;

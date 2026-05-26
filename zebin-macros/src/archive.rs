@@ -85,10 +85,13 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
         let method = field_user_ident(record, index);
         let ty = field_view_type(field);
         let field_id = field.field_id.expect("field ids validated");
-        if field.optional && !field.default && field.default_value.is_none() {
+        if is_option_type(field.ty) {
             quote! {
-                pub fn #method(&self) -> Result<::core::option::Option<&#ty>, zebin::ZebinError> {
-                    Ok(self.#method.as_ref())
+                pub fn #method(&self) -> Result<&#ty, zebin::ZebinError> {
+                    match self.#method.as_ref() {
+                        Some(value) => Ok(value),
+                        None => Ok(&zebin::archive::ArchivedOption::None),
+                    }
                 }
             }
         } else if field.default || field.default_value.is_some() {
@@ -223,7 +226,7 @@ fn record_decode_impl(
         });
         let missing_checks = record.active_fields().zip(vars.iter()).filter_map(
             |((index, field), var)| {
-                if field.optional || field.default || field.default_value.is_some() {
+                if is_option_type(field.ty) || field.default || field.default_value.is_some() {
                     None
                 } else {
                     let field_id = field.field_id.expect("field ids validated");
@@ -242,7 +245,7 @@ fn record_decode_impl(
         );
         let validate_missing_checks = record.active_fields().enumerate().filter_map(
             |(i, (index, field))| {
-                if field.optional || field.default || field.default_value.is_some() {
+                if is_option_type(field.ty) || field.default || field.default_value.is_some() {
                     None
                 } else {
                     let field_id = field.field_id.expect("field ids validated");
@@ -431,7 +434,14 @@ fn restore_field_expr(
 
     if has_schema(record) {
         let member = field_user_ident(record, index);
-        if field.default || field.default_value.is_some() {
+        if is_option_type(field.ty) {
+            quote! {
+                match #source.#member.as_ref() {
+                    Some(value) => value.restore()?,
+                    None => ::core::default::Default::default(),
+                }
+            }
+        } else if field.default || field.default_value.is_some() {
             let ty = field_view_type(field);
             let fallback = if let Some(default_value) = &field.default_value {
                 quote! { #default_value }
@@ -440,22 +450,6 @@ fn restore_field_expr(
             };
             quote! {
                 #source.#member.as_ref().unwrap_or(#fallback).restore()?
-            }
-        } else if field.optional {
-            if is_option_type(field.ty) {
-                quote! {
-                    match #source.#member.as_ref() {
-                        Some(value) => value.restore()?,
-                        None => ::core::default::Default::default(),
-                    }
-                }
-            } else {
-                let message = format!("missing optional field: {}", member);
-                quote! {
-                    #source.#member.as_ref()
-                        .ok_or(zebin::ZebinError::DeserializeError { message: #message })?
-                        .restore()?
-                }
             }
         } else {
             let field_id = field.field_id.expect("field ids validated");

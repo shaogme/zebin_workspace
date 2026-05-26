@@ -19,8 +19,8 @@ pub struct Version2 {
     pub id: u32,
     #[zebin(id = 2)]
     pub name: String,
-    #[zebin(id = 3, optional)]
-    pub email: String,
+    #[zebin(id = 3)]
+    pub email: Option<String>,
     #[zebin(id = 4, default)]
     pub age: u32,
     #[zebin(id = 5, default_value = "custom_default()")]
@@ -64,7 +64,7 @@ fn test_version2_with_all_fields() {
     let v2 = Version2 {
         id: 1,
         name: "Bob".to_string(),
-        email: "bob@example.com".to_string(),
+        email: Some("bob@example.com".to_string()),
         age: 30,
         score: 95,
     };
@@ -74,7 +74,7 @@ fn test_version2_with_all_fields() {
     assert_eq!(reader.id().unwrap(), &1);
     assert_eq!(unsafe { reader.name().unwrap().as_str() }, "Bob");
     assert_eq!(
-        unsafe { reader.email().unwrap().unwrap().as_str() },
+        unsafe { reader.email().unwrap().as_ref().unwrap().as_str() },
         "bob@example.com"
     );
     assert_eq!(reader.age().unwrap(), &30);
@@ -98,8 +98,8 @@ pub enum MessageV2 {
     Login {
         #[zebin(id = 1)]
         user: String,
-        #[zebin(id = 2, optional)]
-        device: String,
+        #[zebin(id = 2)]
+        device: Option<String>,
     },
 }
 

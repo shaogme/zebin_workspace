@@ -84,9 +84,9 @@ fn test_optional_option_restore() {
     #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 4)]
     struct OptionalStruct {
-        #[zebin(id = 0, optional)]
+        #[zebin(id = 0)]
         pub maybe_string: Option<String>,
-        #[zebin(id = 1, optional)]
+        #[zebin(id = 1)]
         pub maybe_u32: Option<u32>,
     }
 

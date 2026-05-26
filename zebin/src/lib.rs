@@ -62,9 +62,9 @@ pub mod prelude {
 /// 底层表示与数据存储结构相关的高级 API
 pub mod archive {
     pub use crate::archive_impl::{
-        ArchivedIter, ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView, ArchivedPackedU8Slice,
-        ArchivedPackedU8SliceView, IterArchive, IterEncoder, PackedBoolSlice, PackedSlice,
-        PackedU8Slice, VarInt, VarIntView,
+        ArchivedIter, ArchivedOption, ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView,
+        ArchivedPackedU8Slice, ArchivedPackedU8SliceView, IterArchive, IterEncoder,
+        PackedBoolSlice, PackedSlice, PackedU8Slice, VarInt, VarIntView,
     };
     #[cfg(feature = "alloc")]
     pub use crate::archive_impl::{
@@ -122,6 +122,7 @@ pub mod error {
 }
 
 // --- 根目录暴露的常用核心门面 API ---
+pub use crate::archive_impl::ArchivedOption;
 pub use crate::error::ZebinError;
 pub use crate::read_impl::ZebinReader;
 pub use crate::traits_impl::{Archive, Decode, Encode, MeasureBody};
