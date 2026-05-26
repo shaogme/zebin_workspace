@@ -180,10 +180,6 @@ where
         Ok(total_written)
     }
 
-    pub fn writer(value: <T as Encode>::Input<'a>) -> Result<Self, ZebinError> {
-        Self::new(value)
-    }
-
     #[cfg(feature = "alloc")]
     pub fn encode(value: <T as Encode>::Input<'a>) -> Result<Vec<u8>, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);

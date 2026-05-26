@@ -197,7 +197,7 @@ mod pub_fn {
         T::Archived: ArchivedLayout,
         T: Encode<Input<'a> = T>,
     {
-        ZebinWriter::writer(value)
+        ZebinWriter::new(value)
     }
 
     #[cfg(feature = "alloc")]
