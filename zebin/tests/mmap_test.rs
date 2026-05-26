@@ -219,3 +219,37 @@ fn test_mmap_encoder_write_past_end_errors() -> Result<(), Box<dyn std::error::E
     fs::remove_file(&path)?;
     Ok(())
 }
+
+#[test]
+fn test_mmap_encoder_with_writer() -> Result<(), Box<dyn std::error::Error>> {
+    use zebin::writer;
+
+    let user = MmapUser {
+        id: 99,
+        name: "MmapMutWriter".to_string(),
+    };
+    let expected = encode(&user)?;
+
+    let path = temp_archive_path();
+    let mmap_mut = open_writable_mmap(&path, expected.len());
+
+    let mut encoder = MmapEncoder::new(mmap_mut, 0);
+    {
+        let mut writer_obj = writer::<MmapUser, _>(&mut encoder)?;
+        writer_obj.write_all(user)?;
+    }
+    encoder.flush()?;
+    drop(encoder);
+
+    let mmap = Mmap::open(&path)?;
+    assert_eq!(mmap.as_slice(), expected.as_slice());
+    let archived = reader::<MmapUser>(&mmap)?;
+    assert_eq!(archived.id, 99);
+    unsafe {
+        assert_eq!(archived.name.as_str(), "MmapMutWriter");
+    }
+
+    drop(mmap);
+    fs::remove_file(&path)?;
+    Ok(())
+}
