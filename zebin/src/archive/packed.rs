@@ -404,7 +404,7 @@ where
 {
     type Input = &'a I;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -417,7 +417,10 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let remaining = 4 - self.prefix_cursor;
             if sink
@@ -443,7 +446,7 @@ where
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

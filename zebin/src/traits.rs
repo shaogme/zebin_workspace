@@ -1,3 +1,4 @@
+use crate::io::StorageMut;
 use core::{num::NonZeroUsize, task::Poll};
 
 #[cfg(feature = "alloc")]
@@ -378,22 +379,7 @@ impl SinkProgress {
     }
 }
 
-/// Byte-stream sink used by archive state machines.
-pub trait ByteSink {
-    /// Returns the current absolute position in the archive being written.
-    fn pos(&self) -> usize;
-
-    /// Attempts to write the provided bytes into the sink.
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
-
-    /// Attempts to align the current archive position to the specified alignment.
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError>;
-
-    /// Attempts to skip (fill with zeros) the specified number of bytes.
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
-}
-
-impl<S: ByteSink + ?Sized> ByteSink for &mut S {
+impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     #[inline]
     fn pos(&self) -> usize {
         (**self).pos()
@@ -427,24 +413,27 @@ pub trait Encoder {
     /// is a borrowed reference (e.g. `&'a [T]`).
     type Input;
 
-    /// Attempts to input a data item into the encoder and encode it into the underlying `ByteSink`.
+    /// Attempts to input a data item into the encoder and encode it into the underlying `StorageMut`.
     ///
     /// # Return Value
     /// - `Ok(Poll::Ready(()))`: The current input item has been fully encoded and written.
-    /// - `Ok(Poll::Pending)`: The `ByteSink` is full. The current input item is pending, and the caller should flush/provide a new Sink and call `poll_pending`.
-    fn input<S: ByteSink + ?Sized>(
+    /// - `Ok(Poll::Pending)`: The `StorageMut` is full. The current input item is pending, and the caller should flush/provide a new StorageMut and call `poll_pending`.
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError>;
 
-    /// Advances and flushes any state/data previously accumulated inside the encoder due to insufficient `ByteSink` space.
+    /// Advances and flushes any state/data previously accumulated inside the encoder due to insufficient `StorageMut` space.
     ///
     /// Regardless of whether it is a one-off or step-by-step input, this method can be called to advance the remaining encoding progress until it returns `Poll::Ready(())`.
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError>;
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError>;
 
     /// Finishes the encoding process, writing any necessary alignments, paddings, or trailing metadata.
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError>;
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError>;
 }
 
 /// Trait for types that can create resumable archive states.
@@ -506,7 +495,7 @@ where
 {
     type Input = &'b T;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -515,11 +504,14 @@ where
         self.inner.input(value, sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -558,7 +550,7 @@ where
 ///
 /// Implementations walk the value by reference and never consume it. They must
 /// produce a length that exactly matches what the corresponding encoder will
-/// write to a `ByteSink`.
+/// write to a `StorageMut`.
 pub trait MeasureBody {
     fn measure_body(&self) -> Result<usize, ZebinError>;
 }

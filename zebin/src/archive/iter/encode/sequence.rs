@@ -79,7 +79,7 @@ where
     T::Archived: ArchivedLayout,
 {
     #[inline]
-    fn try_align<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<bool, ZebinError> {
+    fn try_align<S: StorageMut + ?Sized>(&mut self, sink: &mut S) -> Result<bool, ZebinError> {
         if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_none() || self.aligned {
             return Ok(true);
         }
@@ -123,7 +123,7 @@ where
         }
     }
 
-    pub fn finish_ref<S: ByteSink + ?Sized>(
+    pub fn finish_ref<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -207,7 +207,7 @@ where
 {
     type Input = T;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -250,7 +250,10 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         loop {
             // ── Phase 1: flush the 1-byte sequence marker ──────────────────
             if self.marker_cursor < 1 {
@@ -342,7 +345,7 @@ where
         }
     }
 
-    fn finish<S: ByteSink + ?Sized>(mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         let _ = self.finish_ref(sink)?;
         self.item_encoder.finish(sink)
     }
@@ -351,7 +354,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::write::encoder::SliceEncoder;
+    use crate::io::SliceEncoder;
 
     #[test]
     fn test_seq_encoder_busy_errors() {

@@ -1,3 +1,4 @@
+use crate::io::Storage;
 use crate::{prelude::*, utils::padding_for_alignment};
 use core::ops::Deref;
 
@@ -180,7 +181,11 @@ where
         self.root.restore()
     }
 
-    pub fn new(bytes: &'a [u8], config: ValidationConfig) -> Result<Self, ZebinError> {
+    pub fn new<S: Storage + ?Sized>(
+        storage: &'a S,
+        config: ValidationConfig,
+    ) -> Result<Self, ZebinError> {
+        let bytes = storage.as_slice();
         let header = H::parse(bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
@@ -204,18 +209,19 @@ where
         })
     }
 
-    pub fn decode(bytes: &'a [u8]) -> Result<T, ZebinError>
+    pub fn decode<S: Storage + ?Sized>(storage: &'a S) -> Result<T, ZebinError>
     where
         <T::Archived as Decode<'a>>::View: Restore<T>,
     {
-        Self::new(bytes, ValidationConfig::default())?.restore()
+        Self::new(storage, ValidationConfig::default())?.restore()
     }
 
-    pub fn validate(
-        bytes: &'a [u8],
+    pub fn validate<S: Storage + ?Sized>(
+        storage: &'a S,
         config: ValidationConfig,
         stack: Option<&mut ValidationPathStack>,
     ) -> Result<(), ZebinError> {
+        let bytes = storage.as_slice();
         let header = H::parse(bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
         validate_root::<T>(bytes, H::SIZE, config, stack)

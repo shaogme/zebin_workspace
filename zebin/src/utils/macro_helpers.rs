@@ -1,6 +1,6 @@
 use crate::{
     error::ZebinError,
-    io::{ByteSink, Encoder},
+    io::{Encoder, StorageMut},
     schema::FieldEncoding,
 };
 
@@ -16,7 +16,7 @@ impl FieldEntryEncoder {
     }
 
     #[inline]
-    pub fn poll_write<S: ByteSink + ?Sized>(
+    pub fn poll_write<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
         field_id: u16,
@@ -65,7 +65,7 @@ impl TagEncoder {
     }
 
     #[inline]
-    pub fn poll_write<S: ByteSink + ?Sized>(
+    pub fn poll_write<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -106,7 +106,7 @@ impl<E: Encoder> FieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write<S: ByteSink + ?Sized>(
+    pub fn poll_write<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -134,7 +134,7 @@ impl<E: Encoder> FieldState<E> {
     }
 
     #[inline]
-    pub fn finish<S: ByteSink + ?Sized>(
+    pub fn finish<S: StorageMut + ?Sized>(
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -205,7 +205,7 @@ impl<E: Encoder> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write_entry<S: ByteSink + ?Sized>(
+    pub fn poll_write_entry<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
         field_id: u16,
@@ -216,7 +216,7 @@ impl<E: Encoder> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write<S: ByteSink + ?Sized>(
+    pub fn poll_write<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -224,7 +224,7 @@ impl<E: Encoder> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn finish<S: ByteSink + ?Sized>(
+    pub fn finish<S: StorageMut + ?Sized>(
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -292,7 +292,7 @@ impl<P: Encoder> EnumEncoder<P> {
     }
 
     #[inline]
-    pub fn poll_write_pending<S: ByteSink + ?Sized>(
+    pub fn poll_write_pending<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -316,7 +316,7 @@ impl<P: Encoder> EnumEncoder<P> {
     }
 
     #[inline]
-    pub fn finish_inner<S: ByteSink + ?Sized>(
+    pub fn finish_inner<S: StorageMut + ?Sized>(
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -386,7 +386,7 @@ impl SchemaObjectEncoder {
     }
 
     #[inline]
-    pub fn poll_write_header<S: ByteSink + ?Sized>(
+    pub fn poll_write_header<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
         stable_schema_key: u32,
@@ -415,14 +415,14 @@ impl SchemaObjectEncoder {
     }
 
     #[inline]
-    pub fn mark_table_start<S: ByteSink + ?Sized>(&mut self, sink: &mut S) {
+    pub fn mark_table_start<S: StorageMut + ?Sized>(&mut self, sink: &mut S) {
         if self.table_start == 0 {
             self.table_start = sink.pos();
         }
     }
 
     #[inline]
-    pub fn poll_write_footer<S: ByteSink + ?Sized>(
+    pub fn poll_write_footer<S: StorageMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {

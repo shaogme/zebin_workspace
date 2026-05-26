@@ -158,7 +158,7 @@ where
 {
     type Input = Option<T>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -182,7 +182,10 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.prefix.len() {
             let remaining = self.prefix.len() - self.prefix_cursor;
             if sink
@@ -215,7 +218,7 @@ where
         }
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }

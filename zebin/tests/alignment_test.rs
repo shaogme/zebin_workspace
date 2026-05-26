@@ -4,7 +4,7 @@ use core::num::NonZeroUsize;
 use std::cell::Cell;
 use zebin::io::SliceEncoder;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{ByteSink, SinkProgress, ZebinWriter};
+use zebin::prelude::{SinkProgress, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::{ZebinArchive, ZebinEncode, ZebinError};
 use zebin::{reader, writer};
@@ -47,7 +47,7 @@ fn test_aligned_containers_chunked_writer_matches_full_encode() {
         limit: &'a Cell<usize>,
     }
 
-    impl ByteSink for LimitedSink<'_> {
+    impl StorageMut for LimitedSink<'_> {
         fn pos(&self) -> usize {
             self.buf.len()
         }

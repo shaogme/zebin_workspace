@@ -59,7 +59,10 @@ impl<'a, T: Encode + Archive + 'a> SeqItemEncoder<'a, T> {
         }
     }
 
-    pub(crate) fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    pub(crate) fn finish<S: StorageMut + ?Sized>(
+        self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if let Some(encoder) = self.inner {
             encoder.finish(sink)
         } else {
@@ -133,7 +136,7 @@ where
 {
     type Input = S;
 
-    fn input<Sink: ByteSink + ?Sized>(
+    fn input<Sink: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut Sink,
@@ -142,7 +145,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: ByteSink + ?Sized>(
+    fn poll_pending<Sink: StorageMut + ?Sized>(
         &mut self,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
@@ -173,7 +176,7 @@ where
         }
     }
 
-    fn finish<Sink: ByteSink + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+    fn finish<Sink: StorageMut + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
         self.seq_encoder.finish(sink)
     }
 }
@@ -214,7 +217,7 @@ pub type IterEncoder<'a, S, T> = OwnedIterEncoder<'a, S, T>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::write::encoder::SliceEncoder;
+    use crate::io::SliceEncoder;
 
     #[test]
     fn test_measure_block_index_overhead() {

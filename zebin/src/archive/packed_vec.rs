@@ -120,7 +120,7 @@ where
 {
     type Input = I;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -143,7 +143,10 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
             if sink
@@ -174,7 +177,7 @@ where
         }
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -324,7 +327,7 @@ impl Default for PackedBoolVecEncoder {
 impl Encoder for PackedBoolVecEncoder {
     type Input = PackedVec<bool, 1>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -347,7 +350,10 @@ impl Encoder for PackedBoolVecEncoder {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let remaining = 4 - self.prefix_cursor;
             if sink
@@ -364,7 +370,7 @@ impl Encoder for PackedBoolVecEncoder {
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -421,7 +427,7 @@ impl<const BITS: u8> Default for PackedU8VecEncoder<BITS> {
 impl<const BITS: u8> Encoder for PackedU8VecEncoder<BITS> {
     type Input = PackedVec<u8, BITS>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -464,7 +470,10 @@ impl<const BITS: u8> Encoder for PackedU8VecEncoder<BITS> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let remaining = 4 - self.prefix_cursor;
             if sink
@@ -481,7 +490,7 @@ impl<const BITS: u8> Encoder for PackedU8VecEncoder<BITS> {
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

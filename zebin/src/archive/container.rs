@@ -37,7 +37,7 @@ where
 {
     type Input = Box<T>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -46,11 +46,14 @@ where
         self.inner.input(inner, sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -117,7 +120,7 @@ impl<'a> Default for BoxStrEncoder<'a> {
 impl<'a> Encoder for BoxStrEncoder<'a> {
     type Input = Box<str>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -131,11 +134,14 @@ impl<'a> Encoder for BoxStrEncoder<'a> {
         self.inner.input(s_ref, sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -227,7 +233,7 @@ where
 {
     type Input = Rc<T>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -236,11 +242,14 @@ where
         self.inner.input(value, sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -251,7 +260,7 @@ where
 {
     type Input = Arc<T>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -260,11 +269,14 @@ where
         self.inner.input(value, sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -309,7 +321,7 @@ where
 {
     type Input = Cow<'cow, B>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -318,11 +330,14 @@ where
         self.inner.input(owned, sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }

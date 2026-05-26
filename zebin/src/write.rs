@@ -1,11 +1,10 @@
-pub mod encoder;
-
 use core::marker::PhantomData;
 
-use crate::{prelude::*, write::encoder::SliceEncoder};
+use crate::io_impl::storage::{SliceEncoder, StorageMut};
+use crate::prelude::*;
 
 #[cfg(feature = "alloc")]
-use crate::write::encoder::VecEncoder;
+use crate::io_impl::storage::VecEncoder;
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -39,7 +38,7 @@ pub type ZebinWriter<'a, T, S = SliceEncoder<'a>> = ArchiveWriter<'a, T, S, Arch
 pub struct ArchiveWriter<'a, T, S, H = ArchiveHeader>
 where
     T: Encode + Archive + 'a,
-    S: ByteSink,
+    S: StorageMut,
     H: ArchiveHeaderTrait,
 {
     sink: S,
@@ -50,7 +49,7 @@ where
 impl<'a, T, S, H> ArchiveWriter<'a, T, S, H>
 where
     T: Encode + Archive + 'a,
-    S: ByteSink,
+    S: StorageMut,
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {

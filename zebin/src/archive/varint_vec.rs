@@ -173,7 +173,7 @@ impl<T: VarIntNumber> Default for OwnedVarIntVecEncoder<T> {
 impl<T: VarIntNumber> Encoder for OwnedVarIntVecEncoder<T> {
     type Input = VarIntVec<T>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -188,7 +188,10 @@ impl<T: VarIntNumber> Encoder for OwnedVarIntVecEncoder<T> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
             if sink
@@ -224,7 +227,7 @@ impl<T: VarIntNumber> Encoder for OwnedVarIntVecEncoder<T> {
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -299,7 +302,7 @@ impl<T: VarIntNumber> Default for OwnedArchivedVarIntVecEncoder<T> {
 impl<T: VarIntNumber> Encoder for OwnedArchivedVarIntVecEncoder<T> {
     type Input = ArchivedVarIntVec<T>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -314,7 +317,10 @@ impl<T: VarIntNumber> Encoder for OwnedArchivedVarIntVecEncoder<T> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
             if sink
@@ -350,7 +356,7 @@ impl<T: VarIntNumber> Encoder for OwnedArchivedVarIntVecEncoder<T> {
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -411,7 +417,7 @@ impl<'a, T: VarIntNumber> Default for PackedVarIntSliceEncoder<'a, T> {
 impl<'a, T: VarIntNumber> Encoder for PackedVarIntSliceEncoder<'a, T> {
     type Input = PackedVarIntSlice<'a, T>;
 
-    fn input<S: ByteSink + ?Sized>(
+    fn input<S: StorageMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -427,7 +433,10 @@ impl<'a, T: VarIntNumber> Encoder for PackedVarIntSliceEncoder<'a, T> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending<S: StorageMut + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
             if sink
@@ -466,7 +475,7 @@ impl<'a, T: VarIntNumber> Encoder for PackedVarIntSliceEncoder<'a, T> {
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

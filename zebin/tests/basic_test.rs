@@ -6,7 +6,7 @@ use std::cell::Cell;
 use zebin::ZebinError;
 use zebin::io::SliceEncoder;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{ByteSink, SinkProgress, ZebinWriter};
+use zebin::prelude::{SinkProgress, StorageMut, ZebinWriter};
 use zebin::{ZebinArchive, ZebinEncode, reader, writer};
 
 #[cfg(feature = "alloc")]
@@ -61,7 +61,7 @@ fn test_chunked_writer_resume() {
         limit: &'a Cell<usize>,
     }
 
-    impl ByteSink for LimitedSink<'_> {
+    impl StorageMut for LimitedSink<'_> {
         fn pos(&self) -> usize {
             self.buf.len()
         }

@@ -43,8 +43,8 @@ pub mod prelude {
         error::{ArchiveError, DecodeError, ZebinError},
         io::{
             Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-            ArchivedLayout, ByteSink, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody,
-            Restore, SchemaAware, SinkProgress, SliceEncoder, Storage, ZebinReader, ZebinWriter,
+            ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
+            SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut, ZebinReader, ZebinWriter,
             decode, reader, writer,
         },
         schema::{
@@ -96,28 +96,28 @@ pub mod schema {
 /// 底层 I/O、流、编码器与自定义头部
 pub mod io {
     pub use crate::format_impl::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
-    pub use crate::io_impl::storage::Storage;
+    pub use crate::io_impl::storage::SliceEncoder;
+    #[cfg(feature = "alloc")]
+    pub use crate::io_impl::storage::VecEncoder;
+    #[cfg(feature = "mmap")]
+    pub use crate::io_impl::storage::mmap::MmapEncoder;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
+    pub use crate::io_impl::storage::{Storage, StorageMut};
     pub use crate::pub_fn::{decode, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};
     pub use crate::read_impl::{Cursor, ZebinReader};
     pub use crate::traits_impl::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-        ArchivedLayout, ByteSink, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
-        SchemaAware, SinkProgress,
+        ArchivedLayout, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware,
+        SinkProgress,
     };
     #[cfg(feature = "alloc")]
     pub use crate::traits_impl::{
         BackwardSequenceStrategy, FixedSequenceStrategy, ForwardSequenceStrategy,
         SequenceDecodeStrategy,
     };
-    #[cfg(feature = "mmap")]
-    pub use crate::write::encoder::MmapEncoder;
-    pub use crate::write::encoder::SliceEncoder;
-    #[cfg(feature = "alloc")]
-    pub use crate::write::encoder::VecEncoder;
     pub use crate::write::{ArchiveWriter, ZebinWriter};
 }
 
@@ -140,36 +140,38 @@ pub use pub_fn::*;
 mod pub_fn {
     use super::prelude::*;
     /// Create a reader for the archived root object using the default header.
-    pub fn reader<'a, T>(bytes: &'a [u8]) -> Result<ZebinReader<'a, T>, ZebinError>
+    pub fn reader<'a, T>(
+        storage: &'a (impl Storage + ?Sized),
+    ) -> Result<ZebinReader<'a, T>, ZebinError>
     where
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::new(bytes, ValidationConfig::default())
+        ZebinReader::new(storage, ValidationConfig::default())
     }
 
     /// Decode and validate the archived root object using the default header directly into T.
-    pub fn decode<'a, T>(bytes: &'a [u8]) -> Result<T, ZebinError>
+    pub fn decode<'a, T>(storage: &'a (impl Storage + ?Sized)) -> Result<T, ZebinError>
     where
         T: Archive,
         T::Archived: Decode<'a>,
         <T::Archived as Decode<'a>>::View: Restore<T>,
     {
-        ZebinReader::<T>::decode(bytes)
+        ZebinReader::<T>::decode(storage)
     }
 
     /// Validate an archive without exposing the archived view using the default header.
-    pub fn validate<'a, T>(bytes: &'a [u8]) -> Result<(), ZebinError>
+    pub fn validate<'a, T>(storage: &'a (impl Storage + ?Sized)) -> Result<(), ZebinError>
     where
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T>::validate(bytes, ValidationConfig::default(), None)
+        ZebinReader::<T>::validate(storage, ValidationConfig::default(), None)
     }
 
     /// Validate an archive with explicit runtime validation limits.
     pub fn validate_with_config<'a, T>(
-        bytes: &'a [u8],
+        storage: &'a (impl Storage + ?Sized),
         config: ValidationConfig,
         stack: Option<&mut ValidationPathStack>,
     ) -> Result<(), ZebinError>
@@ -177,26 +179,26 @@ mod pub_fn {
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T>::validate(bytes, config, stack)
+        ZebinReader::<T>::validate(storage, config, stack)
     }
 
     /// Validate an archive and capture the logical field/index path on failure.
     pub fn validate_detailed<'a, T>(
-        bytes: &'a [u8],
+        storage: &'a (impl Storage + ?Sized),
         stack: &mut ValidationPathStack,
     ) -> Result<(), ZebinError>
     where
         T: Archive,
         T::Archived: Decode<'a>,
     {
-        ZebinReader::<T>::validate(bytes, ValidationConfig::default(), Some(stack))
+        ZebinReader::<T>::validate(storage, ValidationConfig::default(), Some(stack))
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.
     pub fn writer<'a, T, S>(sink: S) -> Result<ZebinWriter<'a, T, S>, ZebinError>
     where
         T: Encode + Archive + 'a,
-        S: ByteSink,
+        S: StorageMut,
         T::Archived: ArchivedLayout,
     {
         ZebinWriter::new(sink)

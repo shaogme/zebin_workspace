@@ -8,8 +8,8 @@ use std::{
 };
 
 use zebin::prelude::{
-    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, ByteSink, Encode, Encoder, Mmap,
-    MmapEncoder, MmapMut, Storage, ZebinArchive, ZebinEncode, ZebinError,
+    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, Encode, Encoder, Mmap, MmapEncoder, MmapMut,
+    StorageMut, ZebinArchive, ZebinEncode, ZebinError,
 };
 use zebin::{encode, reader};
 
