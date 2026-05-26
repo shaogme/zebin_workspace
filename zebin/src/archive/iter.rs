@@ -16,8 +16,11 @@ mod restore;
 
 // Re-export public API
 pub use decode::ArchivedIter;
-pub use encode::{OwnedIterEncoder, SeqEncoder, IterEncoder, measure_block_index_overhead};
+#[cfg(feature = "alloc")]
 pub(crate) use decode::skip_block_index;
+#[cfg(feature = "alloc")]
+pub(crate) use encode::OwnedIterEncoder;
+pub use encode::{IterEncoder, SeqEncoder, measure_block_index_overhead};
 
 pub(crate) struct DummyContext;
 

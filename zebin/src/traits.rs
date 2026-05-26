@@ -1,9 +1,8 @@
 use core::{num::NonZeroUsize, task::Poll};
 
-use crate::{error::ParseHeaderError, prelude::*};
-
 #[cfg(feature = "alloc")]
 use crate::archive_impl::iter::skip_block_index;
+use crate::{error::ParseHeaderError, prelude::*};
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;

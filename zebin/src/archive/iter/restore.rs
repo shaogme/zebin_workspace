@@ -1,8 +1,5 @@
-use crate::{
-    prelude::*,
-    error::ZebinError,
-    read_impl::Cursor,
-};
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::{error::ZebinError, prelude::*, read_impl::Cursor};
 
 #[cfg(feature = "alloc")]
 use alloc::{
@@ -13,10 +10,13 @@ use alloc::{
 #[cfg(feature = "std")]
 use std::collections::{HashMap, HashSet};
 
-use super::{DummyContext, decode::ArchivedIter, IterArchive};
+#[cfg(any(feature = "alloc", feature = "std"))]
+use super::{DummyContext, IterArchive, decode::ArchivedIter};
 
 #[cfg(feature = "alloc")]
-pub(crate) fn decode_next_element<'a, T: Decode<'a>>(cursor: &mut Cursor<'a>) -> Result<T::View, ZebinError> {
+pub(crate) fn decode_next_element<'a, T: Decode<'a>>(
+    cursor: &mut Cursor<'a>,
+) -> Result<T::View, ZebinError> {
     let mut context = DummyContext;
     let marker = cursor.read_u8(&mut context)?;
     if marker != 1 {

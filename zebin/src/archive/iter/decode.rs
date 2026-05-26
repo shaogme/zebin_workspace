@@ -1,68 +1,15 @@
 use core::marker::PhantomData;
 
-use crate::{
-    prelude::*,
-    validation::ValidationContext,
-};
+use crate::{prelude::*, validation::ValidationContext};
+
+use super::{DummyContext, MAX_SEQUENCE_LEN};
+
+#[path = "decode/block_index.rs"]
+mod block_index;
+pub(crate) use block_index::{BlockIndex, decode_block_index};
 
 #[cfg(feature = "alloc")]
-use alloc::vec::Vec;
-
-use super::{DummyContext, BLOCK_INDEX_MAGIC, MAX_SEQUENCE_LEN};
-
-/// Sparse block index for fast random access into archived sequences.
-///
-/// Every `chunk_size` elements form a block.  The index stores the byte
-/// offset of the first element marker in each block (relative to the
-/// sequence `start_pos`).  To access element *i*, locate block
-/// `i / chunk_size` in O(1) and scan at most `chunk_size` elements inside
-/// that block.
-#[derive(Clone)]
-pub struct BlockIndex {
-    pub(crate) chunk_size: usize,
-    #[cfg(not(feature = "alloc"))]
-    pub(crate) num_blocks: usize,
-    /// Decoded absolute byte offsets for each block, relative to sequence
-    /// `start_pos`.
-    ///
-    /// Under `no_alloc`, this is replaced by raw byte-range fields so
-    /// offsets can be decoded on the fly.
-    #[cfg(feature = "alloc")]
-    pub(crate) offsets: Vec<usize>,
-    #[cfg(not(feature = "alloc"))]
-    pub(crate) raw_delta_start: usize,
-}
-
-impl BlockIndex {
-    /// Return the byte offset (relative to sequence start_pos) of block `block_idx`.
-    #[cfg(feature = "alloc")]
-    fn block_offset(&self, block_idx: usize) -> Option<usize> {
-        self.offsets.get(block_idx).copied()
-    }
-
-    /// Return the byte offset by re-parsing varint deltas on the fly (no_alloc path).
-    #[cfg(not(feature = "alloc"))]
-    fn block_offset_from_bytes(&self, bytes: &[u8], block_idx: usize) -> Option<usize> {
-        if block_idx >= self.num_blocks {
-            return None;
-        }
-        let mut cursor = Cursor::new(bytes, self.raw_delta_start);
-        let mut ctx = DummyContext;
-        let mut abs = 0usize;
-        for i in 0..=block_idx {
-            match super::super::varint::decode_u64::<usize, _>(&mut cursor, &mut ctx) {
-                Ok(delta) => {
-                    abs += delta;
-                }
-                Err(_) => return None,
-            }
-            if i == block_idx {
-                return Some(abs);
-            }
-        }
-        None
-    }
-}
+pub(crate) use block_index::skip_block_index;
 
 /// The archived representation of an iterator-based collection.
 #[derive(Clone)]
@@ -332,109 +279,6 @@ impl<'marker, A> ArchivedIter<'marker, A> {
     }
 }
 
-/// Attempt to decode a block index section after the sequence sentinel.
-///
-/// Returns `None` when no index is present (fewer than `chunk_size + 1`
-/// elements, or the magic byte is absent).
-pub(crate) fn decode_block_index<C>(
-    cursor: &mut Cursor<'_>,
-    context: &mut C,
-    len: usize,
-) -> Result<Option<BlockIndex>, DecodeError>
-where
-    C: ValidationContext + ?Sized,
-{
-    // No index written for short sequences.
-    if cursor.remaining() == 0 {
-        return Ok(None);
-    }
-
-    // Peek at the next byte – if it isn't the magic, there is no index.
-    let peeked = cursor.peek_exact(1, context)?;
-    if peeked[0] != BLOCK_INDEX_MAGIC {
-        return Ok(None);
-    }
-    // Consume the magic byte.
-    cursor.advance(1, context)?;
-
-    // chunk_size (varint)
-    let chunk_size: usize = super::super::varint::decode_u64(cursor, context)?;
-    if chunk_size == 0 {
-        return Err(DecodeError::ValidationError {
-            message: "Block index chunk_size must be > 0",
-            pos: cursor.pos(),
-        });
-    }
-
-    // num_blocks (varint)
-    let num_blocks: usize = super::super::varint::decode_u64(cursor, context)?;
-    let expected_blocks = len.div_ceil(chunk_size);
-    if num_blocks != expected_blocks {
-        return Err(DecodeError::ValidationError {
-            message: "Block index num_blocks mismatch",
-            pos: cursor.pos(),
-        });
-    }
-
-    #[cfg(feature = "alloc")]
-    {
-        let mut offsets = Vec::with_capacity(num_blocks);
-        let mut abs: usize = 0;
-        for _ in 0..num_blocks {
-            let delta: usize = super::super::varint::decode_u64(cursor, context)?;
-            abs += delta;
-            offsets.push(abs);
-        }
-        Ok(Some(BlockIndex {
-            chunk_size,
-            #[cfg(not(feature = "alloc"))]
-            num_blocks,
-            offsets,
-        }))
-    }
-
-    #[cfg(not(feature = "alloc"))]
-    {
-        let raw_delta_start = cursor.pos();
-        // Walk through all delta varints to advance the cursor past them.
-        for _ in 0..num_blocks {
-            let _delta: usize = super::super::varint::decode_u64(cursor, context)?;
-        }
-        Ok(Some(BlockIndex {
-            chunk_size,
-            num_blocks,
-            raw_delta_start,
-        }))
-    }
-}
-
-/// Skip a block index section without storing it (used by
-/// `SequenceDecodeStrategy` impls that eagerly decode everything).
-#[cfg(feature = "alloc")]
-pub(crate) fn skip_block_index<C>(
-    cursor: &mut Cursor<'_>,
-    context: &mut C,
-) -> Result<(), DecodeError>
-where
-    C: ValidationContext + ?Sized,
-{
-    if cursor.remaining() == 0 {
-        return Ok(());
-    }
-    let peeked = cursor.peek_exact(1, context)?;
-    if peeked[0] != BLOCK_INDEX_MAGIC {
-        return Ok(());
-    }
-    cursor.advance(1, context)?;
-
-    let _chunk_size: usize = super::super::varint::decode_u64(cursor, context)?;
-    let num_blocks: usize = super::super::varint::decode_u64(cursor, context)?;
-    for _ in 0..num_blocks {
-        let _delta: usize = super::super::varint::decode_u64(cursor, context)?;
-    }
-    Ok(())
-}
-
 /// Lazy decoding iterator over the elements of an `ArchivedIter`.
 pub struct ArchivedIterIter<'a, A: Decode<'a>> {
     pub(crate) cursor: Cursor<'a>,
@@ -468,5 +312,39 @@ impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
             })),
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_archived_iter_empty() {
+        let bytes = [0x00];
+        let iter: ArchivedIter<'_, u8> = ArchivedIter {
+            bytes: &bytes,
+            start_pos: 0,
+            len: 0,
+            block_index: None,
+            _marker: PhantomData,
+        };
+        assert!(iter.is_empty());
+        assert_eq!(iter.len(), 0);
+        assert!(iter.get(0).is_err());
+    }
+
+    #[test]
+    fn test_archived_iter_invalid_marker() {
+        let bytes = [0x02, 0x00]; // Invalid marker
+        let iter: ArchivedIter<'_, u32> = ArchivedIter {
+            bytes: &bytes,
+            start_pos: 0,
+            len: 1,
+            block_index: None,
+            _marker: PhantomData,
+        };
+        assert_eq!(iter.len(), 1);
+        assert!(iter.get(0).is_err());
     }
 }
