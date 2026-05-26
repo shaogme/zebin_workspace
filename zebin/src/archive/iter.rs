@@ -11,6 +11,7 @@ use crate::{
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
+    vec::Vec,
 };
 
 #[cfg(feature = "std")]
@@ -172,13 +173,13 @@ impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<alloc::vec::Vec<U>> for ArchivedIter<'_, T>
+impl<T, U> Restore<Vec<U>> for ArchivedIter<'_, T>
 where
     for<'a> T: Decode<'a>,
     for<'a> <T as Decode<'a>>::View: Restore<U>,
 {
-    fn restore(&self) -> Result<alloc::vec::Vec<U>, ZebinError> {
-        let mut out = alloc::vec::Vec::with_capacity(self.len);
+    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+        let mut out = Vec::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
