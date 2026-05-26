@@ -489,4 +489,3 @@ pub fn add_measured_len(total: &mut usize, len: usize) -> Result<(), ZebinError>
         .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
     Ok(())
 }
-

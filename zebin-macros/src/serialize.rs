@@ -11,17 +11,17 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut fields = Vec::new();
     if has_schema(record) {
         fields.push(
-            quote! { pub __schema_encoder: zebin::utils::macros_helpers::SchemaObjectEncoder },
+            quote! { pub __schema_encoder: zebin::utils::macro_helpers::SchemaObjectEncoder },
         );
     }
     for (_index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
         let state_ty = field_state_type(field);
         if has_schema(record) {
-            fields.push(quote! { pub #state_ident: zebin::utils::macros_helpers::SchemaFieldState<#state_ty> });
+            fields.push(quote! { pub #state_ident: zebin::utils::macro_helpers::SchemaFieldState<#state_ty> });
         } else {
             fields.push(
-                quote! { pub #state_ident: zebin::utils::macros_helpers::FieldState<#state_ty> },
+                quote! { pub #state_ident: zebin::utils::macro_helpers::FieldState<#state_ty> },
             );
         }
     }
@@ -37,12 +37,12 @@ fn field_measure_expr(
     if let Some((kind, bits)) = crate::shared::packed::packed_info_pub(field) {
         match kind {
             crate::shared::packed::PackedElementKind::Bool => quote! {
-                zebin::utils::macros_helpers::measure_packed_bool_len((#value).len())
+                zebin::utils::macro_helpers::measure_packed_bool_len((#value).len())
             },
             crate::shared::packed::PackedElementKind::U8 => {
                 let bits_lit = bits as u8;
                 quote! {
-                    zebin::utils::macros_helpers::measure_packed_u8_len((#value).len(), #bits_lit)?
+                    zebin::utils::macro_helpers::measure_packed_u8_len((#value).len(), #bits_lit)?
                 }
             }
         }
@@ -55,7 +55,7 @@ fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut inits = Vec::new();
     if has_schema(record) {
         inits.push(
-            quote! { __schema_encoder: zebin::utils::macros_helpers::SchemaObjectEncoder::new() },
+            quote! { __schema_encoder: zebin::utils::macro_helpers::SchemaObjectEncoder::new() },
         );
     }
     for (_index, field) in record.active_fields() {
@@ -67,9 +67,9 @@ fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
             quote! { <#ty as zebin::Encode>::encoder() }
         };
         if has_schema(record) {
-            inits.push(quote! { #state_ident: zebin::utils::macros_helpers::SchemaFieldState::new(#init_encoder) });
+            inits.push(quote! { #state_ident: zebin::utils::macro_helpers::SchemaFieldState::new(#init_encoder) });
         } else {
-            inits.push(quote! { #state_ident: zebin::utils::macros_helpers::FieldState::new(#init_encoder) });
+            inits.push(quote! { #state_ident: zebin::utils::macro_helpers::FieldState::new(#init_encoder) });
         }
     }
     inits
@@ -314,7 +314,7 @@ fn struct_measure_body_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro
     if schema {
         let n = fields.len();
         sums.push(quote! {
-            zebin::utils::macros_helpers::add_measured_len(&mut __total, zebin::utils::macros_helpers::schema_overhead(#n))?;
+            zebin::utils::macro_helpers::add_measured_len(&mut __total, zebin::utils::macro_helpers::schema_overhead(#n))?;
         });
     }
 
@@ -332,7 +332,7 @@ fn struct_measure_body_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro
         };
         let measure = field_measure_expr(field, quote! { &#member });
         sums.push(quote! {
-            zebin::utils::macros_helpers::add_measured_len(&mut __total, #measure)?;
+            zebin::utils::macro_helpers::add_measured_len(&mut __total, #measure)?;
         });
     }
 
@@ -497,7 +497,7 @@ fn enum_impl(
         }
 
         #vis struct #enum_state<'a> {
-            inner: zebin::utils::macros_helpers::EnumEncoder<#payload_state<'a>>,
+            inner: zebin::utils::macro_helpers::EnumEncoder<#payload_state<'a>>,
         }
 
         impl<'a> zebin::io::Encoder for #enum_state<'a> {
@@ -522,7 +522,7 @@ fn enum_impl(
             type Encoder<'a> = #enum_state<'a> where Self: 'a;
             fn encoder<'a>() -> Self::Encoder<'a> where Self: 'a {
                 #enum_state {
-                    inner: zebin::utils::macros_helpers::EnumEncoder::new(),
+                    inner: zebin::utils::macro_helpers::EnumEncoder::new(),
                 }
             }
         }
@@ -544,7 +544,7 @@ fn enum_measure_body_impl(
         if has_schema(record) {
             let n = record.active_fields().count();
             sums.push(quote! {
-                zebin::utils::macros_helpers::add_measured_len(&mut __total, zebin::utils::macros_helpers::schema_overhead(#n))?;
+                zebin::utils::macro_helpers::add_measured_len(&mut __total, zebin::utils::macro_helpers::schema_overhead(#n))?;
             });
         }
 
@@ -581,7 +581,7 @@ fn enum_measure_body_impl(
             let user_id = field_user_ident_for(record, index, field);
             let measure = field_measure_expr(field, quote! { #user_id });
             sums.push(quote! {
-                zebin::utils::macros_helpers::add_measured_len(&mut __total, #measure)?;
+                zebin::utils::macro_helpers::add_measured_len(&mut __total, #measure)?;
             });
         }
 
@@ -593,7 +593,7 @@ fn enum_measure_body_impl(
 
         quote! {
             #pattern => {
-                let mut __total: usize = zebin::utils::macros_helpers::ENUM_TAG_SIZE;
+                let mut __total: usize = zebin::utils::macro_helpers::ENUM_TAG_SIZE;
                 #(#sums)*
                 Ok(__total)
             }
