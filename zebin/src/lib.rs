@@ -42,10 +42,10 @@ pub mod prelude {
         },
         error::{ArchiveError, DecodeError, ZebinError},
         io::{
-            Archive, ArchiveHeader, ArchiveHeaderTrait, ArchiveReader, ArchivedDefault,
-            ArchivedField, ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout,
-            MeasureBody, Restore, SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut,
-            ZebinReader, ZebinWriter, decode, reader, writer,
+            Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
+            ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
+            SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut, ZebinReader, ZebinWriter,
+            decode, reader, writer,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -107,7 +107,7 @@ pub mod io {
     pub use crate::pub_fn::{decode, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};
-    pub use crate::read_impl::{ArchiveReader, ZebinReader};
+    pub use crate::read_impl::ZebinReader;
     pub use crate::traits_impl::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
         ArchivedLayout, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware,
@@ -129,7 +129,7 @@ pub mod error {
 
 pub use crate::archive_impl::ArchivedOption;
 pub use crate::error::ZebinError;
-pub use crate::read_impl::{ArchiveReader, ZebinReader};
+pub use crate::read_impl::ZebinReader;
 pub use crate::traits_impl::{Archive, Decode, Encode, MeasureBody};
 pub use crate::write::ZebinWriter;
 

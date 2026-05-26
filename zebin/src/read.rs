@@ -1,10 +1,8 @@
 use crate::io::Storage;
 use crate::prelude::*;
 
-pub type ZebinReader<'a, T, S = [u8], H = ArchiveHeader> = ArchiveReader<'a, T, S, H>;
-
 /// Safe access layer output that keeps the validated byte slice alive.
-pub struct ArchiveReader<'a, T, S = [u8], H = ArchiveHeader>
+pub struct ZebinReader<'a, T, S = [u8], H = ArchiveHeader>
 where
     T: Archive,
     T::Archived: Decode<'a>,
@@ -18,7 +16,7 @@ where
     _phantom: core::marker::PhantomData<(T, H)>,
 }
 
-impl<'a, T, S, H> ArchiveReader<'a, T, S, H>
+impl<'a, T, S, H> ZebinReader<'a, T, S, H>
 where
     T: Archive,
     T::Archived: Decode<'a>,
