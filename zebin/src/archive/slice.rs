@@ -1,4 +1,4 @@
-use super::iter::SeqEncoder;
+use super::iter::{SeqEncoder, measure_block_index_overhead};
 #[cfg(feature = "alloc")]
 use crate::io::ForwardSequenceStrategy;
 use crate::prelude::*;
@@ -271,7 +271,7 @@ where
     pub fn new() -> Self {
         Self {
             iter: None,
-            seq_encoder: SeqEncoder::new(),
+            seq_encoder: SeqEncoder::new_indexed(),
         }
     }
 }
@@ -372,6 +372,7 @@ where
         let mut pos = 0usize;
         let alignment = <T as ArchivedLayout>::ALIGNMENT.get();
         let fixed = <T as ArchivedLayout>::FIXED_SIZE.is_some();
+        let mut count = 0usize;
         for item in self.iter() {
             pos = pos
                 .checked_add(1)
@@ -385,10 +386,17 @@ where
             pos = pos
                 .checked_add(item.measure_body()?)
                 .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+            count += 1;
         }
         pos = pos
             .checked_add(1)
             .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        // Block index overhead (only when count > chunk_size).
+        if count > 64 {
+            pos = pos
+                .checked_add(measure_block_index_overhead(count, pos)?)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        }
         Ok(pos)
     }
 }

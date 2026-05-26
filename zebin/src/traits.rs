@@ -3,6 +3,9 @@ use core::{num::NonZeroUsize, task::Poll};
 use crate::{error::ParseHeaderError, prelude::*};
 
 #[cfg(feature = "alloc")]
+use crate::archive_impl::iter::skip_block_index;
+
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 /// Fixed-width archived overlay contract.
@@ -99,6 +102,8 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for FixedSequenceStrategy 
             items.push(T::decode(cursor, &mut *guard)?);
             index += 1;
         }
+        // Skip trailing block index if present.
+        skip_block_index(cursor, context)?;
         Ok(items)
     }
 
@@ -119,6 +124,8 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for FixedSequenceStrategy 
             T::validate(cursor, &mut *guard)?;
             index += 1;
         }
+        // Skip trailing block index if present.
+        skip_block_index(cursor, context)?;
         Ok(())
     }
 }
@@ -149,6 +156,8 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for ForwardSequenceStrateg
             items.push(T::decode(cursor, &mut *guard)?);
             index += 1;
         }
+        // Skip trailing block index if present.
+        skip_block_index(cursor, context)?;
         Ok(items)
     }
 
@@ -168,6 +177,8 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for ForwardSequenceStrateg
             T::validate(cursor, &mut *guard)?;
             index += 1;
         }
+        // Skip trailing block index if present.
+        skip_block_index(cursor, context)?;
         Ok(())
     }
 }

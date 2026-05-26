@@ -78,3 +78,171 @@ fn test_iter_archive_restore_explicit() {
     let expected_deque: VecDeque<u64> = vec![100, 200].into();
     assert_eq!(restored_deque, expected_deque);
 }
+
+// ─── Chunked block index tests ─────────────────────────────────────────────
+
+/// Encode 200 u64 elements, verify get(i) returns correct value for all i.
+#[test]
+fn test_chunked_index_random_access() {
+    let data: Vec<u64> = (0..200).collect();
+    let wrapped = IterArchive::new(data.clone());
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    let reader = zebin::reader::<IterArchive<Vec<u64>, u64>>(&bytes).expect("reader");
+    let archived = reader.root();
+
+    assert_eq!(archived.len(), 200);
+
+    // Verify every element through random access.
+    for i in 0..200 {
+        let val = archived.get(i).expect(&format!("get({i})"));
+        assert_eq!(val, i as u64, "mismatch at index {i}");
+    }
+
+    // Out-of-bounds must return an error.
+    assert!(archived.get(200).is_err());
+}
+
+/// iter_from(start) should yield the remaining elements correctly.
+#[test]
+fn test_chunked_index_iter_from() {
+    let data: Vec<u64> = (0..200).collect();
+    let wrapped = IterArchive::new(data);
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    let reader = zebin::reader::<IterArchive<Vec<u64>, u64>>(&bytes).expect("reader");
+    let archived = reader.root();
+
+    // Iterate from a block boundary.
+    let from_64: Vec<u64> = archived.iter_from(64).map(|r| r.unwrap()).collect();
+    assert_eq!(from_64.len(), 136);
+    assert_eq!(from_64[0], 64);
+    assert_eq!(*from_64.last().unwrap(), 199);
+
+    // Iterate from a non-boundary offset inside a block.
+    let from_100: Vec<u64> = archived.iter_from(100).map(|r| r.unwrap()).collect();
+    assert_eq!(from_100.len(), 100);
+    assert_eq!(from_100[0], 100);
+
+    // iter_from beyond len → empty.
+    let from_end: Vec<u64> = archived.iter_from(200).map(|r| r.unwrap()).collect();
+    assert!(from_end.is_empty());
+}
+
+/// Sequences ≤ 64 elements should not contain a block index.
+#[test]
+fn test_small_sequence_no_index() {
+    let data: Vec<u64> = (0..30).collect();
+    let wrapped = IterArchive::new(data.clone());
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    // Decode as Vec (via ForwardSequenceStrategy) – should work.
+    let decoded: Vec<u64> = zebin::decode::<Vec<u64>>(&bytes).expect("decode Vec");
+    assert_eq!(decoded, data);
+
+    // Decode as IterArchive – should also work and still support get().
+    let reader = zebin::reader::<IterArchive<Vec<u64>, u64>>(&bytes).expect("reader");
+    let archived = reader.root();
+    assert_eq!(archived.len(), 30);
+    // get() falls back to linear scan when no index is present.
+    for i in 0..30 {
+        assert_eq!(archived.get(i).unwrap(), i as u64);
+    }
+}
+
+/// Boundary: exactly 64 elements (= chunk_size, should NOT produce an index
+/// since element_count is not > chunk_size).
+#[test]
+fn test_chunked_index_boundary_64() {
+    let data: Vec<u64> = (0..64).collect();
+    let wrapped = IterArchive::new(data.clone());
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    let reader = zebin::reader::<IterArchive<Vec<u64>, u64>>(&bytes).expect("reader");
+    let archived = reader.root();
+    assert_eq!(archived.len(), 64);
+    for i in 0..64 {
+        assert_eq!(archived.get(i).unwrap(), i as u64);
+    }
+}
+
+/// Boundary: exactly 65 elements (should produce an index with 2 blocks).
+#[test]
+fn test_chunked_index_boundary_65() {
+    let data: Vec<u64> = (0..65).collect();
+    let wrapped = IterArchive::new(data.clone());
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    let reader = zebin::reader::<IterArchive<Vec<u64>, u64>>(&bytes).expect("reader");
+    let archived = reader.root();
+    assert_eq!(archived.len(), 65);
+    for i in 0..65 {
+        assert_eq!(archived.get(i).unwrap(), i as u64, "mismatch at {i}");
+    }
+}
+
+/// Boundary: exactly 128 elements (2 full blocks).
+#[test]
+fn test_chunked_index_boundary_128() {
+    let data: Vec<u64> = (0..128).collect();
+    let wrapped = IterArchive::new(data.clone());
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    let reader = zebin::reader::<IterArchive<Vec<u64>, u64>>(&bytes).expect("reader");
+    let archived = reader.root();
+    assert_eq!(archived.len(), 128);
+    for i in 0..128 {
+        assert_eq!(archived.get(i).unwrap(), i as u64);
+    }
+}
+
+/// Verify that data encoded as IterArchive (which writes block index)
+/// can still be decoded as Vec<T> (which uses ForwardSequenceStrategy).
+#[test]
+fn test_backward_compat_iter_to_vec() {
+    let data: Vec<u64> = (0..200).collect();
+    let wrapped = IterArchive::new(data.clone());
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    // Decode as Vec<u64> – ForwardSequenceStrategy must skip block index.
+    let decoded: Vec<u64> = zebin::decode::<Vec<u64>>(&bytes).expect("decode");
+    assert_eq!(decoded, data);
+}
+
+/// Verify that data encoded as Vec<T> (no block index) can be decoded
+/// as IterArchive.
+#[test]
+fn test_backward_compat_vec_to_iter() {
+    let data: Vec<u64> = (0..200).collect();
+    let bytes = zebin::encode(data.clone()).expect("encode");
+
+    // Decode as IterArchive – should still work (no block index, linear fallback).
+    let reader = zebin::reader::<IterArchive<Vec<u64>, u64>>(&bytes).expect("reader");
+    let archived = reader.root();
+    assert_eq!(archived.len(), 200);
+    // get() should work via linear scan.
+    assert_eq!(archived.get(0).unwrap(), 0);
+    assert_eq!(archived.get(199).unwrap(), 199);
+}
+
+/// Test with variable-length elements (strings) to ensure the index
+/// records correct offsets despite non-uniform element sizes.
+#[test]
+fn test_chunked_index_variable_length_elements() {
+    let data: Vec<String> = (0..200).map(|i| format!("item_{:05}", i)).collect();
+    let wrapped = IterArchive::new(data.clone());
+    let bytes = zebin::encode(wrapped).expect("encode");
+
+    let reader = zebin::reader::<IterArchive<Vec<String>, String>>(&bytes).expect("reader");
+    let archived = reader.root();
+    assert_eq!(archived.len(), 200);
+
+    // Spot-check several positions across block boundaries.
+    for &i in &[0, 1, 63, 64, 65, 127, 128, 129, 190, 199] {
+        let val: String = {
+            use zebin::prelude::Restore;
+            archived.get(i).unwrap().restore().unwrap()
+        };
+        assert_eq!(val, format!("item_{:05}", i), "mismatch at {i}");
+    }
+}
