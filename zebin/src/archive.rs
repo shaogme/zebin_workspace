@@ -6,11 +6,20 @@ mod container;
 mod option;
 
 #[path = "archive/packed.rs"]
-pub mod packed;
+mod packed;
+pub use packed::{
+    ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView, ArchivedPackedU8Slice,
+    ArchivedPackedU8SliceView, PackedBoolSlice, PackedSlice, PackedU8Slice,
+};
 
 #[cfg(feature = "alloc")]
 #[path = "archive/packed_vec.rs"]
-pub mod packed_vec;
+mod packed_vec;
+#[cfg(feature = "alloc")]
+pub use packed_vec::{
+    PackedBoolVec, PackedBoolVecEncoder, PackedSequenceEncoder, PackedU8Vec, PackedU8VecEncoder,
+    PackedVec,
+};
 
 #[path = "archive/primitive.rs"]
 mod primitive;
@@ -19,22 +28,28 @@ mod primitive;
 mod result;
 
 #[path = "archive/slice.rs"]
-pub mod slice;
+mod slice;
 
 #[cfg(feature = "alloc")]
 #[path = "archive/string.rs"]
 mod string;
 
 #[path = "archive/varint.rs"]
-pub mod varint;
+mod varint;
+pub use varint::{VarInt, VarIntView};
 
 #[cfg(feature = "alloc")]
 #[path = "archive/varint_vec.rs"]
-pub mod varint_vec;
+mod varint_vec;
+#[cfg(feature = "alloc")]
+pub use varint_vec::{PackedVarIntSlice, VarIntVec};
 
 #[cfg(feature = "alloc")]
 #[path = "archive/collections.rs"]
-pub mod collections;
+mod collections;
 
 #[path = "archive/iter.rs"]
-pub mod iter;
+mod iter;
+#[cfg(feature = "alloc")]
+pub(crate) use iter::skip_block_index;
+pub use iter::{ArchivedIter, IterArchive, IterEncoder};

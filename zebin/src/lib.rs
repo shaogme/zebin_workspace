@@ -62,20 +62,14 @@ pub mod prelude {
 /// 底层表示与数据存储结构相关的高级 API
 pub mod archive {
     pub use crate::archive_impl::{
-        iter::{ArchivedIter, IterArchive, IterEncoder},
-        packed::{
-            ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView, ArchivedPackedU8Slice,
-            ArchivedPackedU8SliceView, PackedBoolSlice, PackedSlice, PackedU8Slice,
-        },
-        varint::{VarInt, VarIntView},
+        ArchivedIter, ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView, ArchivedPackedU8Slice,
+        ArchivedPackedU8SliceView, IterArchive, IterEncoder, PackedBoolSlice, PackedSlice,
+        PackedU8Slice, VarInt, VarIntView,
     };
     #[cfg(feature = "alloc")]
     pub use crate::archive_impl::{
-        packed_vec::{
-            PackedBoolVec, PackedBoolVecEncoder, PackedSequenceEncoder, PackedU8Vec,
-            PackedU8VecEncoder, PackedVec,
-        },
-        varint_vec::{PackedVarIntSlice, VarIntVec},
+        PackedBoolVec, PackedBoolVecEncoder, PackedSequenceEncoder, PackedU8Vec,
+        PackedU8VecEncoder, PackedVarIntSlice, PackedVec, VarIntVec,
     };
 }
 

@@ -104,4 +104,3 @@ fn test_iter_archive_no_alloc() {
     assert_eq!(iter.next().unwrap().unwrap(), 30);
     assert!(iter.next().is_none());
 }
-
