@@ -1,4 +1,7 @@
-use alloc::{collections::{VecDeque, BTreeSet, BinaryHeap, BTreeMap}, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
+    vec::Vec,
+};
 use core::task::Poll;
 
 use crate::{
@@ -132,7 +135,8 @@ pub type BTreeSetEncoder<'a, T> = IterEncoder<'a, BTreeSet<T>, T, BTreeSet<T>>;
 pub type BinaryHeapEncoder<'a, T> = IterEncoder<'a, BinaryHeap<T>, T, BinaryHeap<T>>;
 
 #[cfg(feature = "std")]
-pub type HashSetEncoder<'a, T> = IterEncoder<'a, std::collections::HashSet<T>, T, std::collections::HashSet<T>>;
+pub type HashSetEncoder<'a, T> =
+    IterEncoder<'a, std::collections::HashSet<T>, T, std::collections::HashSet<T>>;
 
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
@@ -369,7 +373,10 @@ where
         })
     }
 
-    pub fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    pub fn poll_pending<S: ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.stage == 0 {
             if let Some((encoder, started)) = &mut self.key_encoder {
                 let progress = if !*started {
@@ -513,12 +520,16 @@ where
         Ok(core::task::Poll::Ready(()))
     }
 
-    fn finish<Sink: ByteSink + ?Sized>(self, _sink: &mut Sink) -> Result<core::task::Poll<()>, ZebinError> {
+    fn finish<Sink: ByteSink + ?Sized>(
+        self,
+        _sink: &mut Sink,
+    ) -> Result<core::task::Poll<()>, ZebinError> {
         Ok(core::task::Poll::Ready(()))
     }
 }
 
-pub type BTreeMapEncoder<'a, K, V> = MapEncoder<'a, K, V, alloc::collections::btree_map::Iter<'a, K, V>, BTreeMap<K, V>>;
+pub type BTreeMapEncoder<'a, K, V> =
+    MapEncoder<'a, K, V, alloc::collections::btree_map::Iter<'a, K, V>, BTreeMap<K, V>>;
 
 impl<K: Archive, V: Archive> Archive for BTreeMap<K, V> {
     type Archived = ArchivedVec<'static, (K::Archived, V::Archived)>;
@@ -531,7 +542,10 @@ where
     K::Archived: ArchivedLayout,
     V::Archived: ArchivedLayout,
 {
-    type Encoder<'a> = BTreeMapEncoder<'a, K, V> where Self: 'a;
+    type Encoder<'a>
+        = BTreeMapEncoder<'a, K, V>
+    where
+        Self: 'a;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         BTreeMapEncoder::new(self.iter())
@@ -570,7 +584,13 @@ where
 }
 
 #[cfg(feature = "std")]
-pub type HashMapEncoder<'a, K, V> = MapEncoder<'a, K, V, std::collections::hash_map::Iter<'a, K, V>, std::collections::HashMap<K, V>>;
+pub type HashMapEncoder<'a, K, V> = MapEncoder<
+    'a,
+    K,
+    V,
+    std::collections::hash_map::Iter<'a, K, V>,
+    std::collections::HashMap<K, V>,
+>;
 
 #[cfg(feature = "std")]
 impl<K: Archive, V: Archive> Archive for std::collections::HashMap<K, V> {
@@ -585,7 +605,10 @@ where
     K::Archived: ArchivedLayout,
     V::Archived: ArchivedLayout,
 {
-    type Encoder<'a> = HashMapEncoder<'a, K, V> where Self: 'a;
+    type Encoder<'a>
+        = HashMapEncoder<'a, K, V>
+    where
+        Self: 'a;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         HashMapEncoder::new(self.iter())
@@ -624,5 +647,3 @@ where
         Ok(map)
     }
 }
-
-

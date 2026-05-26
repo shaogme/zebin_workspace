@@ -8,7 +8,13 @@ use crate::{
 };
 
 #[cfg(feature = "alloc")]
-use alloc::boxed::Box;
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
+};
+
+#[cfg(feature = "std")]
+use std::collections::{HashMap, HashSet};
 
 /// Validation context used during lazy decoding.
 struct DummyContext;
@@ -184,13 +190,13 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<alloc::collections::VecDeque<U>> for ArchivedIter<'_, T>
+impl<T, U> Restore<VecDeque<U>> for ArchivedIter<'_, T>
 where
     for<'a> T: Decode<'a>,
     for<'a> <T as Decode<'a>>::View: Restore<U>,
 {
-    fn restore(&self) -> Result<alloc::collections::VecDeque<U>, ZebinError> {
-        let mut out = alloc::collections::VecDeque::with_capacity(self.len);
+    fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
+        let mut out = VecDeque::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
@@ -202,14 +208,14 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<alloc::collections::BTreeSet<U>> for ArchivedIter<'_, T>
+impl<T, U> Restore<BTreeSet<U>> for ArchivedIter<'_, T>
 where
     for<'a> T: Decode<'a>,
     for<'a> <T as Decode<'a>>::View: Restore<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<alloc::collections::BTreeSet<U>, ZebinError> {
-        let mut out = alloc::collections::BTreeSet::new();
+    fn restore(&self) -> Result<BTreeSet<U>, ZebinError> {
+        let mut out = BTreeSet::new();
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
@@ -221,14 +227,14 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<alloc::collections::BinaryHeap<U>> for ArchivedIter<'_, T>
+impl<T, U> Restore<BinaryHeap<U>> for ArchivedIter<'_, T>
 where
     for<'a> T: Decode<'a>,
     for<'a> <T as Decode<'a>>::View: Restore<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<alloc::collections::BinaryHeap<U>, ZebinError> {
-        let mut out = alloc::collections::BinaryHeap::with_capacity(self.len);
+    fn restore(&self) -> Result<BinaryHeap<U>, ZebinError> {
+        let mut out = BinaryHeap::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
@@ -240,14 +246,14 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<T, U> Restore<std::collections::HashSet<U>> for ArchivedIter<'_, T>
+impl<T, U> Restore<HashSet<U>> for ArchivedIter<'_, T>
 where
     for<'a> T: Decode<'a>,
     for<'a> <T as Decode<'a>>::View: Restore<U>,
     U: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<std::collections::HashSet<U>, ZebinError> {
-        let mut out = std::collections::HashSet::with_capacity(self.len);
+    fn restore(&self) -> Result<HashSet<U>, ZebinError> {
+        let mut out = HashSet::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
@@ -269,15 +275,15 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, K, V, UK, UV> Restore<alloc::collections::BTreeMap<UK, UV>> for ArchivedIter<'_, T>
+impl<T, K, V, UK, UV> Restore<BTreeMap<UK, UV>> for ArchivedIter<'_, T>
 where
     for<'a> T: Decode<'a, View = (K, V)>,
     K: Restore<UK>,
     V: Restore<UV>,
     UK: Ord,
 {
-    fn restore(&self) -> Result<alloc::collections::BTreeMap<UK, UV>, ZebinError> {
-        let mut map = alloc::collections::BTreeMap::new();
+    fn restore(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
+        let mut map = BTreeMap::new();
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
@@ -289,15 +295,15 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<T, K, V, UK, UV> Restore<std::collections::HashMap<UK, UV>> for ArchivedIter<'_, T>
+impl<T, K, V, UK, UV> Restore<HashMap<UK, UV>> for ArchivedIter<'_, T>
 where
     for<'a> T: Decode<'a, View = (K, V)>,
     K: Restore<UK>,
     V: Restore<UV>,
     UK: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<std::collections::HashMap<UK, UV>, ZebinError> {
-        let mut map = std::collections::HashMap::with_capacity(self.len);
+    fn restore(&self) -> Result<HashMap<UK, UV>, ZebinError> {
+        let mut map = HashMap::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         let mut context = DummyContext;
         for _ in 0..self.len {
@@ -307,8 +313,6 @@ where
         Ok(map)
     }
 }
-
-
 
 pub struct CurrentEncoder<'a, T: Encode + 'a> {
     #[cfg(feature = "alloc")]

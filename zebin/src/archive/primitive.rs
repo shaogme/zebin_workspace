@@ -419,7 +419,10 @@ where
     K: Encode + Archive,
     V: Encode + Archive,
 {
-    type Encoder<'a> = Tuple2Encoder<'a, K, V> where Self: 'a;
+    type Encoder<'a>
+        = Tuple2Encoder<'a, K, V>
+    where
+        Self: 'a;
 
     fn begin_encode(&self) -> Result<Self::Encoder<'_>, ZebinError> {
         Tuple2Encoder::new(&self.0, &self.1)
@@ -463,4 +466,3 @@ where
         Ok((self.0.restore()?, self.1.restore()?))
     }
 }
-
