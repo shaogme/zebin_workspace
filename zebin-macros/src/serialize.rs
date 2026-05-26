@@ -37,18 +37,12 @@ fn field_measure_expr(
     if let Some((kind, bits)) = crate::shared::packed::packed_info_pub(field) {
         match kind {
             crate::shared::packed::PackedElementKind::Bool => quote! {
-                {
-                    let __zebin_packed_len = (#value).len();
-                    4usize + __zebin_packed_len.div_ceil(8)
-                }
+                zebin::utils::macros_helpers::measure_packed_bool_len((#value).len())
             },
             crate::shared::packed::PackedElementKind::U8 => {
-                let bits_lit = bits as usize;
+                let bits_lit = bits as u8;
                 quote! {
-                    {
-                        let __zebin_packed_len = (#value).len();
-                        4usize + (__zebin_packed_len * #bits_lit).div_ceil(8)
-                    }
+                    zebin::utils::macros_helpers::measure_packed_u8_len((#value).len(), #bits_lit)?
                 }
             }
         }
@@ -318,12 +312,10 @@ fn struct_measure_body_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro
     let schema = has_schema(record);
 
     if schema {
-        // 12 bytes header + N * FieldEntry::SIZE table + 4 bytes table_offset + 4 bytes total_len.
-        sums.push(quote! { 12usize });
         let n = fields.len();
-        sums.push(quote! { (#n) * zebin::schema::FieldEntry::SIZE });
-        sums.push(quote! { 4usize });
-        sums.push(quote! { 4usize });
+        sums.push(quote! {
+            zebin::utils::macros_helpers::add_measured_len(&mut __total, zebin::utils::macros_helpers::schema_overhead(#n))?;
+        });
     }
 
     for (index, field) in &fields {
@@ -339,7 +331,9 @@ fn struct_measure_body_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro
             RecordStyle::Unit => continue,
         };
         let measure = field_measure_expr(field, quote! { &#member });
-        sums.push(measure);
+        sums.push(quote! {
+            zebin::utils::macros_helpers::add_measured_len(&mut __total, #measure)?;
+        });
     }
 
     if sums.is_empty() {
@@ -356,10 +350,7 @@ fn struct_measure_body_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro
         impl zebin::MeasureBody for #name {
             fn measure_body(&self) -> Result<usize, zebin::ZebinError> {
                 let mut __total: usize = 0;
-                #(
-                    __total = __total.checked_add(#sums)
-                        .ok_or(zebin::ZebinError::ArithmeticOverflow { pos: 0 })?;
-                )*
+                #(#sums)*
                 Ok(__total)
             }
         }
@@ -544,7 +535,7 @@ fn enum_measure_body_impl(
     name: &Ident,
     variants: &[crate::shared::VariantSpec<'_>],
 ) -> proc_macro2::TokenStream {
-    // Each variant: 4 bytes tag + sum of field measures (with schema overhead if applicable).
+    // Each variant: tag + sum of field measures (with schema overhead if applicable).
     let arms = variants.iter().map(|variant| {
         let variant_ident = variant.ident;
         let record = &variant.record;
@@ -552,10 +543,9 @@ fn enum_measure_body_impl(
         let mut sums: Vec<proc_macro2::TokenStream> = Vec::new();
         if has_schema(record) {
             let n = record.active_fields().count();
-            sums.push(quote! { 12usize });
-            sums.push(quote! { (#n) * zebin::schema::FieldEntry::SIZE });
-            sums.push(quote! { 4usize });
-            sums.push(quote! { 4usize });
+            sums.push(quote! {
+                zebin::utils::macros_helpers::add_measured_len(&mut __total, zebin::utils::macros_helpers::schema_overhead(#n))?;
+            });
         }
 
         let bindings = record
@@ -590,7 +580,9 @@ fn enum_measure_body_impl(
         for (index, field) in record.active_fields() {
             let user_id = field_user_ident_for(record, index, field);
             let measure = field_measure_expr(field, quote! { #user_id });
-            sums.push(measure);
+            sums.push(quote! {
+                zebin::utils::macros_helpers::add_measured_len(&mut __total, #measure)?;
+            });
         }
 
         let pattern = match record.style {
@@ -601,11 +593,8 @@ fn enum_measure_body_impl(
 
         quote! {
             #pattern => {
-                let mut __total: usize = 4;
-                #(
-                    __total = __total.checked_add(#sums)
-                        .ok_or(zebin::ZebinError::ArithmeticOverflow { pos: 0 })?;
-                )*
+                let mut __total: usize = zebin::utils::macros_helpers::ENUM_TAG_SIZE;
+                #(#sums)*
                 Ok(__total)
             }
         }

@@ -453,3 +453,40 @@ impl SchemaObjectEncoder {
         Ok(core::task::Poll::Ready(()))
     }
 }
+
+/// 默认枚举 Variant Tag 所占用的字节大小。
+pub const ENUM_TAG_SIZE: usize = 4;
+
+/// 计算含有 schema 的记录所带来的元数据开销（包括头部信息、字段表和尾部对齐/长度信息）。
+/// - 头部信息：12 字节
+/// - 字段表项：field_count * FieldEntry::SIZE (8 字节)
+/// - 偏移量/长度尾部：8 字节 (4 字节 table_offset + 4 字节 total_len)
+#[inline]
+pub const fn schema_overhead(field_count: usize) -> usize {
+    12 + field_count * crate::schema::FieldEntry::SIZE + 4 + 4
+}
+
+/// 计算压缩布尔数组 (PackedBoolVec / PackedBoolSlice) 的序列化后长度开销（4字节长度前缀 + 向上取整字节数）。
+#[inline]
+pub const fn measure_packed_bool_len(len: usize) -> usize {
+    4 + len.div_ceil(8)
+}
+
+/// 计算压缩字节数组 (PackedU8Vec / PackedU8Slice) 的序列化后长度开销，并进行溢出校验。
+#[inline]
+pub fn measure_packed_u8_len(len: usize, bits: u8) -> Result<usize, ZebinError> {
+    let bits_total = len
+        .checked_mul(bits as usize)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+    Ok(4 + bits_total.div_ceil(8))
+}
+
+/// 安全地累加已度量的长度，并在溢出时返回错误。
+#[inline]
+pub fn add_measured_len(total: &mut usize, len: usize) -> Result<(), ZebinError> {
+    *total = total
+        .checked_add(len)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+    Ok(())
+}
+
