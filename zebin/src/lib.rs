@@ -145,7 +145,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage,
-        T::Archived: Decode<'a>,
+        T::Archived: Decode,
     {
         ZebinReader::new(storage, ValidationConfig::default())
     }
@@ -155,8 +155,8 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage + 'a,
-        T::Archived: Decode<'a>,
-        <T::Archived as Decode<'a>>::View: Restore<T>,
+        T::Archived: Decode + 'a,
+        <T::Archived as Decode>::View<'a>: Restore<T>,
     {
         ZebinReader::<T, S>::decode(storage)
     }
@@ -166,7 +166,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage + 'a,
-        T::Archived: Decode<'a>,
+        T::Archived: Decode,
     {
         ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), None)
     }
@@ -180,7 +180,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage + 'a,
-        T::Archived: Decode<'a>,
+        T::Archived: Decode,
     {
         ZebinReader::<T, S>::validate(storage, config, stack)
     }
@@ -193,7 +193,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage + 'a,
-        T::Archived: Decode<'a>,
+        T::Archived: Decode,
     {
         ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), Some(stack))
     }

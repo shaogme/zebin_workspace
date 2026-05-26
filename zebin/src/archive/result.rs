@@ -56,18 +56,25 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<'a, A, B> Decode<'a> for ArchivedResult<A, B>
+impl<A, B> Decode for ArchivedResult<A, B>
 where
-    A: Decode<'a>,
-    B: Decode<'a>,
+    A: Decode,
+    B: Decode,
 {
-    type View = ArchivedResult<A::View, B::View>;
+    type View<'a>
+        = ArchivedResult<A::View<'a>, B::View<'a>>
+    where
+        Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let pos = cursor.pos();
         match cursor.read_u8(context)? {
@@ -83,7 +90,7 @@ where
         }
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

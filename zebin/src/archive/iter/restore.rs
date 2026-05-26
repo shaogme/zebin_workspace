@@ -14,9 +14,9 @@ use std::collections::{HashMap, HashSet};
 use super::{DummyContext, IterArchive, decode::ArchivedIter};
 
 #[cfg(feature = "alloc")]
-pub(crate) fn decode_next_element<'a, T: Decode<'a>>(
+pub(crate) fn decode_next_element<'a, T: Decode>(
     cursor: &mut Cursor<'a>,
-) -> Result<T::View, ZebinError> {
+) -> Result<T::View<'a>, ZebinError> {
     let mut context = DummyContext;
     let marker = cursor.read_u8(&mut context)?;
     if marker != 1 {
@@ -34,8 +34,8 @@ pub(crate) fn decode_next_element<'a, T: Decode<'a>>(
 #[cfg(feature = "alloc")]
 impl<T, U> Restore<Vec<U>> for ArchivedIter<'_, T>
 where
-    for<'a> T: Decode<'a>,
-    for<'a> <T as Decode<'a>>::View: Restore<U>,
+    T: Decode,
+    for<'a> T::View<'a>: Restore<U>,
 {
     fn restore(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len);
@@ -51,8 +51,8 @@ where
 #[cfg(feature = "alloc")]
 impl<T, U> Restore<VecDeque<U>> for ArchivedIter<'_, T>
 where
-    for<'a> T: Decode<'a>,
-    for<'a> <T as Decode<'a>>::View: Restore<U>,
+    T: Decode,
+    for<'a> T::View<'a>: Restore<U>,
 {
     fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut out = VecDeque::with_capacity(self.len);
@@ -68,8 +68,8 @@ where
 #[cfg(feature = "alloc")]
 impl<T, U> Restore<BTreeSet<U>> for ArchivedIter<'_, T>
 where
-    for<'a> T: Decode<'a>,
-    for<'a> <T as Decode<'a>>::View: Restore<U>,
+    T: Decode,
+    for<'a> T::View<'a>: Restore<U>,
     U: Ord,
 {
     fn restore(&self) -> Result<BTreeSet<U>, ZebinError> {
@@ -86,8 +86,8 @@ where
 #[cfg(feature = "alloc")]
 impl<T, U> Restore<BinaryHeap<U>> for ArchivedIter<'_, T>
 where
-    for<'a> T: Decode<'a>,
-    for<'a> <T as Decode<'a>>::View: Restore<U>,
+    T: Decode,
+    for<'a> T::View<'a>: Restore<U>,
     U: Ord,
 {
     fn restore(&self) -> Result<BinaryHeap<U>, ZebinError> {
@@ -104,8 +104,8 @@ where
 #[cfg(feature = "std")]
 impl<T, U> Restore<HashSet<U>> for ArchivedIter<'_, T>
 where
-    for<'a> T: Decode<'a>,
-    for<'a> <T as Decode<'a>>::View: Restore<U>,
+    T: Decode,
+    for<'a> T::View<'a>: Restore<U>,
     U: Eq + core::hash::Hash,
 {
     fn restore(&self) -> Result<HashSet<U>, ZebinError> {
@@ -130,38 +130,38 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, K, V, UK, UV> Restore<BTreeMap<UK, UV>> for ArchivedIter<'_, T>
+impl<T, UK, UV> Restore<BTreeMap<UK, UV>> for ArchivedIter<'_, T>
 where
-    for<'a> T: Decode<'a, View = (K, V)>,
-    K: Restore<UK>,
-    V: Restore<UV>,
+    T: Decode,
+    for<'a> T::View<'a>: Restore<(UK, UV)>,
     UK: Ord,
 {
     fn restore(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
         let mut map = BTreeMap::new();
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let (k, v) = decode_next_element::<T>(&mut cursor)?;
-            map.insert(k.restore()?, v.restore()?);
+            let view = decode_next_element::<T>(&mut cursor)?;
+            let (k, v) = view.restore()?;
+            map.insert(k, v);
         }
         Ok(map)
     }
 }
 
 #[cfg(feature = "std")]
-impl<T, K, V, UK, UV> Restore<HashMap<UK, UV>> for ArchivedIter<'_, T>
+impl<T, UK, UV> Restore<HashMap<UK, UV>> for ArchivedIter<'_, T>
 where
-    for<'a> T: Decode<'a, View = (K, V)>,
-    K: Restore<UK>,
-    V: Restore<UV>,
+    T: Decode,
+    for<'a> T::View<'a>: Restore<(UK, UV)>,
     UK: Eq + core::hash::Hash,
 {
     fn restore(&self) -> Result<HashMap<UK, UV>, ZebinError> {
         let mut map = HashMap::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let (k, v) = decode_next_element::<T>(&mut cursor)?;
-            map.insert(k.restore()?, v.restore()?);
+            let view = decode_next_element::<T>(&mut cursor)?;
+            let (k, v) = view.restore()?;
+            map.insert(k, v);
         }
         Ok(map)
     }

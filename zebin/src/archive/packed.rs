@@ -107,14 +107,21 @@ impl ArchivedLayout for ArchivedPackedBoolSlice {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 }
 
-impl<'a> Decode<'a> for ArchivedPackedBoolSlice {
-    type View = ArchivedPackedBoolSliceView<'a>;
+impl Decode for ArchivedPackedBoolSlice {
+    type View<'a>
+        = ArchivedPackedBoolSliceView<'a>
+    where
+        Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let len = cursor.read_u32(context)? as usize;
         let byte_len = packed_byte_len(len, 1)?;
@@ -122,7 +129,7 @@ impl<'a> Decode<'a> for ArchivedPackedBoolSlice {
         Ok(ArchivedPackedBoolSliceView { len, bytes })
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -179,14 +186,21 @@ impl<const BITS: u8> ArchivedLayout for ArchivedPackedU8Slice<BITS> {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 }
 
-impl<'a, const BITS: u8> Decode<'a> for ArchivedPackedU8Slice<BITS> {
-    type View = ArchivedPackedU8SliceView<'a, BITS>;
+impl<const BITS: u8> Decode for ArchivedPackedU8Slice<BITS> {
+    type View<'a>
+        = ArchivedPackedU8SliceView<'a, BITS>
+    where
+        Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let pos = cursor.pos();
         let len = cursor.read_u32(context)? as usize;
@@ -209,7 +223,7 @@ impl<'a, const BITS: u8> Decode<'a> for ArchivedPackedU8Slice<BITS> {
         Ok(ArchivedPackedU8SliceView { len, bytes })
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

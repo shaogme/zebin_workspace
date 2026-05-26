@@ -69,27 +69,34 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<'marker, 'a, A> Decode<'a> for ArchivedVec<'marker, A>
+impl<A> Decode for ArchivedVec<'_, A>
 where
-    A: Decode<'a>,
+    A: Decode,
 {
-    type View = ArchivedVec<'a, A::View>;
+    type View<'a>
+        = ArchivedVec<'a, A::View<'a>>
+    where
+        Self: 'a;
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let items =
-            <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::decode_sequence(cursor, context)?;
+            <A::DecodeStrategy as SequenceDecodeStrategy<A>>::decode_sequence(cursor, context)?;
         Ok(ArchivedVec::new(items))
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
-        <A::DecodeStrategy as SequenceDecodeStrategy<'a, A>>::validate_sequence(cursor, context)
+        <A::DecodeStrategy as SequenceDecodeStrategy<A>>::validate_sequence(cursor, context)
     }
 }
 

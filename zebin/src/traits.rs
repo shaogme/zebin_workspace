@@ -46,31 +46,40 @@ pub trait ArchivedLayout {
 }
 
 /// Read-side decode contract for consuming a value from a sequential cursor.
-pub trait Decode<'a>: ArchivedLayout + Sized {
-    type View: 'a;
-    #[cfg(feature = "alloc")]
-    type DecodeStrategy: SequenceDecodeStrategy<'a, Self>;
-
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+pub trait Decode: ArchivedLayout + Sized {
+    type View<'a>
     where
-        C: ValidationContext + ?Sized;
+        Self: 'a;
+    #[cfg(feature = "alloc")]
+    type DecodeStrategy: SequenceDecodeStrategy<Self>;
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
+    where
+        C: ValidationContext + ?Sized,
+        Self: 'a;
+
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized;
 }
 
 /// Strategy for decoding and validating a sequence of elements.
 #[cfg(feature = "alloc")]
-pub trait SequenceDecodeStrategy<'a, T: Decode<'a>> {
-    fn decode_sequence<C>(
+pub trait SequenceDecodeStrategy<T: Decode> {
+    fn decode_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, DecodeError>
     where
         C: ValidationContext + ?Sized;
 
-    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate_sequence<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized;
 }
@@ -80,11 +89,11 @@ pub trait SequenceDecodeStrategy<'a, T: Decode<'a>> {
 pub struct FixedSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for FixedSequenceStrategy {
-    fn decode_sequence<C>(
+impl<T: Decode> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
+    fn decode_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -107,7 +116,7 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for FixedSequenceStrategy 
         Ok(items)
     }
 
-    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -135,11 +144,11 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for FixedSequenceStrategy 
 pub struct ForwardSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for ForwardSequenceStrategy {
-    fn decode_sequence<C>(
+impl<T: Decode> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
+    fn decode_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -161,7 +170,7 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for ForwardSequenceStrateg
         Ok(items)
     }
 
-    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -188,11 +197,11 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for ForwardSequenceStrateg
 pub struct BackwardSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrategy {
-    fn decode_sequence<C>(
+impl<T: Decode> SequenceDecodeStrategy<T> for BackwardSequenceStrategy {
+    fn decode_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -245,7 +254,7 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
         Ok(temp_items)
     }
 
-    fn validate_sequence<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

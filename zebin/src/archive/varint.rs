@@ -68,7 +68,7 @@ impl<T> SchemaAware for VarIntView<T> {
     }
 }
 
-impl<T: Default + 'static> ArchivedDefault for VarIntView<T> {
+impl<T: Default> ArchivedDefault for VarIntView<T> {
     fn archived_default() -> &'static Self {
         static DEFAULT: VarIntView<()> = VarIntView { value: () };
         unsafe { &*(&DEFAULT as *const VarIntView<()> as *const VarIntView<T>) }
@@ -197,23 +197,30 @@ where
     }
 }
 
-impl<'a, T> Decode<'a> for ArchivedVarInt<T>
+impl<T> Decode for ArchivedVarInt<T>
 where
-    T: VarIntNumber + 'a,
+    T: VarIntNumber,
 {
-    type View = VarIntView<T>;
+    type View<'a>
+        = VarIntView<T>
+    where
+        Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let value = decode_u64::<T, C>(cursor, context)?;
         Ok(VarIntView { value })
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

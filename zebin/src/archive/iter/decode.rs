@@ -30,9 +30,9 @@ impl<'a, A> ArchivedIter<'a, A> {
         self.len == 0
     }
 
-    pub fn iter(&self) -> ArchivedIterIter<'a, A>
+    pub fn iter<'s>(&'s self) -> ArchivedIterIter<'s, A>
     where
-        A: Decode<'a>,
+        A: Decode,
     {
         ArchivedIterIter {
             cursor: Cursor::new(self.bytes, self.start_pos),
@@ -47,9 +47,9 @@ impl<'a, A> ArchivedIter<'a, A> {
     /// the block in O(1), scan at most `chunk_size` elements inside).
     /// Without a block index the method falls back to a full linear
     /// scan from the beginning.
-    pub fn get(&self, index: usize) -> Result<A::View, DecodeError>
+    pub fn get(&self, index: usize) -> Result<A::View<'a>, DecodeError>
     where
-        A: Decode<'a>,
+        A: Decode,
     {
         if index >= self.len {
             return Err(DecodeError::ValidationError {
@@ -133,9 +133,9 @@ impl<'a, A> ArchivedIter<'a, A> {
     ///
     /// If a block index is available the cursor is positioned at the
     /// containing block in O(1); otherwise a linear skip is performed.
-    pub fn iter_from(&self, start: usize) -> ArchivedIterIter<'a, A>
+    pub fn iter_from<'s>(&'s self, start: usize) -> ArchivedIterIter<'s, A>
     where
-        A: Decode<'a>,
+        A: Decode,
     {
         if start >= self.len {
             return ArchivedIterIter {
@@ -203,18 +203,25 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<'marker, 'a, A> Decode<'a> for ArchivedIter<'marker, A>
+impl<A> Decode for ArchivedIter<'_, A>
 where
-    A: Decode<'a> + 'a,
+    A: Decode,
 {
-    type View = ArchivedIter<'a, A>;
+    type View<'a>
+        = ArchivedIter<'a, A>
+    where
+        Self: 'a;
 
     #[cfg(feature = "alloc")]
     type DecodeStrategy = crate::io::ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let start_pos = cursor.pos();
         let len = Self::decode_sequence_body(cursor, context)?;
@@ -231,7 +238,7 @@ where
         })
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -248,7 +255,7 @@ impl<'marker, A> ArchivedIter<'marker, A> {
         context: &mut C,
     ) -> Result<usize, DecodeError>
     where
-        A: Decode<'a>,
+        A: Decode,
         C: ValidationContext + ?Sized,
     {
         let mut len = 0usize;
@@ -280,14 +287,14 @@ impl<'marker, A> ArchivedIter<'marker, A> {
 }
 
 /// Lazy decoding iterator over the elements of an `ArchivedIter`.
-pub struct ArchivedIterIter<'a, A: Decode<'a>> {
+pub struct ArchivedIterIter<'a, A> {
     pub(crate) cursor: Cursor<'a>,
     pub(crate) remaining: usize,
     pub(crate) _marker: PhantomData<A>,
 }
 
-impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
-    type Item = Result<A::View, DecodeError>;
+impl<'a, A: Decode + 'a> Iterator for ArchivedIterIter<'a, A> {
+    type Item = Result<A::View<'a>, DecodeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {

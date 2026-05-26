@@ -104,17 +104,21 @@ macro_rules! impl_archive_for_primitive {
                 };
             }
 
-            impl<'a> Decode<'a> for $t {
-                type View = Self;
+            impl Decode for $t {
+                type View<'a>
+                    = Self
+                where
+                    Self: 'a;
                 #[cfg(feature = "alloc")]
                 type DecodeStrategy = crate::io::FixedSequenceStrategy;
 
-                fn decode<C>(
+                fn decode<'a, C>(
                     cursor: &mut Cursor<'a>,
                     context: &mut C,
-                ) -> Result<Self::View, DecodeError>
+                ) -> Result<Self::View<'a>, DecodeError>
                 where
                     C: ValidationContext + ?Sized,
+                    Self: 'a
                 {
                     let bytes = cursor.read_exact(core::mem::size_of::<Self>(), context)?;
                     let mut fixed = [0u8; core::mem::size_of::<Self>()];
@@ -122,7 +126,7 @@ macro_rules! impl_archive_for_primitive {
                     Ok(<$t>::from_le_bytes(fixed))
                 }
 
-                fn validate<C>(
+                fn validate<'a, C>(
                     cursor: &mut Cursor<'a>,
                     context: &mut C,
                 ) -> Result<(), DecodeError>
@@ -201,14 +205,21 @@ impl ArchivedLayout for bool {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 }
 
-impl<'a> Decode<'a> for bool {
-    type View = bool;
+impl Decode for bool {
+    type View<'a>
+        = bool
+    where
+        Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = FixedSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let pos = cursor.pos();
         let value = cursor.read_u8(context)?;
@@ -219,7 +230,7 @@ impl<'a> Decode<'a> for bool {
         }
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -334,19 +345,26 @@ impl ArchivedLayout for () {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 }
 
-impl<'a> Decode<'a> for () {
-    type View = ();
+impl Decode for () {
+    type View<'a>
+        = ()
+    where
+        Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = FixedSequenceStrategy;
 
-    fn decode<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        _cursor: &mut Cursor<'a>,
+        _context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         Ok(())
     }
 
-    fn validate<C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -584,21 +602,28 @@ impl<A: ArchivedLayout, B: ArchivedLayout> ArchivedLayout for (A, B) {
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<'a, A: Decode<'a>, B: Decode<'a>> Decode<'a> for (A, B) {
-    type View = (A::View, B::View);
+impl<A: Decode, B: Decode> Decode for (A, B) {
+    type View<'a2>
+        = (A::View<'a2>, B::View<'a2>)
+    where
+        Self: 'a2;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = crate::io::ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a2, C>(
+        cursor: &mut Cursor<'a2>,
+        context: &mut C,
+    ) -> Result<Self::View<'a2>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a2,
     {
         let key = A::decode(cursor, context)?;
         let value = B::decode(cursor, context)?;
         Ok((key, value))
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a2, C>(cursor: &mut Cursor<'a2>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

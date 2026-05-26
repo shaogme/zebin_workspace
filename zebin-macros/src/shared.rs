@@ -132,7 +132,7 @@ pub fn field_archived_type(field: &FieldSpec<'_>) -> TokenStream {
 
 pub fn field_view_type(field: &FieldSpec<'_>) -> TokenStream {
     let archived = field_archived_type(field);
-    quote! { <#archived as zebin::Decode<'a>>::View }
+    quote! { <#archived as zebin::Decode>::View<'a> }
 }
 
 pub fn active_fields_by_id<'a>(record: &'a RecordSpec<'a>) -> Vec<(usize, &'a FieldSpec<'a>)> {

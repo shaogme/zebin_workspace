@@ -101,13 +101,20 @@ impl<T> ArchivedLayout for ArchivedVarIntVec<T> {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
 }
 
-impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
-    type View = ArchivedVarIntVec<T>;
+impl<T: VarIntNumber> Decode for ArchivedVarIntVec<T> {
+    type View<'a>
+        = ArchivedVarIntVec<T>
+    where
+        Self: 'a;
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let len = cursor.read_u32(context)? as usize;
         let mut values = Vec::with_capacity(len);
@@ -118,7 +125,7 @@ impl<'a, T: VarIntNumber + 'a> Decode<'a> for ArchivedVarIntVec<T> {
         Ok(ArchivedVarIntVec { values })
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

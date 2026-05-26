@@ -67,20 +67,27 @@ where
     const ALIGNMENT: NonZeroUsize = A::ALIGNMENT;
 }
 
-impl<'a, A, const N: usize> Decode<'a> for [A; N]
+impl<A, const N: usize> Decode for [A; N]
 where
-    A: Decode<'a>,
+    A: Decode,
 {
-    type View = [A::View; N];
+    type View<'a>
+        = [A::View<'a>; N]
+    where
+        Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
-        let mut out = core::mem::MaybeUninit::<[A::View; N]>::uninit();
-        let out_ptr = out.as_mut_ptr() as *mut A::View;
+        let mut out = core::mem::MaybeUninit::<[A::View<'a>; N]>::uninit();
+        let out_ptr = out.as_mut_ptr() as *mut A::View<'a>;
         let mut initialized = 0usize;
 
         while initialized < N {
@@ -104,7 +111,7 @@ where
         Ok(unsafe { out.assume_init() })
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

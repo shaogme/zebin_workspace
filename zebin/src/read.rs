@@ -5,21 +5,21 @@ use crate::prelude::*;
 pub struct ZebinReader<'a, T, S, H = ArchiveHeader>
 where
     T: Archive,
-    T::Archived: Decode<'a>,
+    T::Archived: Decode + 'a,
     S: Storage,
     H: ArchiveHeaderTrait,
 {
     storage: S,
     offset: usize,
     config: ValidationConfig,
-    current_view: Option<<T::Archived as Decode<'a>>::View>,
+    current_view: Option<<T::Archived as Decode>::View<'a>>,
     _phantom: core::marker::PhantomData<(T, H, &'a S)>,
 }
 
 impl<'a, T, S, H> ZebinReader<'a, T, S, H>
 where
     T: Archive,
-    T::Archived: Decode<'a>,
+    T::Archived: Decode + 'a,
     S: Storage,
     H: ArchiveHeaderTrait,
 {
@@ -41,7 +41,7 @@ where
         self.offset >= self.storage.as_slice().len()
     }
 
-    pub fn read(&mut self) -> Result<&<T::Archived as Decode<'a>>::View, ZebinError> {
+    pub fn read(&mut self) -> Result<&<T::Archived as Decode>::View<'a>, ZebinError> {
         let bytes: &'a [u8] = unsafe {
             let slice = self.storage.as_slice();
             core::slice::from_raw_parts(slice.as_ptr(), slice.len())
@@ -66,7 +66,7 @@ where
 
     pub fn decode(storage: S) -> Result<T, ZebinError>
     where
-        <T::Archived as Decode<'a>>::View: Restore<T>,
+        <T::Archived as Decode>::View<'a>: Restore<T>,
     {
         let mut reader = Self::new(storage, ValidationConfig::default())?;
         let view = reader.read()?;
@@ -85,15 +85,15 @@ where
     }
 }
 
-fn validate_root<'a, T>(
-    bytes: &'a [u8],
+fn validate_root<T>(
+    bytes: &[u8],
     root_pos: usize,
     config: ValidationConfig,
     mut stack: Option<&mut ValidationPathStack>,
 ) -> Result<(), ZebinError>
 where
     T: Archive,
-    T::Archived: Decode<'a>,
+    T::Archived: Decode,
 {
     let mut cursor = Cursor::new(bytes, root_pos);
     let (result, error_path) = {
@@ -115,11 +115,11 @@ where
     result.map_err(Into::into)
 }
 
-fn validate_root_object_encoding<'a, T, H>(header: &H) -> Result<(), ZebinError>
+fn validate_root_object_encoding<T, H>(header: &H) -> Result<(), ZebinError>
 where
     T: Archive,
     H: ArchiveHeaderTrait,
-    T::Archived: Decode<'a>,
+    T::Archived: Decode,
 {
     let actual = ObjectEncoding::from_byte(header.flags()).ok_or(
         crate::error::ParseHeaderError::InvalidObjectEncoding {

@@ -50,13 +50,20 @@ impl ArchivedLayout for ArchivedString {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
 }
 
-impl<'a> Decode<'a> for ArchivedString {
-    type View = ArchivedStringView<'a>;
+impl Decode for ArchivedString {
+    type View<'a>
+        = ArchivedStringView<'a>
+    where
+        Self: 'a;
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self::View, DecodeError>
+    fn decode<'a, C>(
+        cursor: &mut Cursor<'a>,
+        context: &mut C,
+    ) -> Result<Self::View<'a>, DecodeError>
     where
         C: ValidationContext + ?Sized,
+        Self: 'a,
     {
         let pos = cursor.pos();
         let len = cursor.read_u32(context)? as usize;
@@ -66,7 +73,7 @@ impl<'a> Decode<'a> for ArchivedString {
         Ok(ArchivedStringView { value })
     }
 
-    fn validate<C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
     where
         C: ValidationContext + ?Sized,
     {

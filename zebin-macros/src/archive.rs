@@ -139,7 +139,7 @@ fn decode_known_field(
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
             __entry.check_decodable(__entry_pos, #expected_encoding, #field_var.is_some(), &mut *__field_guard)?;
             let mut __field_cursor = zebin::io::Cursor::new(__payload, 0);
-            let __value = <#archived_ty as zebin::Decode<'a>>::decode(&mut __field_cursor, &mut *__field_guard)?;
+            let __value = <#archived_ty as zebin::Decode>::decode(&mut __field_cursor, &mut *__field_guard)?;
             __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #field_var = ::core::option::Option::Some(__value);
             Ok(())
@@ -162,7 +162,7 @@ fn validate_known_field(
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
             __entry.check_decodable(__entry_pos, #expected_encoding, #seen_expr, &mut *__field_guard)?;
             let mut __field_cursor = zebin::io::Cursor::new(__payload, 0);
-            <#archived_ty as zebin::Decode<'a>>::validate(&mut __field_cursor, &mut *__field_guard)?;
+            <#archived_ty as zebin::Decode>::validate(&mut __field_cursor, &mut *__field_guard)?;
             __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
             #seen_expr = true;
             Ok(())
@@ -263,14 +263,18 @@ fn record_decode_impl(
         quote! {
             #layout
 
-            impl<'a> zebin::Decode<'a> for #marker {
-                type View = #view<'a>;
+            impl zebin::Decode for #marker {
+                type View<'a>
+                    = #view<'a>
+                where
+                    Self: 'a;
                 #[cfg(feature = "alloc")]
                 type DecodeStrategy = zebin::io::BackwardSequenceStrategy;
 
-                fn decode<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::error::DecodeError>
+                fn decode<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::DecodeError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
+                    Self: 'a
                 {
                     let mut __guard = context.guard()?;
                     let __object_start = cursor.pos();
@@ -299,7 +303,7 @@ fn record_decode_impl(
                     })
                 }
 
-                fn validate<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
+                fn validate<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
                 {
@@ -332,7 +336,7 @@ fn record_decode_impl(
             quote! {
                 let #local = {
                     let mut __field_guard = __guard.push_field(stringify!(#name));
-                    <#archived_ty as zebin::Decode<'a>>::decode(cursor, &mut *__field_guard)?
+                    <#archived_ty as zebin::Decode>::decode(cursor, &mut *__field_guard)?
                 };
             }
         });
@@ -342,7 +346,7 @@ fn record_decode_impl(
             quote! {
                 {
                     let mut __field_guard = __guard.push_field(stringify!(#name));
-                    <#archived_ty as zebin::Decode<'a>>::validate(cursor, &mut *__field_guard)?;
+                    <#archived_ty as zebin::Decode>::validate(cursor, &mut *__field_guard)?;
                 }
             }
         });
@@ -368,20 +372,24 @@ fn record_decode_impl(
         quote! {
             #layout
 
-            impl<'a> zebin::Decode<'a> for #marker {
-                type View = #view<'a>;
+            impl zebin::Decode for #marker {
+                type View<'a>
+                    = #view<'a>
+                where
+                    Self: 'a;
                 #[cfg(feature = "alloc")]
                 type DecodeStrategy = zebin::io::ForwardSequenceStrategy;
-                fn decode<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::error::DecodeError>
+                fn decode<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::DecodeError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
+                    Self: 'a
                 {
                     let mut __guard = context.guard()?;
                     #(#decodes)*
                     Ok(#construct)
                 }
 
-                fn validate<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
+                fn validate<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
                 {
@@ -536,7 +544,7 @@ fn enum_impl(
                 quote! {
                     #tag => {
                         let mut __variant_guard = __guard.push_variant(stringify!(#view_variant));
-                        Ok(#view::#view_variant(<#helper_marker as zebin::Decode<'a>>::decode(cursor, &mut *__variant_guard)?))
+                        Ok(#view::#view_variant(<#helper_marker as zebin::Decode>::decode(cursor, &mut *__variant_guard)?))
                     }
                 }
             }
@@ -556,7 +564,7 @@ fn enum_impl(
                 quote! {
                     #tag => {
                         let mut __variant_guard = __guard.push_variant(stringify!(#view_variant));
-                        <#helper_marker as zebin::Decode<'a>>::validate(cursor, &mut *__variant_guard)
+                        <#helper_marker as zebin::Decode>::validate(cursor, &mut *__variant_guard)
                     }
                 }
             }
@@ -664,30 +672,34 @@ fn enum_impl(
 
         impl zebin::io::ArchivedLayout for #marker {}
 
-        impl<'a> zebin::Decode<'a> for #marker {
-            type View = #view<'a>;
+        impl zebin::Decode for #marker {
+            type View<'a>
+                = #view<'a>
+            where
+                Self: 'a;
             #[cfg(feature = "alloc")]
             type DecodeStrategy = zebin::io::ForwardSequenceStrategy;
-            fn decode<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View, zebin::error::DecodeError>
+            fn decode<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::DecodeError>
             where
                 C: zebin::validation::ValidationContext + ?Sized,
+                Self: 'a
             {
                 let mut __guard = context.guard()?;
                 let __tag_pos = cursor.pos();
-                let tag = <u32 as zebin::Decode<'a>>::decode(cursor, &mut *__guard)?;
+                let tag = <u32 as zebin::Decode>::decode(cursor, &mut *__guard)?;
                 match tag {
                     #(#decode_arms,)*
                     _ => Err(__guard.validation_error("Invalid enum discriminant", __tag_pos)),
                 }
             }
 
-            fn validate<C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
+            fn validate<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::DecodeError>
             where
                 C: zebin::validation::ValidationContext + ?Sized,
             {
                 let mut __guard = context.guard()?;
                 let __tag_pos = cursor.pos();
-                let tag = <u32 as zebin::Decode<'a>>::decode(cursor, &mut *__guard)?;
+                let tag = <u32 as zebin::Decode>::decode(cursor, &mut *__guard)?;
                 match tag {
                     #(#validate_arms,)*
                     _ => Err(__guard.validation_error("Invalid enum discriminant", __tag_pos)),
