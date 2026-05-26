@@ -149,3 +149,88 @@ fn test_iter_archive_no_alloc() {
     assert_eq!(iter.next().unwrap().unwrap(), 30);
     assert!(iter.next().is_none());
 }
+
+#[cfg(feature = "alloc")]
+#[test]
+fn test_consecutive_values() {
+    let users = vec![
+        UserProfile {
+            id: 101,
+            username: "Alice".to_string(),
+        },
+        UserProfile {
+            id: 102,
+            username: "Bob".to_string(),
+        },
+        UserProfile {
+            id: 103,
+            username: "Charlie".to_string(),
+        },
+    ];
+
+    let mut buf = Vec::new();
+    for user in &users {
+        let encoded = zebin::encode(user).unwrap();
+        buf.extend_from_slice(&encoded);
+    }
+
+    let mut iter = zebin::prelude::iter_reader::<UserProfile>(&buf);
+
+    let u1 = iter.next().unwrap().unwrap();
+    assert_eq!(u1.id, 101);
+    assert_eq!(unsafe { u1.username.as_str() }, "Alice");
+
+    let u2 = iter.next().unwrap().unwrap();
+    assert_eq!(u2.id, 102);
+    assert_eq!(unsafe { u2.username.as_str() }, "Bob");
+
+    let u3 = iter.next().unwrap().unwrap();
+    assert_eq!(u3.id, 103);
+    assert_eq!(unsafe { u3.username.as_str() }, "Charlie");
+
+    assert!(iter.next().is_none());
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn test_consecutive_writer_and_reader() {
+    let users = vec![
+        UserProfile {
+            id: 101,
+            username: "Alice".to_string(),
+        },
+        UserProfile {
+            id: 102,
+            username: "Bob".to_string(),
+        },
+        UserProfile {
+            id: 103,
+            username: "Charlie".to_string(),
+        },
+    ];
+
+    use zebin::io::VecEncoder;
+    let mut encoder = VecEncoder::new(0);
+
+    for user in &users {
+        let mut writer_obj = writer::<&UserProfile, _>(&mut encoder).unwrap();
+        writer_obj.write_all(user).unwrap();
+    }
+
+    let buf = encoder.into_inner();
+    let mut iter = zebin::prelude::iter_reader::<UserProfile>(&buf);
+
+    let u1 = iter.next().unwrap().unwrap();
+    assert_eq!(u1.id, 101);
+    assert_eq!(unsafe { u1.username.as_str() }, "Alice");
+
+    let u2 = iter.next().unwrap().unwrap();
+    assert_eq!(u2.id, 102);
+    assert_eq!(unsafe { u2.username.as_str() }, "Bob");
+
+    let u3 = iter.next().unwrap().unwrap();
+    assert_eq!(u3.id, 103);
+    assert_eq!(unsafe { u3.username.as_str() }, "Charlie");
+
+    assert!(iter.next().is_none());
+}

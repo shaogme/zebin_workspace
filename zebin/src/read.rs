@@ -1,152 +1,6 @@
 use crate::io::Storage;
-use crate::{prelude::*, utils::padding_for_alignment};
+use crate::prelude::*;
 use core::ops::Deref;
-
-/// Borrowed cursor into an archive byte slice.
-#[derive(Clone, Copy)]
-pub struct Cursor<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Cursor<'a> {
-    pub fn new(bytes: &'a [u8], pos: usize) -> Self {
-        Self { bytes, pos }
-    }
-
-    pub fn bytes(&self) -> &'a [u8] {
-        self.bytes
-    }
-
-    pub fn pos(&self) -> usize {
-        self.pos
-    }
-
-    pub fn remaining(&self) -> usize {
-        self.bytes.len().saturating_sub(self.pos)
-    }
-
-    pub fn with_pos(&self, pos: usize) -> Self {
-        Self {
-            bytes: self.bytes,
-            pos,
-        }
-    }
-
-    pub fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let end = self
-            .pos
-            .checked_add(len)
-            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
-        context.check_range(self.pos, len)?;
-        self.pos = end;
-        Ok(())
-    }
-
-    pub fn align<C>(
-        &mut self,
-        alignment: core::num::NonZeroUsize,
-        context: &mut C,
-    ) -> Result<(), DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let padding = padding_for_alignment(self.pos, alignment);
-        self.advance(padding, context)
-    }
-
-    pub fn read_exact<C>(&mut self, len: usize, context: &mut C) -> Result<&'a [u8], DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let start = self.pos;
-        self.advance(len, context)?;
-        Ok(&self.bytes[start..start + len])
-    }
-
-    pub fn peek_exact<C>(&self, len: usize, context: &mut C) -> Result<&'a [u8], DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        context.check_range(self.pos, len)?;
-        Ok(&self.bytes[self.pos..self.pos + len])
-    }
-
-    fn read_fixed<const N: usize, C>(&mut self, context: &mut C) -> Result<&'a [u8; N], DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let start = self.pos;
-        self.advance(N, context)?;
-        Ok(self.bytes[start..self.pos].try_into().unwrap())
-    }
-
-    pub fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(*self.read_fixed::<N, C>(context)?)
-    }
-
-    pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(self.read_fixed::<1, C>(context)?[0])
-    }
-
-    pub fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(u16::from_le_bytes(*self.read_fixed::<2, C>(context)?))
-    }
-
-    pub fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(u32::from_le_bytes(*self.read_fixed::<4, C>(context)?))
-    }
-
-    pub fn read_i8<C>(&mut self, context: &mut C) -> Result<i8, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(self.read_u8(context)? as i8)
-    }
-
-    pub fn read_i16<C>(&mut self, context: &mut C) -> Result<i16, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(i16::from_le_bytes(*self.read_fixed::<2, C>(context)?))
-    }
-
-    pub fn read_i32<C>(&mut self, context: &mut C) -> Result<i32, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(i32::from_le_bytes(*self.read_fixed::<4, C>(context)?))
-    }
-
-    pub fn read_u64<C>(&mut self, context: &mut C) -> Result<u64, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(u64::from_le_bytes(*self.read_fixed::<8, C>(context)?))
-    }
-
-    pub fn read_i64<C>(&mut self, context: &mut C) -> Result<i64, DecodeError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        Ok(i64::from_le_bytes(*self.read_fixed::<8, C>(context)?))
-    }
-}
 
 /// Safe access layer output that keeps the validated byte slice alive.
 pub struct ZebinReader<'a, T: Archive, H: ArchiveHeaderTrait = ArchiveHeader>
@@ -207,6 +61,11 @@ where
             header,
             root,
         })
+    }
+
+    /// Create an iterator reader for reading consecutive archived objects from the storage.
+    pub fn iter<S: Storage + ?Sized>(storage: &'a S) -> ZebinIter<'a, T, H> {
+        ZebinIter::new(storage, ValidationConfig::default())
     }
 
     pub fn decode<S: Storage + ?Sized>(storage: &'a S) -> Result<T, ZebinError>
@@ -290,5 +149,75 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.root
+    }
+}
+
+/// Iterator for reading consecutive archived objects from the storage (like jsonl).
+pub struct ZebinIter<'a, T: Archive, H: ArchiveHeaderTrait = ArchiveHeader>
+where
+    T::Archived: Decode<'a>,
+{
+    bytes: &'a [u8],
+    offset: usize,
+    config: ValidationConfig,
+    _phantom: core::marker::PhantomData<(T, H)>,
+}
+
+impl<'a, T: Archive, H: ArchiveHeaderTrait> ZebinIter<'a, T, H>
+where
+    T::Archived: Decode<'a>,
+{
+    pub fn new(storage: &'a (impl Storage + ?Sized), config: ValidationConfig) -> Self {
+        Self {
+            bytes: storage.as_slice(),
+            offset: 0,
+            config,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, T: Archive, H: ArchiveHeaderTrait> Iterator for ZebinIter<'a, T, H>
+where
+    T::Archived: Decode<'a>,
+{
+    type Item = Result<ZebinReader<'a, T, H>, ZebinError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset >= self.bytes.len() {
+            return None;
+        }
+
+        let remaining = &self.bytes[self.offset..];
+        if remaining.is_empty() {
+            return None;
+        }
+
+        let header = match H::parse(remaining) {
+            Ok(h) => h,
+            Err(e) => return Some(Err(e.into())),
+        };
+
+        if let Err(e) = validate_root_object_encoding::<T, H>(&header) {
+            return Some(Err(e));
+        }
+
+        let mut validator = Validator::with_config(remaining, self.config, None);
+        let mut cursor = Cursor::new(remaining, H::SIZE);
+
+        let root = match T::Archived::decode(&mut cursor, &mut validator) {
+            Ok(r) => r,
+            Err(e) => return Some(Err(e.into())),
+        };
+
+        let consumed = cursor.pos();
+        let chunk_bytes = &remaining[..consumed];
+        self.offset += consumed;
+
+        Some(Ok(ZebinReader {
+            bytes: chunk_bytes,
+            header,
+            root,
+        }))
     }
 }

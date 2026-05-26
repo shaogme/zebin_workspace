@@ -1,5 +1,5 @@
 #[cfg(any(feature = "alloc", feature = "std"))]
-use crate::{error::ZebinError, prelude::*, read_impl::Cursor};
+use crate::{error::ZebinError, prelude::*};
 
 #[cfg(feature = "alloc")]
 use alloc::{

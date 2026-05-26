@@ -44,8 +44,8 @@ pub mod prelude {
         io::{
             Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
             ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
-            SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut, ZebinReader, ZebinWriter,
-            decode, reader, writer,
+            SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut, ZebinIter, ZebinReader,
+            ZebinWriter, decode, iter_reader, reader, writer,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -104,10 +104,10 @@ pub mod io {
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
     pub use crate::io_impl::storage::{Storage, StorageMut};
-    pub use crate::pub_fn::{decode, reader, writer};
+    pub use crate::pub_fn::{decode, iter_reader, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};
-    pub use crate::read_impl::{Cursor, ZebinReader};
+    pub use crate::read_impl::{ZebinIter, ZebinReader};
     pub use crate::traits_impl::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
         ArchivedLayout, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware,
@@ -118,6 +118,7 @@ pub mod io {
         BackwardSequenceStrategy, FixedSequenceStrategy, ForwardSequenceStrategy,
         SequenceDecodeStrategy,
     };
+    pub use crate::utils::cursor::Cursor;
     pub use crate::write::{ArchiveWriter, ZebinWriter};
 }
 
@@ -128,7 +129,7 @@ pub mod error {
 
 pub use crate::archive_impl::ArchivedOption;
 pub use crate::error::ZebinError;
-pub use crate::read_impl::ZebinReader;
+pub use crate::read_impl::{ZebinIter, ZebinReader};
 pub use crate::traits_impl::{Archive, Decode, Encode, MeasureBody};
 pub use crate::write::ZebinWriter;
 
@@ -202,6 +203,15 @@ mod pub_fn {
         T::Archived: ArchivedLayout,
     {
         ZebinWriter::new(sink)
+    }
+
+    /// Create an iterator reader for reading consecutive archived objects from the storage.
+    pub fn iter_reader<'a, T>(storage: &'a (impl Storage + ?Sized)) -> ZebinIter<'a, T>
+    where
+        T: Archive,
+        T::Archived: Decode<'a>,
+    {
+        ZebinReader::iter(storage)
     }
 
     #[cfg(feature = "alloc")]
