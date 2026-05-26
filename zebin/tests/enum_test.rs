@@ -1,13 +1,13 @@
 use zebin::{ZebinArchive, ZebinEncode, ZebinError};
 
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 enum UnitMode {
     Idle,
     Busy,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 enum TuplePacket {
     Empty,
     #[zebin(schema_key = 573785173)]
@@ -15,7 +15,7 @@ enum TuplePacket {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 enum StructPacket {
     Ping,
     #[zebin(schema_key = 1432778632)]
@@ -28,7 +28,7 @@ enum StructPacket {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 enum RecursiveNode {
     Leaf,
     Branch { children: Vec<RecursiveNode> },
@@ -41,7 +41,7 @@ fn test_unit_enum_round_trip() {
     let value = UnitMode::Busy;
 
     let mut buf = [0u8; 64];
-    let mut writer = zebin::encode_chunked(&value).unwrap();
+    let mut writer = zebin::encode_chunked(value).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();
@@ -63,7 +63,7 @@ fn test_tuple_enum_round_trip() {
     let empty = TuplePacket::Empty;
     assert!(matches!(empty, TuplePacket::Empty));
     let value = TuplePacket::Data(7, "packet".to_string());
-    let buf = zebin::encode(&value).unwrap();
+    let buf = zebin::encode(value).unwrap();
     let reader = zebin::reader::<TuplePacket>(&buf).unwrap();
     let archived = reader.root();
     assert!(!archived.is_empty());
@@ -85,7 +85,7 @@ fn test_struct_enum_round_trip() {
         code: 42,
         label: "hello".to_string(),
     };
-    let buf = zebin::encode(&value).unwrap();
+    let buf = zebin::encode(value).unwrap();
     let reader = zebin::reader::<StructPacket>(&buf).unwrap();
     let archived = reader.root();
     assert_eq!(archived.tag(), 1);
@@ -102,7 +102,7 @@ fn test_invalid_enum_discriminant() {
     let value = UnitMode::Idle;
 
     let mut buf = [0u8; 64];
-    let mut writer = zebin::encode_chunked(&value).unwrap();
+    let mut writer = zebin::encode_chunked(value).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();
@@ -126,7 +126,7 @@ fn test_invalid_enum_discriminant() {
 #[test]
 fn test_truncated_enum_payload_rejected() {
     let value = TuplePacket::Data(11, "cut".to_string());
-    let mut buf = zebin::encode(&value).unwrap();
+    let mut buf = zebin::encode(value).unwrap();
     buf.pop();
 
     assert!(zebin::validate::<TuplePacket>(&buf).is_err());
@@ -142,7 +142,7 @@ fn test_recursive_enum_depth_limit() {
         };
     }
 
-    let buf = zebin::encode(&current).unwrap();
+    let buf = zebin::encode(current).unwrap();
     let err = zebin::validate::<RecursiveNode>(&buf).unwrap_err();
     assert!(matches!(
         err,
@@ -157,7 +157,7 @@ fn test_enum_layout_mismatch_rejected() {
         code: 7,
         label: "layout".to_string(),
     };
-    let mut buf = zebin::encode(&value).unwrap();
+    let mut buf = zebin::encode(value).unwrap();
 
     let object_pos = 4 + 4;
     let label_encoding_pos = object_pos + 12 + 14 + 8 + 2;

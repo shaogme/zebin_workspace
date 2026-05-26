@@ -4,11 +4,16 @@ use syn::{DeriveInput, Ident};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, active_fields_by_id, field_encoding, field_len_ident,
-    field_state_type, has_schema, input_member, parse_item, state_name, variant_state_name,
+    field_state_type, has_schema, parse_item, state_name, variant_state_name,
 };
 
 fn field_started_ident(field: &crate::shared::FieldSpec<'_>) -> Ident {
     format_ident!("__started_{}", field.state_ident)
+}
+
+/// Identifier for the per-field `Option<FieldTy>` slot that holds destructured input.
+fn field_slot_ident(field: &crate::shared::FieldSpec<'_>) -> Ident {
+    format_ident!("__slot_{}", field.state_ident)
 }
 
 fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
@@ -26,6 +31,12 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
         fields.push(quote! { pub #state_ident: #state_ty });
         let started_ident = field_started_ident(field);
         fields.push(quote! { pub #started_ident: bool });
+        let slot_ident = field_slot_ident(field);
+        let ty = field.ty;
+        // Always store the destructured field as Option<FieldTy>.
+        // For packed wrappers, field is consumed via .as_ref() into a wrapper
+        // each poll iteration so we keep the Option populated for the duration.
+        fields.push(quote! { pub #slot_ident: ::core::option::Option<#ty> });
         if has_schema(record) {
             let len_ident = field_len_ident(record, index);
             fields.push(quote! { pub #len_ident: u32 });
@@ -36,31 +47,32 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     fields
 }
 
-fn field_user_ident(record: &RecordSpec<'_>, index: usize) -> Ident {
-    let field = &record.fields[index];
-    if let Some(rename) = &field.rename {
-        return rename.clone();
-    }
-    match record.style {
-        RecordStyle::Named => field.ident.expect("named field has ident").clone(),
-        RecordStyle::Unnamed => format_ident!("field{}", index),
-        RecordStyle::Unit => unreachable!("unit has no fields"),
-    }
-}
-
-fn field_measure_expr_for_value(
+/// Build expression that produces `usize` for the encoded length of a field.
+/// Walks via `MeasureBody` (no encoder, no consumption).
+fn field_measure_expr(
     field: &crate::shared::FieldSpec<'_>,
     value: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    if let Some(wrapper) = crate::shared::packed_wrapper_type_expr(field) {
-        quote! {
-            {
-                let __zebin_wrapped = <#wrapper>::new(#value.as_ref());
-                zebin::measure_serialized_len(&__zebin_wrapped)?
+    if let Some((kind, bits)) = crate::shared::packed::packed_info_pub(field) {
+        match kind {
+            crate::shared::packed::PackedElementKind::Bool => quote! {
+                {
+                    let __zebin_packed_len = (#value).len();
+                    4usize + __zebin_packed_len.div_ceil(8)
+                }
+            },
+            crate::shared::packed::PackedElementKind::U8 => {
+                let bits_lit = bits as usize;
+                quote! {
+                    {
+                        let __zebin_packed_len = (#value).len();
+                        4usize + (__zebin_packed_len * #bits_lit).div_ceil(8)
+                    }
+                }
             }
         }
     } else {
-        quote! { zebin::measure_serialized_len(#value)? }
+        quote! { zebin::MeasureBody::measure_body(#value)? }
     }
 }
 
@@ -76,9 +88,11 @@ fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     for (index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
         let started_ident = field_started_ident(field);
+        let slot_ident = field_slot_ident(field);
         inits.push(quote! { #started_ident: false });
+        inits.push(quote! { #slot_ident: ::core::option::Option::None });
         if let Some(_wrapper) = crate::shared::packed_wrapper_type_expr(field) {
-            inits.push(quote! { #state_ident: zebin::archive::PackedSequenceEncoder::new_empty() });
+            inits.push(quote! { #state_ident: ::core::default::Default::default() });
         } else {
             let ty = field.ty;
             inits.push(quote! { #state_ident: <#ty as zebin::Encode>::encoder() });
@@ -93,12 +107,67 @@ fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     inits
 }
 
-fn record_poll_logic(
+/// Generate `let pat = item;` destructuring for struct or variant.
+fn destructure_pattern(
     record: &RecordSpec<'_>,
-    input_ty_bare: &Ident,
-    is_variant: bool,
-    variant_ident: Option<&Ident>,
+    type_path: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
+    let binders: Vec<_> = record
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let user_id = field_user_ident_for(record, index, field);
+            match record.style {
+                RecordStyle::Named => {
+                    let field_ident = field.ident.expect("named field has ident");
+                    if field.skip {
+                        quote! { #field_ident: _ }
+                    } else if *field_ident == user_id {
+                        quote! { #user_id }
+                    } else {
+                        quote! { #field_ident: #user_id }
+                    }
+                }
+                RecordStyle::Unnamed => {
+                    if field.skip {
+                        quote! { _ }
+                    } else {
+                        quote! { #user_id }
+                    }
+                }
+                RecordStyle::Unit => unreachable!(),
+            }
+        })
+        .collect();
+
+    match record.style {
+        RecordStyle::Named => quote! { #type_path { #(#binders),* } },
+        RecordStyle::Unnamed => quote! { #type_path(#(#binders),*) },
+        RecordStyle::Unit => quote! { #type_path },
+    }
+}
+
+fn field_user_ident_for(
+    record: &RecordSpec<'_>,
+    index: usize,
+    field: &crate::shared::FieldSpec<'_>,
+) -> Ident {
+    if let Some(rename) = &field.rename {
+        return rename.clone();
+    }
+    match record.style {
+        RecordStyle::Named => field.ident.expect("named field has ident").clone(),
+        RecordStyle::Unnamed => format_ident!("field{}", index),
+        RecordStyle::Unit => unreachable!("unit has no fields"),
+    }
+}
+
+/// Builds the body of `poll_pending` after the input has been destructured into
+/// per-field slots. Each field block:
+/// - if not started: `take()` from slot, call `state.input(val, encoder)`;
+/// - if started: call `state.poll_pending(encoder)`.
+fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let fields = active_fields_by_id(record);
     let field_count = fields.len();
 
@@ -130,54 +199,25 @@ fn record_poll_logic(
         quote! {}
     };
 
-    let payload_polls = fields.iter().map(|(index, field)| {
+    let payload_polls = fields.iter().map(|(_, field)| {
         let state_ident = &field.state_ident;
         let started_ident = field_started_ident(field);
-        let len_ident = field_len_ident(record, *index);
+        let slot_ident = field_slot_ident(field);
 
-        let val_expr = if is_variant {
-            let var_ident = field_user_ident(record, *index);
-            if let Some(wrapper) = crate::shared::packed_wrapper_type_expr(field) {
-                quote! { <#wrapper>::new(#var_ident.as_ref()) }
-            } else {
-                quote! { #var_ident }
-            }
-        } else {
-            let member = input_member(record, *index);
-            if let Some(wrapper) = crate::shared::packed_wrapper_type_expr(field) {
-                quote! { <#wrapper>::new(__item.#member.as_ref()) }
-            } else {
-                quote! { &__item.#member }
-            }
-        };
-
-        let measure_expr = if is_variant {
-            let var_ident = field_user_ident(record, *index);
-            field_measure_expr_for_value(field, quote! { #var_ident })
-        } else {
-            let member = input_member(record, *index);
-            field_measure_expr_for_value(field, quote! { &__item.#member })
-        };
-
-        let len_measure_stmt = if has_schema(record) {
+        // Build the value expression we hand to state.input(...). For packed
+        // wrappers we wrap the slot's owned contents into the owned wrapper
+        // (PackedBoolVec / PackedU8Vec) which is moved by value.
+        let input_val_expr = if let Some(wrapper) = crate::shared::packed_wrapper_type_expr(field) {
             quote! {
-                self.#len_ident = {
-                    let __zebin_len = #measure_expr;
-                    u32::try_from(__zebin_len).map_err(|_| zebin::ZebinError::SerializationError {
-                        pos: encoder.pos(),
-                        message: "field payload length exceeds u32 range",
-                    })?
-                };
+                <#wrapper>::new(self.#slot_ident.take().expect("packed field already consumed"))
             }
         } else {
-            quote! {}
+            quote! { self.#slot_ident.take().expect("field already consumed") }
         };
 
         quote! {
             if !self.#started_ident {
-                #len_measure_stmt
-                let __val = #val_expr;
-                match self.#state_ident.input(__val, encoder)? {
+                match self.#state_ident.input(#input_val_expr, encoder)? {
                     ::core::task::Poll::Pending => {
                         self.#started_ident = true;
                         return Ok(::core::task::Poll::Pending);
@@ -253,106 +293,87 @@ fn record_poll_logic(
         quote! {}
     };
 
-    if is_variant {
-        let variant_ident = variant_ident.expect("variant_ident present if is_variant");
-        let binders: Vec<_> = record
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(index, field)| {
-                let ident = field_user_ident(record, index);
-                match record.style {
-                    RecordStyle::Named => {
-                        let field_ident = field.ident.expect("named field has ident");
-                        if field.skip {
-                            quote! { #field_ident: _ }
-                        } else if *field_ident == ident {
-                            quote! { #ident }
-                        } else {
-                            quote! { #field_ident: #ident }
-                        }
-                    }
-                    RecordStyle::Unnamed => {
-                        if field.skip {
-                            quote! { _ }
-                        } else {
-                            quote! { #ident }
-                        }
-                    }
-                    RecordStyle::Unit => unreachable!(),
-                }
-            })
-            .collect();
-
-        let pattern = match record.style {
-            RecordStyle::Named => quote! { #input_ty_bare::#variant_ident { #(#binders),* } },
-            RecordStyle::Unnamed => quote! { #input_ty_bare::#variant_ident(#(#binders),*) },
-            RecordStyle::Unit => quote! { #input_ty_bare::#variant_ident },
-        };
-
-        quote! {
-            match __item {
-                #pattern => {
-                    #header_write
-                    #(#payload_polls)*
-                    #table_write_and_len
-                    Ok(::core::task::Poll::Ready(()))
-                }
-                _ => unsafe { ::core::hint::unreachable_unchecked() }
-            }
-        }
-    } else {
-        quote! {
-            #header_write
-            #(#payload_polls)*
-            #table_write_and_len
-            Ok(::core::task::Poll::Ready(()))
-        }
+    quote! {
+        #header_write
+        #(#payload_polls)*
+        #table_write_and_len
+        Ok(::core::task::Poll::Ready(()))
     }
 }
 
 fn record_state_def(
     vis: &syn::Visibility,
     state_name: &Ident,
-    input_ty_bare: &Ident,
     record: &RecordSpec<'_>,
 ) -> proc_macro2::TokenStream {
     let fields = state_field_decls(record);
     quote! {
         #vis struct #state_name<'a> {
             pub _marker: ::core::marker::PhantomData<&'a ()>,
-            pub __item: Option<&'a #input_ty_bare>,
             #(#fields,)*
         }
     }
 }
 
-fn record_state_impl(
+/// Generates the `Encoder` impl for a record state struct.
+///
+/// On `input(item)`:
+/// 1. destructure `item` into per-field locals;
+/// 2. for each schema field, call `MeasureBody::measure_body` on the local
+///    (or via packed wrapper) and store into `#len_ident`;
+/// 3. move each local into its slot;
+/// 4. delegate to `poll_pending`.
+fn record_state_input_impl(
     state_name: &Ident,
-    input_ty_bare: &Ident,
+    input_ty: proc_macro2::TokenStream,
+    destructure_target: proc_macro2::TokenStream,
     record: &RecordSpec<'_>,
-    is_variant: bool,
-    variant_ident: Option<&Ident>,
 ) -> proc_macro2::TokenStream {
-    let logic = record_poll_logic(record, input_ty_bare, is_variant, variant_ident);
-    let finishes = record.active_fields().map(|(index, _)| {
-        let state_ident = &record.fields[index].state_ident;
+    let logic = record_poll_logic(record);
+    let pattern = destructure_pattern(record, destructure_target);
+
+    // Build measure-and-store steps.
+    let mut measure_and_store: Vec<proc_macro2::TokenStream> = Vec::new();
+    for (index, field) in record.active_fields() {
+        let user_id = field_user_ident_for(record, index, field);
+        let slot_ident = field_slot_ident(field);
+
+        if has_schema(record) {
+            let len_ident = field_len_ident(record, index);
+            let measure_expr = field_measure_expr(field, quote! { &#user_id });
+            measure_and_store.push(quote! {
+                {
+                    let __zebin_len = #measure_expr;
+                    self.#len_ident = u32::try_from(__zebin_len).map_err(|_| zebin::ZebinError::SerializationError {
+                        pos: 0,
+                        message: "field payload length exceeds u32 range",
+                    })?;
+                }
+            });
+        }
+        measure_and_store.push(quote! {
+            self.#slot_ident = ::core::option::Option::Some(#user_id);
+        });
+    }
+
+    let finishes = record.active_fields().map(|(_, field)| {
+        let state_ident = &field.state_ident;
         quote! {
             let _ = self.#state_ident.finish(sink)?;
         }
     });
     quote! {
-        impl<'a> zebin::io::Encoder<'a> for #state_name<'a> {
-            type Input = &'a #input_ty_bare;
+        impl<'a> zebin::io::Encoder for #state_name<'a> {
+            type Input = #input_ty;
             fn input<S: zebin::io::ByteSink + ?Sized>(&mut self, item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
-                self.__item = Some(item);
+                #[allow(irrefutable_let_patterns)]
+                let #pattern = item else {
+                    unsafe { ::core::hint::unreachable_unchecked() }
+                };
+                #(#measure_and_store)*
                 self.poll_pending(sink)
             }
             fn poll_pending<E: zebin::io::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
-                let __item = self.__item.ok_or(zebin::ZebinError::SerializationError {
-                    pos: encoder.pos(),
-                    message: "encoder polled before input",
-                })?;
                 #logic
             }
             fn finish<S: zebin::io::ByteSink + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
@@ -369,20 +390,78 @@ fn struct_impl(
     record: &RecordSpec<'_>,
 ) -> proc_macro2::TokenStream {
     let s_name = state_name(name);
-    let state_def = record_state_def(vis, &s_name, name, record);
-    let state_impl = record_state_impl(&s_name, name, record, false, None);
+    let state_def = record_state_def(vis, &s_name, record);
+    let state_impl = record_state_input_impl(&s_name, quote! { #name }, quote! { #name }, record);
     let inits = state_init(record);
+
+    let measure_body_impl = struct_measure_body_impl(name, record);
+
     quote! {
         #state_def
         #state_impl
         impl zebin::Encode for #name {
+            type Input<'a> = #name where Self: 'a;
             type Encoder<'a> = #s_name<'a> where Self: 'a;
             fn encoder<'a>() -> Self::Encoder<'a> where Self: 'a {
                 #s_name {
                     _marker: ::core::marker::PhantomData,
-                    __item: None,
                     #(#inits,)*
                 }
+            }
+        }
+        #measure_body_impl
+    }
+}
+
+fn struct_measure_body_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
+    let fields = active_fields_by_id(record);
+    let mut sums: Vec<proc_macro2::TokenStream> = Vec::new();
+    let schema = has_schema(record);
+
+    if schema {
+        // 12 bytes header + N * FieldEntry::SIZE table + 4 bytes table_offset + 4 bytes total_len.
+        sums.push(quote! { 12usize });
+        let n = fields.len();
+        sums.push(quote! { (#n) * zebin::schema::FieldEntry::SIZE });
+        sums.push(quote! { 4usize });
+        sums.push(quote! { 4usize });
+    }
+
+    for (index, field) in &fields {
+        let member = match record.style {
+            RecordStyle::Named => {
+                let ident = field.ident.expect("named field has ident");
+                quote! { self.#ident }
+            }
+            RecordStyle::Unnamed => {
+                let idx = syn::Index::from(*index);
+                quote! { self.#idx }
+            }
+            RecordStyle::Unit => continue,
+        };
+        let measure = field_measure_expr(field, quote! { &#member });
+        sums.push(measure);
+    }
+
+    if sums.is_empty() {
+        return quote! {
+            impl zebin::MeasureBody for #name {
+                fn measure_body(&self) -> Result<usize, zebin::ZebinError> {
+                    Ok(0)
+                }
+            }
+        };
+    }
+
+    quote! {
+        impl zebin::MeasureBody for #name {
+            fn measure_body(&self) -> Result<usize, zebin::ZebinError> {
+                let mut __total: usize = 0;
+                #(
+                    __total = __total.checked_add(#sums)
+                        .ok_or(zebin::ZebinError::ArithmeticOverflow { pos: 0 })?;
+                )*
+                Ok(__total)
             }
         }
     }
@@ -395,28 +474,32 @@ fn enum_impl(
 ) -> proc_macro2::TokenStream {
     let enum_state = state_name(name);
     let payload_state = format_ident!("{}ArchivePayloadState", name);
+
+    // Emit per-variant state structs (only for variants with fields).
     let variant_state_defs: Vec<_> = variants
         .iter()
         .filter(|variant| variant.record.style != RecordStyle::Unit)
         .map(|variant| {
             let state_ident = variant_state_name(name, variant.ident);
-            record_state_def(vis, &state_ident, name, &variant.record)
+            record_state_def(vis, &state_ident, &variant.record)
         })
         .collect();
+
     let variant_state_impls: Vec<_> = variants
         .iter()
         .filter(|variant| variant.record.style != RecordStyle::Unit)
         .map(|variant| {
             let state_ident = variant_state_name(name, variant.ident);
-            record_state_impl(
+            let variant_ident = variant.ident;
+            record_state_input_impl(
                 &state_ident,
-                name,
+                quote! { #name },
+                quote! { #name::#variant_ident },
                 &variant.record,
-                true,
-                Some(variant.ident),
             )
         })
         .collect();
+
     let payload_variants: Vec<_> = variants
         .iter()
         .filter(|variant| variant.record.style != RecordStyle::Unit)
@@ -426,6 +509,7 @@ fn enum_impl(
             quote! { #ident(#state_ident<'a>) }
         })
         .collect();
+
     let payload_polls: Vec<_> = variants
         .iter()
         .filter(|variant| variant.record.style != RecordStyle::Unit)
@@ -434,6 +518,7 @@ fn enum_impl(
             quote! { #payload_state::#ident(state) => state.poll_pending(encoder) }
         })
         .collect();
+
     let payload_finishes: Vec<_> = variants
         .iter()
         .filter(|variant| variant.record.style != RecordStyle::Unit)
@@ -452,15 +537,9 @@ fn enum_impl(
         })
         .collect();
 
-    let payload_assign_arms: Vec<_> = variants
-        .iter()
-        .filter(|variant| variant.record.style != RecordStyle::Unit)
-        .map(|variant| {
-            let ident = variant.ident;
-            quote! { #payload_state::#ident(state) => { state.__item = ::core::option::Option::Some(item); } }
-        })
-        .collect();
-
+    // For each variant, when we see this variant in `input`, set up its tag
+    // and a fresh payload state. Note: payload_assign_arms used to populate
+    // `__item: Option<&T>` — that field no longer exists, so we drop those.
     let begin_matches: Vec<_> = variants
         .iter()
         .enumerate()
@@ -477,7 +556,6 @@ fn enum_impl(
                     #name::#variant_ident { .. } => {
                         let __variant_state = #state_ident {
                             _marker: ::core::marker::PhantomData,
-                            __item: None,
                             #(#inits,)*
                         };
                         (#tag, Some(#payload_state::#variant_ident(__variant_state)))
@@ -487,7 +565,6 @@ fn enum_impl(
                     #name::#variant_ident( .. ) => {
                         let __variant_state = #state_ident {
                             _marker: ::core::marker::PhantomData,
-                            __item: None,
                             #(#inits,)*
                         };
                         (#tag, Some(#payload_state::#variant_ident(__variant_state)))
@@ -496,6 +573,8 @@ fn enum_impl(
             }
         })
         .collect();
+
+    let measure_body_impl = enum_measure_body_impl(name, variants);
 
     quote! {
         #(#variant_state_defs)*
@@ -506,8 +585,8 @@ fn enum_impl(
             #(#payload_variants,)*
         }
 
-        impl<'a> zebin::io::Encoder<'a> for #payload_state<'a> {
-            type Input = &'a #name;
+        impl<'a> zebin::io::Encoder for #payload_state<'a> {
+            type Input = #name;
             fn input<S: zebin::io::ByteSink + ?Sized>(&mut self, item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
@@ -532,24 +611,18 @@ fn enum_impl(
             tag: [u8; 4],
             tag_cursor: usize,
             payload: Option<#payload_state<'a>>,
-            __item: Option<&'a #name>,
+            pending_item: Option<#name>,
         }
 
-        impl<'a> zebin::io::Encoder<'a> for #enum_state<'a> {
-            type Input = &'a #name;
+        impl<'a> zebin::io::Encoder for #enum_state<'a> {
+            type Input = #name;
             fn input<S: zebin::io::ByteSink + ?Sized>(&mut self, item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
-                self.__item = Some(item);
-                let (tag_val, payload_val) = match item {
+                let (tag_val, payload_val) = match &item {
                     #(#begin_matches,)*
                 };
                 self.tag = tag_val.to_le_bytes();
                 self.payload = payload_val;
-                if let Some(payload) = &mut self.payload {
-                    match payload {
-                        #payload_state::__Never(_) => {},
-                        #(#payload_assign_arms,)*
-                    }
-                }
+                self.pending_item = Some(item);
                 self.poll_pending(sink)
             }
             fn poll_pending<E: zebin::io::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
@@ -563,6 +636,12 @@ fn enum_impl(
                     }
                 }
                 if let Some(payload) = &mut self.payload {
+                    if let Some(item) = self.pending_item.take() {
+                        match payload.input(item, encoder)? {
+                            ::core::task::Poll::Pending => return Ok(::core::task::Poll::Pending),
+                            ::core::task::Poll::Ready(()) => return Ok(::core::task::Poll::Ready(())),
+                        }
+                    }
                     match payload.poll_pending(encoder)? {
                         ::core::task::Poll::Pending => Ok(::core::task::Poll::Pending),
                         ::core::task::Poll::Ready(()) => {
@@ -583,13 +662,98 @@ fn enum_impl(
         }
 
         impl zebin::Encode for #name {
+            type Input<'a> = #name where Self: 'a;
             type Encoder<'a> = #enum_state<'a> where Self: 'a;
             fn encoder<'a>() -> Self::Encoder<'a> where Self: 'a {
                 #enum_state {
                     tag: [0; 4],
                     tag_cursor: 0,
                     payload: None,
-                    __item: None,
+                    pending_item: None,
+                }
+            }
+        }
+
+        #measure_body_impl
+    }
+}
+
+fn enum_measure_body_impl(
+    name: &Ident,
+    variants: &[crate::shared::VariantSpec<'_>],
+) -> proc_macro2::TokenStream {
+    // Each variant: 4 bytes tag + sum of field measures (with schema overhead if applicable).
+    let arms = variants.iter().map(|variant| {
+        let variant_ident = variant.ident;
+        let record = &variant.record;
+
+        let mut sums: Vec<proc_macro2::TokenStream> = Vec::new();
+        if has_schema(record) {
+            let n = record.active_fields().count();
+            sums.push(quote! { 12usize });
+            sums.push(quote! { (#n) * zebin::schema::FieldEntry::SIZE });
+            sums.push(quote! { 4usize });
+            sums.push(quote! { 4usize });
+        }
+
+        let bindings = record
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| {
+                let user_id = field_user_ident_for(record, index, field);
+                match record.style {
+                    RecordStyle::Named => {
+                        let field_ident = field.ident.expect("named field has ident");
+                        if field.skip {
+                            quote! { #field_ident: _ }
+                        } else if *field_ident == user_id {
+                            quote! { #user_id }
+                        } else {
+                            quote! { #field_ident: #user_id }
+                        }
+                    }
+                    RecordStyle::Unnamed => {
+                        if field.skip {
+                            quote! { _ }
+                        } else {
+                            quote! { #user_id }
+                        }
+                    }
+                    RecordStyle::Unit => quote! {},
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for (index, field) in record.active_fields() {
+            let user_id = field_user_ident_for(record, index, field);
+            let measure = field_measure_expr(field, quote! { #user_id });
+            sums.push(measure);
+        }
+
+        let pattern = match record.style {
+            RecordStyle::Unit => quote! { #name::#variant_ident },
+            RecordStyle::Named => quote! { #name::#variant_ident { #(#bindings),* } },
+            RecordStyle::Unnamed => quote! { #name::#variant_ident( #(#bindings),* ) },
+        };
+
+        quote! {
+            #pattern => {
+                let mut __total: usize = 4;
+                #(
+                    __total = __total.checked_add(#sums)
+                        .ok_or(zebin::ZebinError::ArithmeticOverflow { pos: 0 })?;
+                )*
+                Ok(__total)
+            }
+        }
+    });
+
+    quote! {
+        impl zebin::MeasureBody for #name {
+            fn measure_body(&self) -> Result<usize, zebin::ZebinError> {
+                match self {
+                    #(#arms,)*
                 }
             }
         }

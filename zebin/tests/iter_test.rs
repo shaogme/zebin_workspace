@@ -10,7 +10,7 @@ fn test_iter_archive_btreeset() {
     set.insert(30u64);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(&wrapped).expect("failed to encode");
+    let bytes = zebin::encode(wrapped).expect("failed to encode");
 
     let decoded: Vec<u64> = zebin::decode::<Vec<u64>>(&bytes).expect("failed to decode");
     assert_eq!(decoded, vec![10, 20, 30]);
@@ -23,7 +23,7 @@ fn test_iter_archive_hashset() {
     set.insert(100u32);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(&wrapped).expect("failed to encode");
+    let bytes = zebin::encode(wrapped).expect("failed to encode");
 
     let mut decoded: Vec<u32> = zebin::decode::<Vec<u32>>(&bytes).expect("failed to decode");
     decoded.sort();
@@ -37,7 +37,7 @@ fn test_iter_archive_lazy() {
     set.insert(200u64);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(&wrapped).expect("failed to encode");
+    let bytes = zebin::encode(wrapped).expect("failed to encode");
 
     // 不做 Restore，直接获取零拷贝延迟反序列化视图
     let reader =
@@ -59,7 +59,7 @@ fn test_iter_archive_restore_explicit() {
     set.insert(200u64);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(&wrapped).expect("failed to encode");
+    let bytes = zebin::encode(wrapped).expect("failed to encode");
 
     let reader =
         zebin::reader::<IterArchive<BTreeSet<u64>, u64>>(&bytes).expect("failed to create reader");

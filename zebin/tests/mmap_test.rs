@@ -12,7 +12,7 @@ use zebin::prelude::{
     MmapEncoder, MmapMut, Storage, ZebinArchive, ZebinEncode, ZebinError,
 };
 
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 pub struct MmapUser {
     pub id: u64,
     pub name: String,
@@ -34,10 +34,11 @@ fn open_writable_mmap(path: &Path, len: usize) -> MmapMut {
     MmapMut::create(path, len as u64).expect("create writable mmap")
 }
 
-fn drive_to_mmap<T>(value: &T, encoder: &mut MmapEncoder) -> Result<(), ZebinError>
+fn drive_to_mmap<T>(value: T, encoder: &mut MmapEncoder) -> Result<(), ZebinError>
 where
-    T: Encode,
+    T: Encode + 'static,
     T::Archived: ArchivedLayout,
+    T: for<'a> Encode<Input<'a> = T>,
 {
     let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
     encoder.write(header.encode().as_ref())?;
@@ -56,7 +57,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
         id: 7,
         name: "Mika".to_string(),
     };
-    let buf = zebin::encode(&user)?;
+    let buf = zebin::encode(user)?;
 
     let path = temp_archive_path();
     fs::write(&path, &buf)?;
@@ -78,7 +79,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_mmap_is_read_only_for_extend() -> Result<(), Box<dyn std::error::Error>> {
-    let buf = zebin::encode(&MmapUser {
+    let buf = zebin::encode(MmapUser {
         id: 1,
         name: "read-only".to_string(),
     })?;
@@ -106,7 +107,7 @@ fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::er
     let mmap_mut = open_writable_mmap(&path, expected.len());
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    drive_to_mmap(&user, &mut encoder)?;
+    drive_to_mmap(user, &mut encoder)?;
     assert_eq!(encoder.written(), expected.len());
     assert_eq!(encoder.pos(), expected.len());
     encoder.flush()?;
@@ -137,7 +138,7 @@ fn test_mmap_encoder_matches_vec_encode() -> Result<(), Box<dyn std::error::Erro
     let mmap_mut = open_writable_mmap(&path, expected.len());
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    drive_to_mmap(&user, &mut encoder)?;
+    drive_to_mmap(user, &mut encoder)?;
     encoder.flush()?;
     drop(encoder);
 
@@ -161,7 +162,7 @@ fn test_mmap_encoder_overflow_returns_buffer_too_small() -> Result<(), Box<dyn s
     let mmap_mut = open_writable_mmap(&path, expected.len() - 1);
 
     let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    let result = drive_to_mmap(&user, &mut encoder);
+    let result = drive_to_mmap(user, &mut encoder);
     match result {
         Err(ZebinError::BufferTooSmall { .. }) => {}
         other => panic!("expected BufferTooSmall, got {other:?}"),

@@ -5,7 +5,7 @@ use crate::{
     prelude::*,
 };
 
-use super::super::iter::IterEncoder;
+use super::super::iter::OwnedIterEncoder;
 
 impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
     fn pos(&self) -> usize {
@@ -119,8 +119,8 @@ where
     }
 }
 
-pub type VecEncoder<'a, T> = IterEncoder<'a, [T], T, Vec<T>>;
-pub type VecDequeEncoder<'a, T> = IterEncoder<'a, VecDeque<T>, T, VecDeque<T>>;
+pub type VecEncoder<'a, T> = OwnedIterEncoder<'a, Vec<T>, T>;
+pub type VecDequeEncoder<'a, T> = OwnedIterEncoder<'a, VecDeque<T>, T>;
 
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
@@ -130,7 +130,12 @@ impl<T> Encode for Vec<T>
 where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = Vec<T>
+    where
+        Self: 'a;
     type Encoder<'a>
         = VecEncoder<'a, T>
     where
@@ -144,6 +149,46 @@ where
     }
 }
 
+impl<T> MeasureBody for Vec<T>
+where
+    T: MeasureBody + Archive,
+    T::Archived: ArchivedLayout,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        measure_seq_body::<T>(self.iter())
+    }
+}
+
+pub(crate) fn measure_seq_body<'a, T>(
+    items: impl Iterator<Item = &'a T>,
+) -> Result<usize, ZebinError>
+where
+    T: MeasureBody + Archive + 'a,
+    T::Archived: ArchivedLayout,
+{
+    let mut pos = 0usize;
+    let alignment = <T::Archived as ArchivedLayout>::ALIGNMENT.get();
+    let fixed = <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some();
+    for item in items {
+        pos = pos
+            .checked_add(1)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        if fixed {
+            let pad = (alignment - (pos % alignment)) % alignment;
+            pos = pos
+                .checked_add(pad)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        }
+        pos = pos
+            .checked_add(item.measure_body()?)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+    }
+    pos = pos
+        .checked_add(1)
+        .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+    Ok(pos)
+}
+
 impl<T: Archive> Archive for VecDeque<T>
 where
     T: Archive,
@@ -155,7 +200,12 @@ impl<T> Encode for VecDeque<T>
 where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = VecDeque<T>
+    where
+        Self: 'a;
     type Encoder<'a>
         = VecDequeEncoder<'a, T>
     where
@@ -166,6 +216,16 @@ where
         Self: 'a,
     {
         VecDequeEncoder::new()
+    }
+}
+
+impl<T> MeasureBody for VecDeque<T>
+where
+    T: MeasureBody + Archive,
+    T::Archived: ArchivedLayout,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        measure_seq_body::<T>(self.iter())
     }
 }
 

@@ -2,10 +2,7 @@ pub mod encoder;
 
 use core::marker::PhantomData;
 
-use crate::{
-    prelude::*,
-    write::encoder::{MeasureEncoder, SliceEncoder},
-};
+use crate::{prelude::*, write::encoder::SliceEncoder};
 
 #[cfg(feature = "alloc")]
 use crate::write::encoder::VecEncoder;
@@ -35,15 +32,18 @@ where
 pub type ZebinWriter<'a, T> = ArchiveWriter<'a, T, ArchiveHeader>;
 
 /// Stateful archive writer that can stream into caller-provided buffers.
+///
+/// Owns the value being archived; the value is moved into the body encoder on
+/// the first `write` that enters the `Body` phase, after which the writer holds
+/// no reference to the original allocation.
 pub struct ArchiveWriter<'a, T, H = ArchiveHeader>
 where
     T: Encode + Archive + 'a,
     H: ArchiveHeaderTrait,
 {
-    value: &'a T,
+    value: Option<<T as Encode>::Input<'a>>,
     phase: EncodePhase<'a, T, H>,
     archive_pos: usize,
-    total_len: usize,
 }
 
 impl<'a, T, H> ArchiveWriter<'a, T, H>
@@ -52,23 +52,26 @@ where
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {
-    pub fn new(value: &'a T) -> Result<Self, ZebinError> {
-        let total_len = measure_total_len::<T, H>(value)?;
+    pub fn new(value: <T as Encode>::Input<'a>) -> Result<Self, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         Ok(Self {
-            value,
+            value: Some(value),
             phase: EncodePhase::Header {
                 bytes: header.encode(),
                 cursor: 0,
                 next_encoder: Some(T::encoder()),
             },
             archive_pos: 0,
-            total_len,
         })
     }
 
-    pub fn total_len(&self) -> usize {
-        self.total_len
+    /// Returns the total archive length when known statically.
+    ///
+    /// Pre-measurement was dropped together with the move-by-value transition;
+    /// only fixed-layout archives advertise their length up-front. Variable-size
+    /// archives return `None` and grow as bytes are produced.
+    pub fn total_len(&self) -> Option<usize> {
+        <T::Archived as ArchivedLayout>::FIXED_SIZE.map(|sz| H::SIZE + sz)
     }
 
     pub fn written(&self) -> usize {
@@ -111,12 +114,18 @@ where
                 }
                 EncodePhase::Body { encoder, started } => {
                     if !*started {
-                        match encoder.input(self.value, &mut encoder_sink)? {
+                        let value = self.value.take().ok_or(ZebinError::SerializationError {
+                            pos: encoder_sink.pos(),
+                            message: "archive writer used after value taken",
+                        })?;
+                        match encoder.input(value, &mut encoder_sink)? {
                             core::task::Poll::Pending => {
                                 *started = true;
                                 break;
                             }
-                            core::task::Poll::Ready(()) => {}
+                            core::task::Poll::Ready(()) => {
+                                *started = true;
+                            }
                         }
                     } else {
                         match encoder.poll_pending(&mut encoder_sink)? {
@@ -164,19 +173,19 @@ where
             if chunk == 0 && !self.is_finished() {
                 return Err(ZebinError::BufferTooSmall {
                     pos: self.archive_pos,
-                    required: self.total_len.saturating_sub(self.archive_pos),
+                    required: 0,
                 });
             }
         }
         Ok(total_written)
     }
 
-    pub fn encode_chunked(value: &'a T) -> Result<Self, ZebinError> {
+    pub fn encode_chunked(value: <T as Encode>::Input<'a>) -> Result<Self, ZebinError> {
         Self::new(value)
     }
 
     #[cfg(feature = "alloc")]
-    pub fn encode(value: &'a T) -> Result<Vec<u8>, ZebinError> {
+    pub fn encode(value: <T as Encode>::Input<'a>) -> Result<Vec<u8>, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         let mut encoder = VecEncoder::new(0);
         encoder.write(header.encode().as_ref())?;
@@ -190,48 +199,19 @@ where
     }
 
     #[cfg(feature = "alloc")]
-    pub fn encode_into(value: &'a T, buf: &mut Vec<u8>) -> Result<(), ZebinError> {
+    pub fn encode_into(
+        value: <T as Encode>::Input<'a>,
+        buf: &mut Vec<u8>,
+    ) -> Result<(), ZebinError> {
         buf.clear();
         *buf = Self::encode(value)?;
         Ok(())
     }
 }
 
-fn measure_total_len<'a, T, H>(value: &'a T) -> Result<usize, ZebinError>
-where
-    T: Encode + Archive + 'a,
-    H: ArchiveHeaderTrait,
-    T::Archived: ArchivedLayout,
-{
-    let body_len = if let Some(fixed_size) = <T::Archived as ArchivedLayout>::FIXED_SIZE {
-        fixed_size
-    } else {
-        measure_body_len_from_pos(value, H::SIZE)?
-    };
-    H::SIZE
-        .checked_add(body_len)
-        .ok_or(ZebinError::ArithmeticOverflow { pos: H::SIZE })
-}
-
-pub(crate) fn measure_body_len_from_pos<T>(value: &T, start_pos: usize) -> Result<usize, ZebinError>
-where
-    T: Encode + Archive + ?Sized,
-{
-    let mut encoder = MeasureEncoder::new(start_pos);
-    let mut body_encoder = T::encoder();
-    if body_encoder.input(value, &mut encoder)?.is_pending() {
-        while body_encoder.poll_pending(&mut encoder)?.is_pending() {}
-    }
-    let _ = body_encoder.finish(&mut encoder)?;
-    encoder
-        .pos()
-        .checked_sub(start_pos)
-        .ok_or(ZebinError::ArithmeticOverflow { pos: start_pos })
-}
-
 pub fn measure_body_len<T>(value: &T) -> Result<usize, ZebinError>
 where
-    T: Encode + Archive + ?Sized,
+    T: MeasureBody + ?Sized,
 {
-    measure_body_len_from_pos(value, 0)
+    value.measure_body()
 }

@@ -7,53 +7,6 @@ use crate::{
     utils::{byteops, padding_for_alignment},
 };
 
-/// Measuring encoder that simulates writes.
-pub struct MeasureEncoder {
-    pos: usize,
-}
-
-impl MeasureEncoder {
-    pub fn new(pos: usize) -> Self {
-        Self { pos }
-    }
-}
-
-impl ByteSink for MeasureEncoder {
-    fn pos(&self) -> usize {
-        self.pos
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        let len = bytes.len();
-        self.pos = self
-            .pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
-        debug_assert!(len <= isize::MAX as usize);
-        Ok(SinkProgress::Complete)
-    }
-
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-        let align_val = alignment.get();
-        debug_assert!(align_val.is_power_of_two());
-        let padding = padding_for_alignment(self.pos, alignment);
-        self.pos = self
-            .pos
-            .checked_add(padding)
-            .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
-        debug_assert!(self.pos.is_multiple_of(alignment.get()));
-        Ok(SinkProgress::Complete)
-    }
-
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        self.pos = self
-            .pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos: self.pos })?;
-        Ok(SinkProgress::Complete)
-    }
-}
-
 /// Chunked encoder that writes into a caller-provided buffer slice.
 pub struct SliceEncoder<'a> {
     buf: &'a mut [u8],
@@ -145,14 +98,6 @@ impl VecEncoder {
     pub fn new(archive_pos: usize) -> Self {
         Self {
             buf: alloc::vec::Vec::new(),
-            archive_pos,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn with_capacity(capacity: usize, archive_pos: usize) -> Self {
-        Self {
-            buf: alloc::vec::Vec::with_capacity(capacity),
             archive_pos,
         }
     }

@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 use zebin::{ZebinArchive, ZebinEncode};
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 100)]
 pub struct CollectionContainer {
     #[zebin(id = 0)]

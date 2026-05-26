@@ -2,7 +2,7 @@
 use zebin::{ZebinArchive, ZebinEncode};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 0x100)]
 pub struct Version1 {
     #[zebin(id = 1)]
@@ -12,7 +12,7 @@ pub struct Version1 {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 0x100)]
 pub struct Version2 {
     #[zebin(id = 1)]
@@ -40,7 +40,7 @@ fn test_evolution_optional_and_default() {
         id: 42,
         name: "Alice".to_string(),
     };
-    let buf = zebin::encode(&v1).unwrap();
+    let buf = zebin::encode(v1).unwrap();
 
     let reader = zebin::reader::<Version2>(&buf).unwrap();
 
@@ -68,7 +68,7 @@ fn test_version2_with_all_fields() {
         age: 30,
         score: 95,
     };
-    let buf = zebin::encode(&v2).unwrap();
+    let buf = zebin::encode(v2).unwrap();
     let reader = zebin::reader::<Version2>(&buf).unwrap();
 
     assert_eq!(reader.id().unwrap(), &1);
@@ -82,7 +82,7 @@ fn test_version2_with_all_fields() {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 pub enum MessageV1 {
     #[zebin(schema_key = 0x201)]
     Login {
@@ -92,7 +92,7 @@ pub enum MessageV1 {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 pub enum MessageV2 {
     #[zebin(schema_key = 0x201)]
     Login {
@@ -109,7 +109,7 @@ fn test_enum_evolution() {
     let m1 = MessageV1::Login {
         user: "Alice".to_string(),
     };
-    let buf = zebin::encode(&m1).unwrap();
+    let buf = zebin::encode(m1).unwrap();
 
     let reader = zebin::reader::<MessageV2>(&buf).unwrap();
 

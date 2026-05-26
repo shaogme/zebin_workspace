@@ -114,7 +114,7 @@ impl<'a, I> PackedSequenceEncoder<'a, I> {
     }
 }
 
-impl<'a, I> Encoder<'a> for PackedSequenceEncoder<'a, I>
+impl<'a, I> Encoder for PackedSequenceEncoder<'a, I>
 where
     I: ToPackedData<'a>,
 {
@@ -180,6 +180,7 @@ where
 }
 
 /// Owned packed sequence wrapper.
+#[derive(Clone)]
 pub struct PackedVec<T, const BITS: u8> {
     values: Vec<T>,
 }
@@ -204,6 +205,18 @@ impl<T, const BITS: u8> PackedVec<T, BITS> {
 impl<T, const BITS: u8> From<Vec<T>> for PackedVec<T, BITS> {
     fn from(values: Vec<T>) -> Self {
         Self::new(values)
+    }
+}
+
+impl<T: Clone, const BITS: u8> From<&Vec<T>> for PackedVec<T, BITS> {
+    fn from(values: &Vec<T>) -> Self {
+        Self::new(values.clone())
+    }
+}
+
+impl<T: Clone, const BITS: u8> From<&[T]> for PackedVec<T, BITS> {
+    fn from(values: &[T]) -> Self {
+        Self::new(values.to_vec())
     }
 }
 
@@ -277,9 +290,92 @@ impl Archive for PackedVec<bool, 1> {
     type Archived = ArchivedPackedBoolSlice;
 }
 
+/// Owned-input encoder for `PackedVec<bool, 1>`.
+///
+/// Holds the vector while streaming; the inner `PackedSequenceEncoder`
+/// borrows from it via a self-referential pattern made safe by pinning the
+/// owner inside this struct.
+pub struct PackedBoolVecEncoder {
+    owner: Option<PackedVec<bool, 1>>,
+    bits: alloc::vec::Vec<u8>,
+    len_prefix: [u8; 4],
+    prefix_cursor: usize,
+    cursor: usize,
+}
+
+impl PackedBoolVecEncoder {
+    pub fn new() -> Self {
+        Self {
+            owner: None,
+            bits: alloc::vec::Vec::new(),
+            len_prefix: [0; 4],
+            prefix_cursor: 0,
+            cursor: 0,
+        }
+    }
+}
+
+impl Default for PackedBoolVecEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Encoder for PackedBoolVecEncoder {
+    type Input = PackedVec<bool, 1>;
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        let len = item.values().len() as u32;
+        // Eagerly pack into a Vec<u8>. Avoids the self-referential lifetime
+        // issue at the cost of one materialization pass.
+        let byte_len = (item.values().len()).div_ceil(8);
+        let mut bits = vec![0; byte_len];
+        for (i, b) in item.values().iter().enumerate() {
+            if *b {
+                bits[i / 8] |= 1 << (i % 8);
+            }
+        }
+        self.owner = Some(item);
+        self.bits = bits;
+        self.len_prefix = len.to_le_bytes();
+        self.prefix_cursor = 0;
+        self.cursor = 0;
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        if self.prefix_cursor < 4 {
+            let remaining = 4 - self.prefix_cursor;
+            if sink
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
+                return Ok(Poll::Pending);
+            }
+        }
+        let remaining = self.bits.len() - self.cursor;
+        Ok(sink
+            .write(&self.bits[self.cursor..])?
+            .advance_cursor(&mut self.cursor, remaining))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+}
+
 impl Encode for PackedVec<bool, 1> {
+    type Input<'a>
+        = PackedVec<bool, 1>
+    where
+        Self: 'a;
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, &'a PackedVec<bool, 1>>
+        = PackedBoolVecEncoder
     where
         Self: 'a;
 
@@ -287,7 +383,7 @@ impl Encode for PackedVec<bool, 1> {
     where
         Self: 'a,
     {
-        PackedSequenceEncoder::new_empty()
+        PackedBoolVecEncoder::new()
     }
 }
 
@@ -295,9 +391,108 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
 }
 
+/// Owned-input encoder for `PackedVec<u8, BITS>`.
+pub struct PackedU8VecEncoder<const BITS: u8> {
+    owner: Option<PackedVec<u8, BITS>>,
+    bits: alloc::vec::Vec<u8>,
+    len_prefix: [u8; 4],
+    prefix_cursor: usize,
+    cursor: usize,
+}
+
+impl<const BITS: u8> PackedU8VecEncoder<BITS> {
+    pub fn new() -> Self {
+        Self {
+            owner: None,
+            bits: alloc::vec::Vec::new(),
+            len_prefix: [0; 4],
+            prefix_cursor: 0,
+            cursor: 0,
+        }
+    }
+}
+
+impl<const BITS: u8> Default for PackedU8VecEncoder<BITS> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const BITS: u8> Encoder for PackedU8VecEncoder<BITS> {
+    type Input = PackedVec<u8, BITS>;
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        let len = item.values().len() as u32;
+        let bits_per_value = BITS as usize;
+        let total_bits = item
+            .values()
+            .len()
+            .checked_mul(bits_per_value)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        let byte_len = total_bits.div_ceil(8);
+        let mut bits = vec![0; byte_len];
+        let mask = if bits_per_value == 8 {
+            u8::MAX
+        } else {
+            (1u8 << bits_per_value) - 1
+        };
+        for (i, value) in item.values().iter().enumerate() {
+            let value = *value;
+            if value > mask {
+                return Err(ZebinError::SerializationError {
+                    pos: i,
+                    message: "Value exceeds packed bit capacity",
+                });
+            }
+            let bit_offset = i * bits_per_value;
+            let byte_idx = bit_offset / 8;
+            let bit_shift = bit_offset % 8;
+            bits[byte_idx] |= value << bit_shift;
+            if bit_shift + bits_per_value > 8 {
+                bits[byte_idx + 1] |= value >> (8 - bit_shift);
+            }
+        }
+        self.owner = Some(item);
+        self.bits = bits;
+        self.len_prefix = len.to_le_bytes();
+        self.prefix_cursor = 0;
+        self.cursor = 0;
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        if self.prefix_cursor < 4 {
+            let remaining = 4 - self.prefix_cursor;
+            if sink
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
+                return Ok(Poll::Pending);
+            }
+        }
+        let remaining = self.bits.len() - self.cursor;
+        Ok(sink
+            .write(&self.bits[self.cursor..])?
+            .advance_cursor(&mut self.cursor, remaining))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+}
+
 impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
+    type Input<'a>
+        = PackedVec<u8, BITS>
+    where
+        Self: 'a;
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, &'a PackedVec<u8, BITS>>
+        = PackedU8VecEncoder<BITS>
     where
         Self: 'a;
 
@@ -305,13 +500,17 @@ impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
     where
         Self: 'a,
     {
-        PackedSequenceEncoder::new_empty()
+        PackedU8VecEncoder::new()
     }
 }
 
 impl<'b> Encode for PackedSlice<'b, bool, 1> {
+    type Input<'a>
+        = PackedSlice<'b, bool, 1>
+    where
+        Self: 'a;
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, &'a PackedSlice<'b, bool, 1>>
+        = PackedSequenceEncoder<'a, PackedSlice<'b, bool, 1>>
     where
         Self: 'a;
 
@@ -324,8 +523,12 @@ impl<'b> Encode for PackedSlice<'b, bool, 1> {
 }
 
 impl<'b, const BITS: u8> Encode for PackedSlice<'b, u8, BITS> {
+    type Input<'a>
+        = PackedSlice<'b, u8, BITS>
+    where
+        Self: 'a;
     type Encoder<'a>
-        = PackedSequenceEncoder<'a, &'a PackedSlice<'b, u8, BITS>>
+        = PackedSequenceEncoder<'a, PackedSlice<'b, u8, BITS>>
     where
         Self: 'a;
 
@@ -334,6 +537,36 @@ impl<'b, const BITS: u8> Encode for PackedSlice<'b, u8, BITS> {
         Self: 'a,
     {
         PackedSequenceEncoder::new_empty()
+    }
+}
+
+impl MeasureBody for PackedVec<bool, 1> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        Ok(4 + self.values().len().div_ceil(8))
+    }
+}
+
+impl<const BITS: u8> MeasureBody for PackedVec<u8, BITS> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        let bits = (self.values().len())
+            .checked_mul(usize::from(BITS))
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        Ok(4 + bits.div_ceil(8))
+    }
+}
+
+impl<'b> MeasureBody for PackedSlice<'b, bool, 1> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        Ok(4 + self.values().len().div_ceil(8))
+    }
+}
+
+impl<'b, const BITS: u8> MeasureBody for PackedSlice<'b, u8, BITS> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        let bits = (self.values().len())
+            .checked_mul(usize::from(BITS))
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        Ok(4 + bits.div_ceil(8))
     }
 }
 

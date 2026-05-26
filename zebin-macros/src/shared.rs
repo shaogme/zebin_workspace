@@ -6,7 +6,7 @@ use syn::{
 };
 
 mod attrs;
-mod packed;
+pub mod packed;
 
 pub use packed::packed_wrapper_type_expr;
 
@@ -193,10 +193,10 @@ pub fn field_state_type(field: &FieldSpec<'_>) -> TokenStream {
     if let Some((kind, bits)) = packed::packed_info(field) {
         match kind {
             packed::PackedElementKind::Bool => {
-                quote! { zebin::archive::PackedSequenceEncoder<'a, zebin::archive::PackedSlice<'a, bool, 1>> }
+                quote! { zebin::archive::PackedBoolVecEncoder }
             }
             packed::PackedElementKind::U8 => {
-                quote! { zebin::archive::PackedSequenceEncoder<'a, zebin::archive::PackedSlice<'a, u8, #bits>> }
+                quote! { zebin::archive::PackedU8VecEncoder<#bits> }
             }
         }
     } else {

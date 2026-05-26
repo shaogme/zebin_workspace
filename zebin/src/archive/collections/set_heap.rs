@@ -2,15 +2,14 @@ use alloc::collections::{BTreeSet, BinaryHeap};
 
 use crate::prelude::*;
 
-use super::super::iter::IterEncoder;
-use super::vec::ArchivedVec;
+use super::super::iter::OwnedIterEncoder;
+use super::vec::{ArchivedVec, measure_seq_body};
 
-pub type BTreeSetEncoder<'a, T> = IterEncoder<'a, BTreeSet<T>, T, BTreeSet<T>>;
-pub type BinaryHeapEncoder<'a, T> = IterEncoder<'a, BinaryHeap<T>, T, BinaryHeap<T>>;
+pub type BTreeSetEncoder<'a, T> = OwnedIterEncoder<'a, BTreeSet<T>, T>;
+pub type BinaryHeapEncoder<'a, T> = OwnedIterEncoder<'a, BinaryHeap<T>, T>;
 
 #[cfg(feature = "std")]
-pub type HashSetEncoder<'a, T> =
-    IterEncoder<'a, std::collections::HashSet<T>, T, std::collections::HashSet<T>>;
+pub type HashSetEncoder<'a, T> = OwnedIterEncoder<'a, std::collections::HashSet<T>, T>;
 
 impl<T: Archive> Archive for BTreeSet<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
@@ -20,7 +19,12 @@ impl<T> Encode for BTreeSet<T>
 where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = BTreeSet<T>
+    where
+        Self: 'a;
     type Encoder<'a>
         = BTreeSetEncoder<'a, T>
     where
@@ -31,6 +35,16 @@ where
         Self: 'a,
     {
         BTreeSetEncoder::new()
+    }
+}
+
+impl<T> MeasureBody for BTreeSet<T>
+where
+    T: MeasureBody + Archive,
+    T::Archived: ArchivedLayout,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        measure_seq_body::<T>(self.iter())
     }
 }
 
@@ -70,7 +84,12 @@ impl<T> Encode for BinaryHeap<T>
 where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = BinaryHeap<T>
+    where
+        Self: 'a;
     type Encoder<'a>
         = BinaryHeapEncoder<'a, T>
     where
@@ -81,6 +100,16 @@ where
         Self: 'a,
     {
         BinaryHeapEncoder::new()
+    }
+}
+
+impl<T> MeasureBody for BinaryHeap<T>
+where
+    T: MeasureBody + Archive,
+    T::Archived: ArchivedLayout,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        measure_seq_body::<T>(self.iter())
     }
 }
 
@@ -122,7 +151,12 @@ impl<T> Encode for std::collections::HashSet<T>
 where
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = std::collections::HashSet<T>
+    where
+        Self: 'a;
     type Encoder<'a>
         = HashSetEncoder<'a, T>
     where
@@ -133,6 +167,17 @@ where
         Self: 'a,
     {
         HashSetEncoder::new()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T> MeasureBody for std::collections::HashSet<T>
+where
+    T: MeasureBody + Archive,
+    T::Archived: ArchivedLayout,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        measure_seq_body::<T>(self.iter())
     }
 }
 

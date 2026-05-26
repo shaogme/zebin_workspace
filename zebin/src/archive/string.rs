@@ -1,6 +1,7 @@
 use core::{marker::PhantomData, ops::Deref, str, task::Poll};
 
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 #[cfg(feature = "alloc")]
 use crate::io::ForwardSequenceStrategy;
@@ -107,11 +108,76 @@ impl<'a> ToBytesRef<'a> for &'a str {
     }
 }
 
-/// Resumable serialization state for `String` and `str`.
-pub struct StringEncoder<'a, T = str>
-where
-    T: ?Sized,
-{
+/// Resumable serialization state for an owned `String`.
+///
+/// On `input(String)`, the string is moved into the encoder via `into_bytes`,
+/// so the original allocation is owned by the encoder while it streams.
+pub struct StringEncoder {
+    bytes: Vec<u8>,
+    len_prefix: [u8; 4],
+    prefix_cursor: usize,
+    cursor: usize,
+}
+
+impl StringEncoder {
+    pub(crate) fn new_empty() -> Self {
+        Self {
+            bytes: Vec::new(),
+            len_prefix: [0; 4],
+            prefix_cursor: 0,
+            cursor: 0,
+        }
+    }
+}
+
+impl Default for StringEncoder {
+    fn default() -> Self {
+        Self::new_empty()
+    }
+}
+
+impl Encoder for StringEncoder {
+    type Input = String;
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        let bytes = item.into_bytes();
+        let len = bytes.len() as u32;
+        self.bytes = bytes;
+        self.len_prefix = len.to_le_bytes();
+        self.prefix_cursor = 0;
+        self.cursor = 0;
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        if self.prefix_cursor < self.len_prefix.len() {
+            let remaining = self.len_prefix.len() - self.prefix_cursor;
+            if sink
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
+                return Ok(Poll::Pending);
+            }
+        }
+
+        let remaining = self.bytes.len() - self.cursor;
+        Ok(sink
+            .write(&self.bytes[self.cursor..])?
+            .advance_cursor(&mut self.cursor, remaining))
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+}
+
+/// Resumable serialization state for borrowed string-like inputs (`&str`).
+pub struct StrEncoder<'a, T: ?Sized = str> {
     bytes: &'a [u8],
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -119,7 +185,7 @@ where
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T> StringEncoder<'a, T>
+impl<'a, T> StrEncoder<'a, T>
 where
     T: ?Sized,
 {
@@ -134,7 +200,7 @@ where
     }
 }
 
-impl<'a, T> Encoder<'a> for StringEncoder<'a, T>
+impl<'a, T> Encoder for StrEncoder<'a, T>
 where
     T: ?Sized,
     &'a T: ToBytesRef<'a>,
@@ -183,8 +249,12 @@ impl Archive for String {
 }
 
 impl Encode for String {
+    type Input<'a>
+        = String
+    where
+        Self: 'a;
     type Encoder<'a>
-        = StringEncoder<'a, String>
+        = StringEncoder
     where
         Self: 'a;
 
@@ -201,8 +271,12 @@ impl Archive for str {
 }
 
 impl Encode for str {
+    type Input<'a>
+        = &'a str
+    where
+        Self: 'a;
     type Encoder<'a>
-        = StringEncoder<'a, str>
+        = StrEncoder<'a, str>
     where
         Self: 'a;
 
@@ -210,7 +284,23 @@ impl Encode for str {
     where
         Self: 'a,
     {
-        StringEncoder::new_empty()
+        StrEncoder::new_empty()
+    }
+}
+
+impl MeasureBody for String {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        4usize
+            .checked_add(self.len())
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
+    }
+}
+
+impl MeasureBody for str {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        4usize
+            .checked_add(self.len())
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
     }
 }
 

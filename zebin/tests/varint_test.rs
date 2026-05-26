@@ -2,20 +2,20 @@
 
 use zebin::prelude::*;
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 pub struct VarIntStruct {
     pub a: u8,
     pub b: VarInt<u32>,
     pub c: u64,
 }
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 pub struct NestedVarInt {
     pub inner: VarIntStruct,
     pub count: VarInt<usize>,
 }
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 #[allow(dead_code)]
 enum VarIntEnum {
     Small(u8),
@@ -30,7 +30,7 @@ fn test_varint_struct_round_trip() {
         c: 1000,
     };
 
-    let buf = zebin::encode(&s).unwrap();
+    let buf = zebin::encode(s).unwrap();
     let archived = zebin::reader::<VarIntStruct>(&buf).unwrap();
 
     assert_eq!(archived.a, 10);
@@ -47,7 +47,7 @@ fn test_varint_boundaries() {
             b: VarInt::new(val),
             c: 2,
         };
-        let buf = zebin::encode(&s).unwrap();
+        let buf = zebin::encode(s).unwrap();
         let archived = zebin::reader::<VarIntStruct>(&buf).unwrap();
         assert_eq!(archived.b.get(), val);
     }
@@ -60,7 +60,7 @@ fn test_varint_u64_large() {
         b: VarInt::new(u32::MAX),
         c: 2,
     };
-    let buf = zebin::encode(&s).unwrap();
+    let buf = zebin::encode(s).unwrap();
     let archived = zebin::reader::<VarIntStruct>(&buf).unwrap();
     assert_eq!(archived.b.get(), u32::MAX);
 }
@@ -75,7 +75,7 @@ fn test_varint_usize() {
         },
         count: VarInt::new(12345678),
     };
-    let buf = zebin::encode(&s).unwrap();
+    let buf = zebin::encode(s).unwrap();
     let archived = zebin::reader::<NestedVarInt>(&buf).unwrap();
     assert_eq!(archived.count.get(), 12345678);
 }
@@ -83,7 +83,7 @@ fn test_varint_usize() {
 #[test]
 fn test_varint_enum_round_trip() {
     let e = VarIntEnum::Large(VarInt::new(0x123456789ABCDEF0));
-    let buf = zebin::encode(&e).unwrap();
+    let buf = zebin::encode(e).unwrap();
     let archived = zebin::reader::<VarIntEnum>(&buf).unwrap();
 
     assert_eq!(archived.tag(), 1);
@@ -94,7 +94,7 @@ fn test_varint_enum_round_trip() {
 #[test]
 fn test_varint_in_varint_vec() {
     let v = VarIntVec::new(vec![1u32, 300, 100000]);
-    let buf = zebin::encode(&v).unwrap();
+    let buf = zebin::encode(v).unwrap();
 
     let archived = zebin::reader::<VarIntVec<u32>>(&buf).unwrap();
 
@@ -107,9 +107,9 @@ fn test_varint_in_varint_vec() {
 #[test]
 fn test_varint_vec_compact() {
     let values = vec![1u32, 300, 100000, 0, 42];
-    let v = VarIntVec::new(values.clone());
+    let v = VarIntVec::new(&values);
 
-    let buf = zebin::encode(&v).unwrap();
+    let buf = zebin::encode(v).unwrap();
 
     // Check size:
     // Header (12) + Data (1+2+3+1+1=8) + Alignment + Offsets (6*4=24) + Layouts...

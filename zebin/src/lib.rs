@@ -42,8 +42,8 @@ pub mod prelude {
         error::{ArchiveError, DecodeError, ZebinError},
         io::{
             Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-            Cursor, Decode, Encode, Encoder, FixedLayout, Restore, SchemaAware, SinkProgress,
-            Storage, ZebinReader, ZebinWriter, decode, encode_chunked, reader,
+            Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware,
+            SinkProgress, Storage, ZebinReader, ZebinWriter, decode, encode_chunked, reader,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -71,7 +71,10 @@ pub mod archive {
     };
     #[cfg(feature = "alloc")]
     pub use crate::archive_impl::{
-        packed_vec::{PackedBoolVec, PackedSequenceEncoder, PackedU8Vec, PackedVec},
+        packed_vec::{
+            PackedBoolVec, PackedBoolVecEncoder, PackedSequenceEncoder, PackedU8Vec,
+            PackedU8VecEncoder, PackedVec,
+        },
         varint_vec::{PackedVarIntSlice, VarIntVec},
     };
 }
@@ -107,7 +110,7 @@ pub mod io {
     pub use crate::read_impl::{Cursor, ZebinReader};
     pub use crate::traits_impl::{
         Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-        Decode, Encode, Encoder, FixedLayout, Restore, SchemaAware, SinkProgress,
+        Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware, SinkProgress,
     };
     #[cfg(feature = "alloc")]
     pub use crate::traits_impl::{
@@ -127,7 +130,7 @@ pub mod error {
 // --- 根目录暴露的常用核心门面 API ---
 pub use crate::error::ZebinError;
 pub use crate::read_impl::ZebinReader;
-pub use crate::traits_impl::{Archive, Decode, Encode};
+pub use crate::traits_impl::{Archive, Decode, Encode, MeasureBody};
 pub use crate::write::ZebinWriter;
 
 pub use memoffset;
@@ -141,7 +144,7 @@ mod pub_fn {
     /// Measure the body length a value will occupy when serialized without the archive header.
     pub fn measure_serialized_len<T>(value: &T) -> Result<usize, ZebinError>
     where
-        T: Encode + Archive + ?Sized,
+        T: MeasureBody + ?Sized,
     {
         crate::write::measure_body_len(value)
     }
@@ -200,10 +203,11 @@ mod pub_fn {
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.
-    pub fn encode_chunked<T>(value: &T) -> Result<ZebinWriter<'_, T>, ZebinError>
+    pub fn encode_chunked<'a, T>(value: T) -> Result<ZebinWriter<'a, T>, ZebinError>
     where
-        T: Encode + Archive,
+        T: Encode + Archive + 'a,
         T::Archived: ArchivedLayout,
+        T: Encode<Input<'a> = T>,
     {
         ZebinWriter::encode_chunked(value)
     }
@@ -213,21 +217,23 @@ mod pub_fn {
 
     /// Archive a value into a newly allocated byte vector using the default header.
     #[cfg(feature = "alloc")]
-    pub fn encode<T>(value: &T) -> Result<Vec<u8>, ZebinError>
+    pub fn encode<'a, T>(value: T) -> Result<Vec<u8>, ZebinError>
     where
-        T: Encode + Archive,
+        T: Encode + Archive + 'a,
         T::Archived: ArchivedLayout,
+        T: Encode<Input<'a> = T>,
     {
-        ZebinWriter::encode(value)
+        ZebinWriter::<'a, T>::encode(value)
     }
 
     /// Archive a value into an existing vector using the default header.
     #[cfg(feature = "alloc")]
-    pub fn encode_into<T>(value: &T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
+    pub fn encode_into<'a, T>(value: T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
     where
-        T: Encode + Archive,
+        T: Encode + Archive + 'a,
         T::Archived: ArchivedLayout,
+        T: Encode<Input<'a> = T>,
     {
-        ZebinWriter::encode_into(value, buf)
+        ZebinWriter::<'a, T>::encode_into(value, buf)
     }
 }

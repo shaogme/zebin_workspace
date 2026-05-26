@@ -1,7 +1,9 @@
+use super::iter::SeqEncoder;
 #[cfg(feature = "alloc")]
 use crate::io::ForwardSequenceStrategy;
 use crate::prelude::*;
 use core::num::NonZeroUsize;
+use core::task::Poll;
 
 impl<T, const N: usize> FixedLayout for [T; N]
 where
@@ -119,9 +121,10 @@ pub struct ArrayEncoder<'a, T, const N: usize>
 where
     T: Encode + Archive + 'a,
 {
-    items: Option<&'a [T; N]>,
-    index: usize,
-    current_encoder: Option<(<T as Encode>::Encoder<'a>, bool)>,
+    items: Option<core::array::IntoIter<T, N>>,
+    item_encoder: <T as Encode>::Encoder<'a>,
+    started: bool,
+    awaiting_next: bool,
 }
 
 impl<'a, T, const N: usize> ArrayEncoder<'a, T, N>
@@ -131,24 +134,27 @@ where
     pub(crate) fn new() -> Self {
         Self {
             items: None,
-            index: 0,
-            current_encoder: None,
+            item_encoder: T::encoder(),
+            started: false,
+            awaiting_next: true,
         }
     }
 }
 
-impl<'a, T, const N: usize> Encoder<'a> for ArrayEncoder<'a, T, N>
+impl<'a, T, const N: usize> Encoder for ArrayEncoder<'a, T, N>
 where
-    T: Encode + Archive + 'a,
+    T: Encode<Input<'a> = T> + Archive + 'a,
 {
-    type Input = &'a [T; N];
+    type Input = [T; N];
 
     fn input<Sink: ByteSink + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.items = Some(item);
+        self.items = Some(item.into_iter());
+        self.started = true;
+        self.awaiting_next = true;
         self.poll_pending(sink)
     }
 
@@ -156,55 +162,58 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        let items = self.items.ok_or(ZebinError::SerializationError {
+        if !self.started {
+            return Err(ZebinError::SerializationError {
+                pos: sink.pos(),
+                message: "ArrayEncoder polled before input",
+            });
+        }
+        let iter = self.items.as_mut().ok_or(ZebinError::SerializationError {
             pos: sink.pos(),
-            message: "ArrayEncoder polled before input",
+            message: "ArrayEncoder iterator missing",
         })?;
-        while self.index < N {
-            if self.current_encoder.is_none() {
-                self.current_encoder = Some((T::encoder(), false));
-            }
-            let (encoder, started) = self
-                .current_encoder
-                .as_mut()
-                .expect("array item encoder initialized above");
-
-            let progress = if !*started {
-                match encoder.input(&items[self.index], sink)? {
-                    core::task::Poll::Pending => {
-                        *started = true;
-                        core::task::Poll::Pending
-                    }
-                    core::task::Poll::Ready(()) => core::task::Poll::Ready(()),
+        loop {
+            if self.awaiting_next {
+                match iter.next() {
+                    Some(item) => match self.item_encoder.input(item, sink)? {
+                        core::task::Poll::Pending => {
+                            self.awaiting_next = false;
+                            return Ok(core::task::Poll::Pending);
+                        }
+                        core::task::Poll::Ready(()) => {
+                            // ready immediately; loop to next item.
+                        }
+                    },
+                    None => return Ok(core::task::Poll::Ready(())),
                 }
             } else {
-                encoder.poll_pending(sink)?
-            };
-
-            match progress {
-                core::task::Poll::Pending => return Ok(core::task::Poll::Pending),
-                core::task::Poll::Ready(()) => {
-                    let (encoder, _) = self.current_encoder.take().expect("present");
-                    let _ = encoder.finish(sink)?;
-                    self.index += 1;
+                match self.item_encoder.poll_pending(sink)? {
+                    core::task::Poll::Pending => return Ok(core::task::Poll::Pending),
+                    core::task::Poll::Ready(()) => {
+                        self.awaiting_next = true;
+                    }
                 }
             }
         }
-        Ok(core::task::Poll::Ready(()))
     }
 
     fn finish<Sink: ByteSink + ?Sized>(
         self,
-        _sink: &mut Sink,
+        sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        Ok(core::task::Poll::Ready(()))
+        self.item_encoder.finish(sink)
     }
 }
 
 impl<T, const N: usize> Encode for [T; N]
 where
     T: Encode + Archive,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = [T; N]
+    where
+        Self: 'a;
     type Encoder<'a>
         = ArrayEncoder<'a, T, N>
     where
@@ -218,6 +227,21 @@ where
     }
 }
 
+impl<T, const N: usize> MeasureBody for [T; N]
+where
+    T: MeasureBody,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        let mut total = 0usize;
+        for item in self.iter() {
+            total = total
+                .checked_add(item.measure_body()?)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        }
+        Ok(total)
+    }
+}
+
 impl<T> Archive for [T]
 where
     T: Archive,
@@ -225,15 +249,108 @@ where
     type Archived = crate::archive::ArchivedIter<'static, T::Archived>;
 }
 
+/// Borrowed-iterator sequence encoder for DST inputs (`[T]`).
+///
+/// Each element is cloned out of the borrowed slice and fed to the owned
+/// `SeqEncoder<T>`. This intentionally requires `T: Clone`; the memory benefit
+/// only applies to the owned-collection path.
+pub struct RefIterEncoder<'a, S: ?Sized, T>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode + Archive + Clone + 'a,
+{
+    iter: Option<<&'a S as IntoIterator>::IntoIter>,
+    seq_encoder: SeqEncoder<'a, T>,
+}
+
+impl<'a, S: ?Sized, T> RefIterEncoder<'a, S, T>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode + Archive + Clone + 'a,
+{
+    pub fn new() -> Self {
+        Self {
+            iter: None,
+            seq_encoder: SeqEncoder::new(),
+        }
+    }
+}
+
+impl<'a, S: ?Sized, T> Default for RefIterEncoder<'a, S, T>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode + Archive + Clone + 'a,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a, S: ?Sized, T> Encoder for RefIterEncoder<'a, S, T>
+where
+    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    T: Encode<Input<'a> = T> + Archive + Clone + 'a,
+    T::Archived: ArchivedLayout,
+{
+    type Input = &'a S;
+
+    fn input<Sink: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.iter = Some(item.into_iter());
+        self.poll_pending(sink)
+    }
+
+    fn poll_pending<Sink: ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut Sink,
+    ) -> Result<Poll<()>, ZebinError> {
+        let iter = self.iter.as_mut().ok_or(ZebinError::SerializationError {
+            pos: sink.pos(),
+            message: "RefIterEncoder polled before input",
+        })?;
+        loop {
+            if self.seq_encoder.poll_pending(sink)?.is_pending() {
+                return Ok(Poll::Pending);
+            }
+
+            if self.seq_encoder.is_finished() {
+                return Ok(Poll::Ready(()));
+            }
+
+            if !self.seq_encoder.is_finished() {
+                if let Some(item) = iter.next() {
+                    if self.seq_encoder.input(item.clone(), sink)?.is_pending() {
+                        return Ok(Poll::Pending);
+                    }
+                } else {
+                    if self.seq_encoder.finish_ref(sink)?.is_pending() {
+                        return Ok(Poll::Pending);
+                    }
+                }
+            }
+        }
+    }
+
+    fn finish<Sink: ByteSink + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+        self.seq_encoder.finish(sink)
+    }
+}
+
 impl<T> Encode for [T]
 where
-    T: Encode + Archive,
+    T: Encode + Archive + Clone,
     T::Archived: ArchivedLayout,
-    for<'b> &'b [T]: IntoIterator<Item = &'b T>,
-    for<'b> <&'b [T] as IntoIterator>::IntoIter: ExactSizeIterator,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = &'a [T]
+    where
+        Self: 'a;
     type Encoder<'a>
-        = crate::archive::IterEncoder<'a, [T], T>
+        = RefIterEncoder<'a, [T], T>
     where
         Self: 'a;
 
@@ -241,6 +358,37 @@ where
     where
         Self: 'a,
     {
-        crate::archive::IterEncoder::new()
+        RefIterEncoder::new()
+    }
+}
+
+impl<T> MeasureBody for [T]
+where
+    T: MeasureBody,
+    T: ArchivedLayout,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        // Sequence layout: each element is (1 byte marker) + optional alignment padding + body, ended with a 0-byte sentinel.
+        let mut pos = 0usize;
+        let alignment = <T as ArchivedLayout>::ALIGNMENT.get();
+        let fixed = <T as ArchivedLayout>::FIXED_SIZE.is_some();
+        for item in self.iter() {
+            pos = pos
+                .checked_add(1)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+            if fixed {
+                let pad = (alignment - (pos % alignment)) % alignment;
+                pos = pos
+                    .checked_add(pad)
+                    .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+            }
+            pos = pos
+                .checked_add(item.measure_body()?)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        }
+        pos = pos
+            .checked_add(1)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        Ok(pos)
     }
 }

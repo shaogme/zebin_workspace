@@ -1,7 +1,7 @@
 use zebin::{ZebinArchive, ZebinEncode};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 pub struct UserProfile {
     pub id: u64,
     pub username: String,
@@ -14,7 +14,7 @@ fn test_basic_archive() {
         id: 42,
         username: "Alice".to_string(),
     };
-    let buf = zebin::encode(&user).unwrap();
+    let buf = zebin::encode(user).unwrap();
     let archived = zebin::reader::<UserProfile>(&buf).unwrap();
     assert_eq!(archived.id, 42);
     assert_eq!(unsafe { archived.username.as_str() }, "Alice");
@@ -30,7 +30,7 @@ fn test_encode_into_existing_buffer() {
 
     let expected = zebin::encode(&user).unwrap();
     let mut buf = vec![0xAA, 0xBB, 0xCC];
-    zebin::encode_into(&user, &mut buf).unwrap();
+    zebin::encode_into(user, &mut buf).unwrap();
 
     assert_eq!(buf, expected);
 }
@@ -44,7 +44,7 @@ fn test_chunked_writer_resume() {
     };
 
     let expected = zebin::encode(&user).unwrap();
-    let mut writer = zebin::ZebinWriter::new(&user).unwrap();
+    let mut writer = zebin::ZebinWriter::<&UserProfile>::new(&user).unwrap();
     let mut actual = Vec::new();
     let mut chunk = [0u8; 5];
 
@@ -58,7 +58,7 @@ fn test_chunked_writer_resume() {
     assert_eq!(actual, expected);
 }
 
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 pub struct SimpleUser {
     pub id: u64,
 }
@@ -67,7 +67,7 @@ pub struct SimpleUser {
 fn test_basic_no_alloc() {
     let user = SimpleUser { id: 42 };
     let mut buf = [0u8; 64];
-    let mut writer = zebin::encode_chunked(&user).unwrap();
+    let mut writer = zebin::encode_chunked(user).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();

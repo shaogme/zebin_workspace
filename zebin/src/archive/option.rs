@@ -124,10 +124,12 @@ pub struct OptionEncoder<'a, T>
 where
     T: Encode + Archive + 'a,
 {
-    value: Option<&'a T>,
+    value: Option<T>,
     prefix: [u8; 1],
     prefix_cursor: usize,
-    inner: Option<(<T as Encode>::Encoder<'a>, bool)>,
+    inner: <T as Encode>::Encoder<'a>,
+    inner_started: bool,
+    has_inner: bool,
 }
 
 impl<'a, T> OptionEncoder<'a, T>
@@ -139,16 +141,18 @@ where
             value: None,
             prefix: [0],
             prefix_cursor: 1,
-            inner: None,
+            inner: T::encoder(),
+            inner_started: false,
+            has_inner: false,
         }
     }
 }
 
-impl<'a, T> Encoder<'a> for OptionEncoder<'a, T>
+impl<'a, T> Encoder for OptionEncoder<'a, T>
 where
-    T: Encode + Archive + 'a,
+    T: Encode<Input<'a> = T> + Archive + 'a,
 {
-    type Input = &'a Option<T>;
+    type Input = Option<T>;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -160,13 +164,15 @@ where
                 self.value = Some(inner);
                 self.prefix = [1];
                 self.prefix_cursor = 0;
-                self.inner = Some((T::encoder(), false));
+                self.has_inner = true;
+                self.inner_started = false;
             }
             None => {
                 self.value = None;
                 self.prefix = [0];
                 self.prefix_cursor = 0;
-                self.inner = None;
+                self.has_inner = false;
+                self.inner_started = false;
             }
         }
         self.poll_pending(sink)
@@ -184,25 +190,19 @@ where
             }
         }
 
-        if let Some((encoder, started)) = &mut self.inner {
-            let progress = if !*started {
-                let item = self.value.expect("must be Some if inner is Some");
-                match encoder.input(item, sink)? {
-                    Poll::Pending => {
-                        *started = true;
-                        Poll::Pending
-                    }
-                    Poll::Ready(()) => Poll::Ready(()),
-                }
+        if self.has_inner {
+            let progress = if !self.inner_started {
+                let item = self.value.take().expect("must be Some if has_inner");
+                self.inner_started = true;
+                self.inner.input(item, sink)?
             } else {
-                encoder.poll_pending(sink)?
+                self.inner.poll_pending(sink)?
             };
 
             match progress {
                 Poll::Pending => Ok(Poll::Pending),
                 Poll::Ready(()) => {
-                    let (encoder, _) = self.inner.take().expect("present");
-                    let _ = encoder.finish(sink)?;
+                    self.has_inner = false;
                     Ok(Poll::Ready(()))
                 }
             }
@@ -211,8 +211,8 @@ where
         }
     }
 
-    fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
-        Ok(Poll::Ready(()))
+    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        self.inner.finish(sink)
     }
 }
 
@@ -226,7 +226,12 @@ where
 impl<T> Encode for Option<T>
 where
     T: Encode + Archive,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = Option<T>
+    where
+        Self: 'a;
     type Encoder<'a>
         = OptionEncoder<'a, T>
     where
@@ -237,5 +242,19 @@ where
         Self: 'a,
     {
         OptionEncoder::new_empty()
+    }
+}
+
+impl<T> MeasureBody for Option<T>
+where
+    T: MeasureBody,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        match self {
+            Some(v) => Ok(1usize
+                .checked_add(v.measure_body()?)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?),
+            None => Ok(1),
+        }
     }
 }

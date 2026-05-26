@@ -1,7 +1,7 @@
 use zebin::{ZebinArchive, ZebinEncode};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 #[zebin(schema_key = 324478056)]
 #[zebin(revision = 3)]
 pub struct VersionedUser {
@@ -21,7 +21,7 @@ fn test_vtable_generation() {
         age: 30,
         name: "Bob".to_string(),
     };
-    let buf = zebin::encode(&user).unwrap();
+    let buf = zebin::encode(user).unwrap();
 
     let object_pos = 4;
     let stable_schema_key = u32::from_le_bytes(buf[object_pos..object_pos + 4].try_into().unwrap());
@@ -77,7 +77,7 @@ fn test_safe_access() {
         age: 30,
         name: "Bob".to_string(),
     };
-    let buf = zebin::encode(&user).unwrap();
+    let buf = zebin::encode(user).unwrap();
 
     let reader = zebin::reader::<VersionedUser>(&buf).expect("Failed to validate archive");
     assert_eq!(reader.stable_schema_key(), 324478056);
@@ -88,7 +88,7 @@ fn test_safe_access() {
     }
 }
 
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 #[zebin(schema_key = 987654321)]
 #[zebin(revision = 5)]
 pub struct VersionedSensor {
@@ -102,7 +102,7 @@ pub struct VersionedSensor {
 fn test_vtable_generation_no_alloc() {
     let sensor = VersionedSensor { id: 101, value: 30 };
     let mut buf = [0u8; 128];
-    let mut writer = zebin::encode_chunked(&sensor).unwrap();
+    let mut writer = zebin::encode_chunked(sensor).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();
@@ -154,7 +154,7 @@ fn test_vtable_generation_no_alloc() {
 fn test_safe_access_no_alloc() {
     let sensor = VersionedSensor { id: 101, value: 30 };
     let mut buf = [0u8; 128];
-    let mut writer = zebin::encode_chunked(&sensor).unwrap();
+    let mut writer = zebin::encode_chunked(sensor).unwrap();
     let mut written = 0;
     while !writer.is_finished() {
         let n = writer.write(&mut buf[written..]).unwrap();

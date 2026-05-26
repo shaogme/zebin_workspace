@@ -28,13 +28,16 @@ macro_rules! impl_to_bytes {
 impl_to_bytes!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
 /// Byte-oriented encoder used by fixed-width primitive encoders.
-pub struct ByteEncoder<'a, const N: usize, T = ()> {
+///
+/// Owns a small fixed-size buffer; `input(value)` immediately serializes the
+/// value into the buffer and drops the original ownership.
+pub struct ByteEncoder<const N: usize, T = ()> {
     bytes: [u8; N],
     cursor: usize,
-    _phantom: core::marker::PhantomData<&'a T>,
+    _phantom: core::marker::PhantomData<T>,
 }
 
-impl<'a, const N: usize, T> ByteEncoder<'a, N, T> {
+impl<const N: usize, T> ByteEncoder<N, T> {
     pub fn new() -> Self {
         Self {
             bytes: [0; N],
@@ -44,11 +47,17 @@ impl<'a, const N: usize, T> ByteEncoder<'a, N, T> {
     }
 }
 
-impl<'a, const N: usize, T> Encoder<'a> for ByteEncoder<'a, N, T>
+impl<const N: usize, T> Default for ByteEncoder<N, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const N: usize, T> Encoder for ByteEncoder<N, T>
 where
     T: ToBytes<N>,
 {
-    type Input = &'a T;
+    type Input = T;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -56,6 +65,7 @@ where
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.bytes = item.to_bytes();
+        self.cursor = 0;
         self.poll_pending(sink)
     }
 
@@ -125,13 +135,20 @@ macro_rules! impl_archive_for_primitive {
             }
 
             impl Encode for $t {
-                type Encoder<'a> = ByteEncoder<'a, { core::mem::size_of::<$t>() }, $t> where Self: 'a;
+                type Input<'a> = $t where Self: 'a;
+                type Encoder<'a> = ByteEncoder<{ core::mem::size_of::<$t>() }, $t> where Self: 'a;
 
                 fn encoder<'a>() -> Self::Encoder<'a>
                 where
                     Self: 'a,
                 {
                     ByteEncoder::new()
+                }
+            }
+
+            impl MeasureBody for $t {
+                fn measure_body(&self) -> Result<usize, ZebinError> {
+                    Ok(core::mem::size_of::<Self>())
                 }
             }
 
@@ -212,8 +229,12 @@ impl Archive for bool {
 }
 
 impl Encode for bool {
+    type Input<'a>
+        = bool
+    where
+        Self: 'a;
     type Encoder<'a>
-        = ByteEncoder<'a, 1, bool>
+        = ByteEncoder<1, bool>
     where
         Self: 'a;
 
@@ -222,6 +243,12 @@ impl Encode for bool {
         Self: 'a,
     {
         ByteEncoder::new()
+    }
+}
+
+impl MeasureBody for bool {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        Ok(1)
     }
 }
 
@@ -251,12 +278,26 @@ impl SchemaAware for bool {
     }
 }
 
-pub struct UnitEncoder<'a, T = ()> {
-    _phantom: core::marker::PhantomData<&'a T>,
+pub struct UnitEncoder<T = ()> {
+    _phantom: core::marker::PhantomData<T>,
 }
 
-impl<'a, T> Encoder<'a> for UnitEncoder<'a, T> {
-    type Input = &'a T;
+impl<T> UnitEncoder<T> {
+    pub fn new() -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<T> Default for UnitEncoder<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> Encoder for UnitEncoder<T> {
+    type Input = T;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -315,15 +356,23 @@ impl Archive for () {
 }
 
 impl Encode for () {
-    type Encoder<'a> = UnitEncoder<'a, ()>;
+    type Input<'a>
+        = ()
+    where
+        Self: 'a;
+    type Encoder<'a> = UnitEncoder<()>;
 
     fn encoder<'a>() -> Self::Encoder<'a>
     where
         Self: 'a,
     {
-        UnitEncoder {
-            _phantom: core::marker::PhantomData,
-        }
+        UnitEncoder::new()
+    }
+}
+
+impl MeasureBody for () {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        Ok(0)
     }
 }
 
@@ -353,100 +402,134 @@ impl SchemaAware for () {
     }
 }
 
+/// Resumable serialization state for `(K, V)`.
+///
+/// On `input((k, v))` the key `k` is moved into `key_encoder`; the value `v`
+/// is parked in `pending_value` until stage 1 begins, at which point it is
+/// taken and moved into `value_encoder`.
 pub struct Tuple2Encoder<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> {
-    item: Option<&'a (K, V)>,
-    key_encoder: Option<(<K as Encode>::Encoder<'a>, bool)>,
-    value_encoder: Option<(<V as Encode>::Encoder<'a>, bool)>,
+    pending_value: Option<V>,
+    key_encoder: <K as Encode>::Encoder<'a>,
+    value_encoder: <V as Encode>::Encoder<'a>,
+    key_started: bool,
+    value_started: bool,
     stage: u8,
 }
 
 impl<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> Tuple2Encoder<'a, K, V> {
     pub fn new() -> Self {
         Self {
-            item: None,
-            key_encoder: Some((K::encoder(), false)),
-            value_encoder: Some((V::encoder(), false)),
+            pending_value: None,
+            key_encoder: K::encoder(),
+            value_encoder: V::encoder(),
+            key_started: false,
+            value_started: false,
             stage: 0,
         }
     }
 }
 
-impl<'a, K, V> Encoder<'a> for Tuple2Encoder<'a, K, V>
+impl<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> Default for Tuple2Encoder<'a, K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a, K, V> Encoder for Tuple2Encoder<'a, K, V>
 where
-    K: Encode + Archive + 'a,
-    V: Encode + Archive + 'a,
+    K: Encode<Input<'a> = K> + Archive + 'a,
+    V: Encode<Input<'a> = V> + Archive + 'a,
 {
-    type Input = &'a (K, V);
+    type Input = (K, V);
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
-        self.item = Some(item);
-        self.poll_pending(sink)
+        let (key, value) = item;
+        self.pending_value = Some(value);
+        match self.key_encoder.input(key, sink)? {
+            Poll::Pending => {
+                self.key_started = true;
+                Ok(Poll::Pending)
+            }
+            Poll::Ready(()) => {
+                self.key_started = true;
+                self.advance_after_key(sink)
+            }
+        }
     }
 
     fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
-        let item = self.item.ok_or(ZebinError::SerializationError {
-            pos: sink.pos(),
-            message: "Tuple2Encoder polled before input",
-        })?;
-        if self.stage == 0
-            && let Some((encoder, started)) = &mut self.key_encoder
-        {
-            let progress = if !*started {
-                match encoder.input(&item.0, sink)? {
-                    Poll::Pending => {
-                        *started = true;
-                        Poll::Pending
-                    }
-                    Poll::Ready(()) => Poll::Ready(()),
+        if self.stage == 0 {
+            if !self.key_started {
+                return Err(ZebinError::SerializationError {
+                    pos: sink.pos(),
+                    message: "Tuple2Encoder polled before input",
+                });
+            }
+            match self.key_encoder.poll_pending(sink)? {
+                Poll::Pending => return Ok(Poll::Pending),
+                Poll::Ready(()) => {}
+            }
+            return self.advance_after_key(sink);
+        }
+        if self.stage == 1 {
+            if !self.value_started {
+                let v = self
+                    .pending_value
+                    .take()
+                    .ok_or(ZebinError::SerializationError {
+                        pos: sink.pos(),
+                        message: "Tuple2Encoder lost pending value",
+                    })?;
+                self.value_started = true;
+                match self.value_encoder.input(v, sink)? {
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(()) => {}
                 }
             } else {
-                encoder.poll_pending(sink)?
-            };
-
-            match progress {
-                Poll::Pending => return Ok(Poll::Pending),
-                Poll::Ready(()) => {
-                    let (enc, _) = self.key_encoder.take().unwrap();
-                    let _ = enc.finish(sink)?;
-                    self.stage = 1;
+                match self.value_encoder.poll_pending(sink)? {
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(()) => {}
                 }
             }
+            self.stage = 2;
         }
-
-        if self.stage == 1
-            && let Some((encoder, started)) = &mut self.value_encoder
-        {
-            let progress = if !*started {
-                match encoder.input(&item.1, sink)? {
-                    Poll::Pending => {
-                        *started = true;
-                        Poll::Pending
-                    }
-                    Poll::Ready(()) => Poll::Ready(()),
-                }
-            } else {
-                encoder.poll_pending(sink)?
-            };
-
-            match progress {
-                Poll::Pending => return Ok(Poll::Pending),
-                Poll::Ready(()) => {
-                    let (enc, _) = self.value_encoder.take().unwrap();
-                    let _ = enc.finish(sink)?;
-                    self.stage = 2;
-                }
-            }
-        }
-
         Ok(Poll::Ready(()))
     }
 
     fn finish<S: ByteSink + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
+    }
+}
+
+impl<'a, K, V> Tuple2Encoder<'a, K, V>
+where
+    K: Encode<Input<'a> = K> + Archive + 'a,
+    V: Encode<Input<'a> = V> + Archive + 'a,
+{
+    fn advance_after_key<S: ByteSink + ?Sized>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.stage = 1;
+        let v = self
+            .pending_value
+            .take()
+            .ok_or(ZebinError::SerializationError {
+                pos: sink.pos(),
+                message: "Tuple2Encoder lost pending value",
+            })?;
+        self.value_started = true;
+        match self.value_encoder.input(v, sink)? {
+            Poll::Pending => Ok(Poll::Pending),
+            Poll::Ready(()) => {
+                self.stage = 2;
+                Ok(Poll::Ready(()))
+            }
+        }
     }
 }
 
@@ -458,7 +541,13 @@ impl<K, V> Encode for (K, V)
 where
     K: Encode + Archive,
     V: Encode + Archive,
+    for<'a> K: Encode<Input<'a> = K> + 'a,
+    for<'a> V: Encode<Input<'a> = V> + 'a,
 {
+    type Input<'a>
+        = (K, V)
+    where
+        Self: 'a;
     type Encoder<'a>
         = Tuple2Encoder<'a, K, V>
     where
@@ -469,6 +558,19 @@ where
         Self: 'a,
     {
         Tuple2Encoder::new()
+    }
+}
+
+impl<K, V> MeasureBody for (K, V)
+where
+    K: MeasureBody,
+    V: MeasureBody,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        self.0
+            .measure_body()?
+            .checked_add(self.1.measure_body()?)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
     }
 }
 

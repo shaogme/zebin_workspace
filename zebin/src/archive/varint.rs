@@ -244,14 +244,14 @@ impl<T: VarIntNumber> ToVarIntNumber<T> for VarIntView<T> {
     }
 }
 
-pub struct VarIntEncoder<'a, T: VarIntNumber, I = ()> {
+pub struct VarIntEncoder<T: VarIntNumber, I = ()> {
     bytes: [u8; 10],
     len: u8,
     cursor: u8,
-    _phantom: PhantomData<&'a (T, I)>,
+    _phantom: PhantomData<(T, I)>,
 }
 
-impl<'a, T: VarIntNumber, I> VarIntEncoder<'a, T, I> {
+impl<T: VarIntNumber, I> VarIntEncoder<T, I> {
     pub(crate) fn new_empty() -> Self {
         Self {
             bytes: [0u8; 10],
@@ -262,11 +262,11 @@ impl<'a, T: VarIntNumber, I> VarIntEncoder<'a, T, I> {
     }
 }
 
-impl<'a, T: VarIntNumber, I> Encoder<'a> for VarIntEncoder<'a, T, I>
+impl<T: VarIntNumber, I> Encoder for VarIntEncoder<T, I>
 where
     I: ToVarIntNumber<T>,
 {
-    type Input = &'a I;
+    type Input = I;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -302,8 +302,12 @@ impl<T> Encode for VarInt<T>
 where
     T: VarIntNumber,
 {
+    type Input<'a>
+        = VarInt<T>
+    where
+        Self: 'a;
     type Encoder<'a>
-        = VarIntEncoder<'a, T, VarInt<T>>
+        = VarIntEncoder<T, VarInt<T>>
     where
         Self: 'a;
 
@@ -319,8 +323,12 @@ impl<T> Encode for VarIntView<T>
 where
     T: VarIntNumber,
 {
+    type Input<'a>
+        = VarIntView<T>
+    where
+        Self: 'a;
     type Encoder<'a>
-        = VarIntEncoder<'a, T, VarIntView<T>>
+        = VarIntEncoder<T, VarIntView<T>>
     where
         Self: 'a;
 
@@ -329,5 +337,17 @@ where
         Self: 'a,
     {
         VarIntEncoder::new_empty()
+    }
+}
+
+impl<T: VarIntNumber> MeasureBody for VarInt<T> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        Ok(encoded_len_u64(self.get().to_u64()))
+    }
+}
+
+impl<T: VarIntNumber> MeasureBody for VarIntView<T> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        Ok(encoded_len_u64(self.get().to_u64()))
     }
 }

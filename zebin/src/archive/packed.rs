@@ -244,6 +244,7 @@ impl<const BITS: u8> ArchivedDefault for ArchivedPackedU8SliceView<'_, BITS> {
 }
 
 /// Borrowed packed sequence wrapper.
+#[derive(Clone, Copy)]
 pub struct PackedSlice<'a, T, const BITS: u8> {
     pub(crate) values: &'a [T],
 }
@@ -308,6 +309,10 @@ impl<'a, 'b, const BITS: u8> ToPackedViewInfo<'b> for &'b ArchivedPackedU8SliceV
 }
 
 impl<'a> Encode for ArchivedPackedBoolSliceView<'a> {
+    type Input<'b>
+        = &'b ArchivedPackedBoolSliceView<'a>
+    where
+        Self: 'b;
     type Encoder<'b>
         = PackedViewEncoder<'b, ArchivedPackedBoolSliceView<'a>>
     where
@@ -322,6 +327,10 @@ impl<'a> Encode for ArchivedPackedBoolSliceView<'a> {
 }
 
 impl<'a, const BITS: u8> Encode for ArchivedPackedU8SliceView<'a, BITS> {
+    type Input<'b>
+        = &'b ArchivedPackedU8SliceView<'a, BITS>
+    where
+        Self: 'b;
     type Encoder<'b>
         = PackedViewEncoder<'b, ArchivedPackedU8SliceView<'a, BITS>>
     where
@@ -332,6 +341,39 @@ impl<'a, const BITS: u8> Encode for ArchivedPackedU8SliceView<'a, BITS> {
         Self: 'b,
     {
         PackedViewEncoder::new_empty()
+    }
+}
+
+impl<'a> MeasureBody for ArchivedPackedBoolSliceView<'a> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        let byte_len =
+            packed_byte_len(self.len(), 1).map_err(|e| ZebinError::SerializationError {
+                pos: 0,
+                message: match e {
+                    DecodeError::ValidationError { message, .. } => message,
+                    _ => "packed length overflow",
+                },
+            })?;
+        4usize
+            .checked_add(byte_len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
+    }
+}
+
+impl<'a, const BITS: u8> MeasureBody for ArchivedPackedU8SliceView<'a, BITS> {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        let byte_len = packed_byte_len(self.len(), usize::from(BITS)).map_err(|e| {
+            ZebinError::SerializationError {
+                pos: 0,
+                message: match e {
+                    DecodeError::ValidationError { message, .. } => message,
+                    _ => "packed length overflow",
+                },
+            }
+        })?;
+        4usize
+            .checked_add(byte_len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
     }
 }
 
@@ -356,7 +398,7 @@ impl<'a, I> PackedViewEncoder<'a, I> {
     }
 }
 
-impl<'a, I> Encoder<'a> for PackedViewEncoder<'a, I>
+impl<'a, I> Encoder for PackedViewEncoder<'a, I>
 where
     &'a I: ToPackedViewInfo<'a>,
 {

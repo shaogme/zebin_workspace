@@ -377,13 +377,18 @@ pub trait ByteSink {
 }
 
 /// Unified encoder protocol, supporting one-off or incremental step-by-step input.
-pub trait Encoder<'a> {
+///
+/// The trait carries no lifetime. Encoders that work over borrowed inputs (DST
+/// adapters such as `[T]` / `str` / shared-pointer wrappers) embed any required
+/// lifetime in their concrete type and feed it through `Encode::Input<'a>`.
+pub trait Encoder {
     /// The type of input items received by the encoder.
-    /// - For one-off encoding, this can be `()` (since data is already bound at creation).
-    /// - For streamable step-by-step encoding, this is the concrete input slice/item type (e.g., `&'a T`, `&'a [u8]`, etc.).
+    ///
+    /// For owned encoders this is the value type itself. For DST adapters this
+    /// is a borrowed reference (e.g. `&'a [T]`).
     type Input;
 
-    /// Attempts to input a data slice into the encoder and encode it into the underlying `ByteSink`.
+    /// Attempts to input a data item into the encoder and encode it into the underlying `ByteSink`.
     ///
     /// # Return Value
     /// - `Ok(Poll::Ready(()))`: The current input item has been fully encoded and written.
@@ -404,12 +409,124 @@ pub trait Encoder<'a> {
 }
 
 /// Trait for types that can create resumable archive states.
+///
+/// `Input<'a>` defaults conceptually to `Self` for owned/sized types and is
+/// overridden to `&'a Self` for DST adapters (`[T]`, `str`) and shared-pointer
+/// wrappers (`Rc<T>`, `Arc<T>`, `Cow<'_, T>`) where moving by value is impossible
+/// or would defeat the purpose of the wrapper.
 pub trait Encode: Archive {
-    type Encoder<'a>: Encoder<'a, Input = &'a Self>
+    type Input<'a>
+    where
+        Self: 'a;
+
+    type Encoder<'a>: Encoder<Input = Self::Input<'a>>
     where
         Self: 'a;
 
     fn encoder<'a>() -> Self::Encoder<'a>
     where
         Self: 'a;
+}
+
+/// Encoder for `&T` references.
+///
+/// RefEncoder takes a borrow of a reference `&'b T`, clones the inner `T` (which is `Clone`),
+/// and feeds the cloned owned value into `T::Encoder`.
+pub struct RefEncoder<'a, 'b, T>
+where
+    T: Encode + Archive + 'a,
+{
+    inner: <T as Encode>::Encoder<'a>,
+    _phantom: core::marker::PhantomData<&'b T>,
+}
+
+impl<'a, 'b, T> RefEncoder<'a, 'b, T>
+where
+    T: Encode + Archive + 'a,
+{
+    pub fn new() -> Self {
+        Self {
+            inner: T::encoder(),
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, 'b, T> Default for RefEncoder<'a, 'b, T>
+where
+    T: Encode + Archive + 'a,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a, 'b, T> Encoder for RefEncoder<'a, 'b, T>
+where
+    T: Encode<Input<'a> = T> + Archive + Clone + 'a,
+{
+    type Input = &'b T;
+
+    fn input<S: ByteSink + ?Sized>(
+        &mut self,
+        item: Self::Input,
+        sink: &mut S,
+    ) -> Result<Poll<()>, ZebinError> {
+        let value: T = (*item).clone();
+        self.inner.input(value, sink)
+    }
+
+    fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        self.inner.poll_pending(sink)
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        self.inner.finish(sink)
+    }
+}
+
+impl<T: Archive + ?Sized> Archive for &T {
+    type Archived = T::Archived;
+}
+
+impl<'b, T> Encode for &'b T
+where
+    T: Encode + Archive + Clone,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
+{
+    type Input<'a>
+        = &'b T
+    where
+        Self: 'a;
+    type Encoder<'a>
+        = RefEncoder<'a, 'b, T>
+    where
+        Self: 'a;
+
+    fn encoder<'a>() -> Self::Encoder<'a>
+    where
+        Self: 'a,
+    {
+        RefEncoder::new()
+    }
+}
+
+/// Pre-pass measurement contract.
+///
+/// Used by:
+/// - schema-aware records that must know each field's encoded length before
+///   writing the field table;
+/// - `measure_serialized_len` for estimating archive size by reference.
+///
+/// Implementations walk the value by reference and never consume it. They must
+/// produce a length that exactly matches what the corresponding encoder will
+/// write to a `ByteSink`.
+pub trait MeasureBody {
+    fn measure_body(&self) -> Result<usize, ZebinError>;
+}
+
+impl<T: MeasureBody + ?Sized> MeasureBody for &T {
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        (**self).measure_body()
+    }
 }

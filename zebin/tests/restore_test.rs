@@ -1,7 +1,7 @@
 use zebin::{ZebinArchive, ZebinEncode};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 1)]
 pub struct UserProfile {
     #[zebin(id = 0)]
@@ -13,7 +13,7 @@ pub struct UserProfile {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 pub enum Packet {
     Ping,
     #[zebin(schema_key = 2)]
@@ -59,7 +59,7 @@ fn test_enum_restore() {
 #[cfg(feature = "alloc")]
 #[test]
 fn test_nested_restore() {
-    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 3)]
     struct Container {
         #[zebin(id = 0)]
@@ -81,7 +81,7 @@ fn test_nested_restore() {
 #[cfg(feature = "alloc")]
 #[test]
 fn test_optional_option_restore() {
-    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 4)]
     struct OptionalStruct {
         #[zebin(id = 0, optional)]
@@ -109,7 +109,7 @@ fn test_optional_option_restore() {
     assert_eq!(restored_none, obj_none);
 }
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 pub struct SimpleProfile {
     pub id: u64,
     pub val: u32,
@@ -132,7 +132,7 @@ fn test_struct_restore_no_alloc() {
     assert_eq!(restored, profile);
 }
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq)]
+#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
 pub enum SimplePacket {
     Ping,
     Data(u32),
@@ -167,4 +167,18 @@ fn test_enum_restore_no_alloc() {
     }
     let restored: SimplePacket = zebin::decode::<SimplePacket>(&buf[..written]).unwrap();
     assert_eq!(restored, data);
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn test_ref_encode_restore() {
+    let user = UserProfile {
+        id: 42,
+        username: "Alice".to_string(),
+        tags: vec!["rust".to_string(), "zebin".to_string()],
+    };
+    let buf = zebin::encode(&user).unwrap();
+    let restored: UserProfile = zebin::decode::<UserProfile>(&buf).unwrap();
+
+    assert_eq!(restored, user);
 }

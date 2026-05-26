@@ -128,22 +128,26 @@ where
     }
 }
 
-pub enum ResultEncoder<'a, T, E>
+pub struct ResultEncoder<'a, T, E>
 where
     T: Encode + Archive + 'a,
     E: Encode + Archive + 'a,
 {
+    state: ResultEncoderState<T, E>,
+    ok_encoder: <T as Encode>::Encoder<'a>,
+    err_encoder: <E as Encode>::Encoder<'a>,
+}
+
+enum ResultEncoderState<T, E> {
     Uninitialized,
     Ok {
-        val: &'a T,
+        val: Option<T>,
         prefix_cursor: usize,
-        encoder: <T as Encode>::Encoder<'a>,
         started: bool,
     },
     Err {
-        val: &'a E,
+        val: Option<E>,
         prefix_cursor: usize,
-        encoder: <E as Encode>::Encoder<'a>,
         started: bool,
     },
 }
@@ -154,50 +158,47 @@ where
     E: Encode + Archive + 'a,
 {
     pub(crate) fn new_empty() -> Self {
-        Self::Uninitialized
+        Self {
+            state: ResultEncoderState::Uninitialized,
+            ok_encoder: T::encoder(),
+            err_encoder: E::encoder(),
+        }
     }
 }
 
-impl<'a, T, E> Encoder<'a> for ResultEncoder<'a, T, E>
+impl<'a, T, E> Encoder for ResultEncoder<'a, T, E>
 where
-    T: Encode + Archive + 'a,
-    E: Encode + Archive + 'a,
+    T: Encode<Input<'a> = T> + Archive + 'a,
+    E: Encode<Input<'a> = E> + Archive + 'a,
 {
-    type Input = &'a Result<T, E>;
+    type Input = Result<T, E>;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
-        match item {
-            Ok(inner) => {
-                *self = Self::Ok {
-                    val: inner,
-                    prefix_cursor: 0,
-                    encoder: T::encoder(),
-                    started: false,
-                };
-            }
-            Err(inner) => {
-                *self = Self::Err {
-                    val: inner,
-                    prefix_cursor: 0,
-                    encoder: E::encoder(),
-                    started: false,
-                };
-            }
-        }
+        self.state = match item {
+            Ok(inner) => ResultEncoderState::Ok {
+                val: Some(inner),
+                prefix_cursor: 0,
+                started: false,
+            },
+            Err(inner) => ResultEncoderState::Err {
+                val: Some(inner),
+                prefix_cursor: 0,
+                started: false,
+            },
+        };
         self.poll_pending(sink)
     }
 
     fn poll_pending<S: ByteSink + ?Sized>(&mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
-        match self {
-            ResultEncoder::Uninitialized => Ok(Poll::Ready(())),
-            ResultEncoder::Ok {
+        match &mut self.state {
+            ResultEncoderState::Uninitialized => Ok(Poll::Ready(())),
+            ResultEncoderState::Ok {
                 val,
                 prefix_cursor,
-                encoder,
                 started,
             } => {
                 if *prefix_cursor == 0
@@ -210,26 +211,21 @@ where
                 }
 
                 let progress = if !*started {
-                    match encoder.input(*val, sink)? {
-                        Poll::Pending => {
-                            *started = true;
-                            Poll::Pending
-                        }
-                        Poll::Ready(()) => Poll::Ready(()),
-                    }
+                    let v = val.take().ok_or(ZebinError::SerializationError {
+                        pos: sink.pos(),
+                        message: "ResultEncoder lost Ok value",
+                    })?;
+                    *started = true;
+                    self.ok_encoder.input(v, sink)?
                 } else {
-                    encoder.poll_pending(sink)?
+                    self.ok_encoder.poll_pending(sink)?
                 };
 
-                match progress {
-                    Poll::Pending => Ok(Poll::Pending),
-                    Poll::Ready(()) => Ok(Poll::Ready(())),
-                }
+                Ok(progress)
             }
-            ResultEncoder::Err {
+            ResultEncoderState::Err {
                 val,
                 prefix_cursor,
-                encoder,
                 started,
             } => {
                 if *prefix_cursor == 0
@@ -242,30 +238,26 @@ where
                 }
 
                 let progress = if !*started {
-                    match encoder.input(*val, sink)? {
-                        Poll::Pending => {
-                            *started = true;
-                            Poll::Pending
-                        }
-                        Poll::Ready(()) => Poll::Ready(()),
-                    }
+                    let v = val.take().ok_or(ZebinError::SerializationError {
+                        pos: sink.pos(),
+                        message: "ResultEncoder lost Err value",
+                    })?;
+                    *started = true;
+                    self.err_encoder.input(v, sink)?
                 } else {
-                    encoder.poll_pending(sink)?
+                    self.err_encoder.poll_pending(sink)?
                 };
 
-                match progress {
-                    Poll::Pending => Ok(Poll::Pending),
-                    Poll::Ready(()) => Ok(Poll::Ready(())),
-                }
+                Ok(progress)
             }
         }
     }
 
     fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
-        match self {
-            ResultEncoder::Uninitialized => Ok(Poll::Ready(())),
-            ResultEncoder::Ok { encoder, .. } => encoder.finish(sink),
-            ResultEncoder::Err { encoder, .. } => encoder.finish(sink),
+        match self.state {
+            ResultEncoderState::Uninitialized => Ok(Poll::Ready(())),
+            ResultEncoderState::Ok { .. } => self.ok_encoder.finish(sink),
+            ResultEncoderState::Err { .. } => self.err_encoder.finish(sink),
         }
     }
 }
@@ -282,7 +274,13 @@ impl<T, E> Encode for Result<T, E>
 where
     T: Encode + Archive,
     E: Encode + Archive,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> E: Encode<Input<'a> = E> + 'a,
 {
+    type Input<'a>
+        = Result<T, E>
+    where
+        Self: 'a;
     type Encoder<'a>
         = ResultEncoder<'a, T, E>
     where
@@ -293,5 +291,21 @@ where
         Self: 'a,
     {
         ResultEncoder::new_empty()
+    }
+}
+
+impl<T, E> MeasureBody for Result<T, E>
+where
+    T: MeasureBody,
+    E: MeasureBody,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        let inner = match self {
+            Ok(v) => v.measure_body()?,
+            Err(v) => v.measure_body()?,
+        };
+        1usize
+            .checked_add(inner)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
     }
 }

@@ -5,7 +5,7 @@ extern crate alloc;
 use alloc::{borrow::Cow, collections::VecDeque};
 use zebin::{ZebinArchive, ZebinEncode};
 
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 struct NativeContainers {
     maybe_name: Option<String>,
     boxed_name: Box<str>,
@@ -15,7 +15,7 @@ struct NativeContainers {
     queue: VecDeque<String>,
 }
 
-#[derive(ZebinArchive, ZebinEncode)]
+#[derive(ZebinArchive, ZebinEncode, Clone)]
 struct BorrowedContainers {
     borrowed_text: Cow<'static, str>,
     owned_text: Cow<'static, str>,
@@ -38,7 +38,7 @@ fn test_native_container_round_trip_some() {
         queue,
     };
 
-    let buf = zebin::encode(&value).unwrap();
+    let buf = zebin::encode(value).unwrap();
     let archived = zebin::reader::<NativeContainers>(&buf).unwrap();
 
     assert!(archived.maybe_name.is_some());
@@ -76,7 +76,7 @@ fn test_native_container_round_trip_none() {
         queue,
     };
 
-    let buf = zebin::encode(&value).unwrap();
+    let buf = zebin::encode(value).unwrap();
     let archived = zebin::reader::<NativeContainers>(&buf).unwrap();
 
     assert!(archived.maybe_name.is_none());
@@ -104,7 +104,7 @@ fn test_borrowed_container_round_trip() {
         owned_numbers: Cow::Owned(vec![4u32, 5, 6]),
     };
 
-    let buf = zebin::encode(&value).unwrap();
+    let buf = zebin::encode(value).unwrap();
     let archived = zebin::reader::<BorrowedContainers>(&buf).unwrap();
 
     assert_eq!(unsafe { archived.borrowed_text.as_str() }, "borrowed");

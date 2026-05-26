@@ -124,11 +124,16 @@ pub fn packed_info(field: &FieldSpec<'_>) -> Option<(PackedElementKind, u8)> {
     Some((kind, bits))
 }
 
+/// Public accessor for derive macros (re-exported via `shared::packed`).
+pub fn packed_info_pub(field: &FieldSpec<'_>) -> Option<(PackedElementKind, u8)> {
+    packed_info(field)
+}
+
 pub fn packed_wrapper_type_expr(field: &FieldSpec<'_>) -> Option<TokenStream> {
     let (kind, bits) = packed_info(field)?;
     Some(match kind {
-        PackedElementKind::Bool => quote! { zebin::archive::PackedSlice<'_, bool, 1> },
-        PackedElementKind::U8 => quote! { zebin::archive::PackedSlice<'_, u8, #bits> },
+        PackedElementKind::Bool => quote! { zebin::archive::PackedBoolVec },
+        PackedElementKind::U8 => quote! { zebin::archive::PackedU8Vec<#bits> },
     })
 }
 

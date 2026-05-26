@@ -9,7 +9,6 @@ use crate::{
 
 #[cfg(feature = "alloc")]
 use alloc::{
-    boxed::Box,
     collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
     vec::Vec,
 };
@@ -57,6 +56,22 @@ pub struct IterArchive<I, T>(pub I, pub PhantomData<T>);
 impl<I, T> IterArchive<I, T> {
     pub fn new(inner: I) -> Self {
         Self(inner, PhantomData)
+    }
+
+    pub fn into_inner(self) -> I {
+        self.0
+    }
+}
+
+impl<I, T> IntoIterator for IterArchive<I, T>
+where
+    I: IntoIterator<Item = T>,
+{
+    type Item = T;
+    type IntoIter = I::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -369,54 +384,85 @@ where
     }
 }
 
-pub struct CurrentEncoder<'a, T: Encode + 'a> {
+/// Per-element resumable encoder for an owned-element sequence.
+///
+/// The element is moved into the encoder via `input(item)` and dropped after
+/// the inner encoder finishes. This is the building block that makes streaming
+/// owned-collection encoding (e.g. `Vec::into_iter`) actually release memory.
+///
+/// The element encoder is boxed when the `alloc` feature is enabled, which
+/// breaks recursive type cycles for self-referential structs (`Node` ->
+/// `Vec<Node>` -> `SeqEncoder<Node>` -> `Node::Encoder` -> ...).
+struct SeqItemEncoder<'a, T: Encode + Archive + 'a> {
     #[cfg(feature = "alloc")]
-    inner: Box<(<T as Encode>::Encoder<'a>, bool)>,
+    inner: Option<alloc::boxed::Box<<T as Encode>::Encoder<'a>>>,
     #[cfg(not(feature = "alloc"))]
-    inner: (<T as Encode>::Encoder<'a>, bool),
+    inner: Option<<T as Encode>::Encoder<'a>>,
 }
 
-impl<'a, T: Encode + 'a> CurrentEncoder<'a, T> {
-    pub fn new(encoder: <T as Encode>::Encoder<'a>, started: bool) -> Self {
+impl<'a, T: Encode + Archive + 'a> SeqItemEncoder<'a, T> {
+    fn new() -> Self {
+        Self { inner: None }
+    }
+
+    fn take(&mut self) -> Self {
         Self {
-            #[cfg(feature = "alloc")]
-            inner: Box::new((encoder, started)),
-            #[cfg(not(feature = "alloc"))]
-            inner: (encoder, started),
+            inner: self.inner.take(),
         }
     }
 
-    pub fn get_mut(&mut self) -> (&mut <T as Encode>::Encoder<'a>, &mut bool) {
+    fn get_or_insert_with<F>(&mut self, f: F) -> &mut <T as Encode>::Encoder<'a>
+    where
+        F: FnOnce() -> <T as Encode>::Encoder<'a>,
+    {
         #[cfg(feature = "alloc")]
-        {
-            let (ref mut encoder, ref mut started) = *self.inner;
-            (encoder, started)
-        }
-        #[cfg(not(feature = "alloc"))]
-        {
-            let (ref mut encoder, ref mut started) = self.inner;
-            (encoder, started)
-        }
-    }
-
-    pub fn into_inner(self) -> (<T as Encode>::Encoder<'a>, bool) {
-        #[cfg(feature = "alloc")]
-        {
-            *self.inner
-        }
-        #[cfg(not(feature = "alloc"))]
         {
             self.inner
+                .get_or_insert_with(|| alloc::boxed::Box::new(f()))
+        }
+        #[cfg(not(feature = "alloc"))]
+        {
+            self.inner.get_or_insert_with(f)
+        }
+    }
+
+    fn as_mut(&mut self) -> Option<&mut <T as Encode>::Encoder<'a>> {
+        #[cfg(feature = "alloc")]
+        {
+            self.inner.as_deref_mut()
+        }
+        #[cfg(not(feature = "alloc"))]
+        {
+            self.inner.as_mut()
+        }
+    }
+
+    fn finish<S: ByteSink + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+        if let Some(encoder) = self.inner {
+            encoder.finish(sink)
+        } else {
+            Ok(Poll::Ready(()))
         }
     }
 }
 
+/// Per-element resumable encoder for an owned-element sequence.
+///
+/// The element is moved into the encoder via `input(item)` and dropped after
+/// the inner encoder finishes. This is the building block that makes streaming
+/// owned-collection encoding (e.g. `Vec::into_iter`) actually release memory.
+///
+/// The element encoder is boxed when the `alloc` feature is enabled, which
+/// breaks recursive type cycles for self-referential structs (`Node` ->
+/// `Vec<Node>` -> `SeqEncoder<Node>` -> `Node::Encoder` -> ...).
 pub struct SeqEncoder<'a, T: Encode + Archive + 'a> {
-    next_item: Option<&'a T>,
+    next_item: Option<T>,
     marker: [u8; 1],
     marker_cursor: usize,
     aligned: bool,
-    current_encoder: Option<CurrentEncoder<'a, T>>,
+    item_encoder: SeqItemEncoder<'a, T>,
+    has_active_encoder: bool,
+    encoder_started: bool,
     finished: bool,
 }
 
@@ -427,15 +473,24 @@ impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T> {
             marker: [0],
             marker_cursor: 1,
             aligned: false,
-            current_encoder: None,
+            item_encoder: SeqItemEncoder::new(),
+            has_active_encoder: false,
+            encoder_started: false,
             finished: false,
         }
+    }
+}
+
+impl<'a, T: Encode + Archive + 'a> Default for SeqEncoder<'a, T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T>
 where
     T::Archived: ArchivedLayout,
+    T: Encode<Input<'a> = T>,
 {
     pub fn is_finished(&self) -> bool {
         self.finished && self.marker_cursor == 1
@@ -446,8 +501,7 @@ where
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         if !self.finished {
-            if self.next_item.is_some() || self.current_encoder.is_some() || self.marker_cursor < 1
-            {
+            if self.next_item.is_some() || self.has_active_encoder || self.marker_cursor < 1 {
                 return Err(ZebinError::SerializationError {
                     pos: sink.pos(),
                     message: "Encoder is busy",
@@ -461,11 +515,12 @@ where
     }
 }
 
-impl<'a, T: Encode + Archive + 'a> Encoder<'a> for SeqEncoder<'a, T>
+impl<'a, T: Encode + Archive + 'a> Encoder for SeqEncoder<'a, T>
 where
     T::Archived: ArchivedLayout,
+    T: Encode<Input<'a> = T>,
 {
-    type Input = &'a T;
+    type Input = T;
 
     fn input<S: ByteSink + ?Sized>(
         &mut self,
@@ -478,7 +533,7 @@ where
                 message: "Encoder already finished",
             });
         }
-        if self.next_item.is_some() || self.current_encoder.is_some() || self.marker_cursor < 1 {
+        if self.next_item.is_some() || self.has_active_encoder || self.marker_cursor < 1 {
             return Err(ZebinError::SerializationError {
                 pos: sink.pos(),
                 message: "Encoder is busy",
@@ -510,9 +565,7 @@ where
                 return Ok(Poll::Ready(()));
             }
 
-            if let Some(state) = &mut self.current_encoder {
-                let (encoder, started) = state.get_mut();
-
+            if self.has_active_encoder {
                 if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some() && !self.aligned {
                     if sink
                         .align(<T::Archived as ArchivedLayout>::ALIGNMENT)?
@@ -524,15 +577,23 @@ where
                     }
                 }
 
-                if *started {
-                    match encoder.poll_pending(sink)? {
+                if self.encoder_started {
+                    let encoder = self.item_encoder.as_mut().expect("active encoder missing");
+                    let res = encoder.poll_pending(sink)?;
+
+                    match res {
                         Poll::Pending => return Ok(Poll::Pending),
                         Poll::Ready(()) => {}
                     }
                 }
 
-                let (encoder, _) = self.current_encoder.take().unwrap().into_inner();
-                let _ = encoder.finish(sink)?;
+                // Element fully encoded. Replace the inner encoder with None
+                // so state from this element doesn't leak into the
+                // next, and run its `finish` to flush any trailing padding.
+                let completed = self.item_encoder.take();
+                let _ = completed.finish(sink)?;
+                self.has_active_encoder = false;
+                self.encoder_started = false;
                 self.aligned = false;
             }
 
@@ -549,14 +610,18 @@ where
                     }
                 }
 
-                let mut encoder = T::encoder();
-                match encoder.input(item, sink)? {
+                let encoder = self.item_encoder.get_or_insert_with(T::encoder);
+                let res = encoder.input(item, sink)?;
+
+                match res {
                     Poll::Pending => {
-                        self.current_encoder = Some(CurrentEncoder::new(encoder, true));
+                        self.has_active_encoder = true;
+                        self.encoder_started = true;
                         return Ok(Poll::Pending);
                     }
                     Poll::Ready(()) => {
-                        self.current_encoder = Some(CurrentEncoder::new(encoder, false));
+                        self.has_active_encoder = true;
+                        self.encoder_started = false;
                     }
                 }
                 continue;
@@ -569,45 +634,39 @@ where
     }
 
     fn finish<S: ByteSink + ?Sized>(mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
-        self.finish_ref(sink)
+        let _ = self.finish_ref(sink)?;
+        self.item_encoder.finish(sink)
     }
 }
 
-pub trait ToIterRef<'a, S: ?Sized> {
-    fn to_iter_ref(self) -> &'a S;
-}
-
-impl<'a, T: ?Sized> ToIterRef<'a, T> for &'a T {
-    fn to_iter_ref(self) -> &'a T {
-        self
-    }
-}
-
-impl<'a, I, T> ToIterRef<'a, I> for &'a IterArchive<I, T> {
-    fn to_iter_ref(self) -> &'a I {
-        &self.0
-    }
-}
-
-impl<'a, T> ToIterRef<'a, [T]> for &'a Vec<T> {
-    fn to_iter_ref(self) -> &'a [T] {
-        self.as_slice()
-    }
-}
-
-pub struct IterEncoder<'a, S: ?Sized, T, I: ?Sized = S>
+/// Owned-iterator sequence encoder: drains `S: IntoIterator<Item = T>` and
+/// drops each element after encoding. This is the path that delivers the
+/// "encode and drop" memory benefit for `Vec`, `BTreeMap`, etc.
+pub struct OwnedIterEncoder<'a, S, T>
 where
-    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    S: IntoIterator<Item = T>,
     T: Encode + Archive + 'a,
 {
-    iter: Option<<&'a S as IntoIterator>::IntoIter>,
+    iter: Option<S::IntoIter>,
     seq_encoder: SeqEncoder<'a, T>,
-    _phantom: PhantomData<&'a I>,
 }
 
-impl<'a, S: ?Sized, T, I: ?Sized> Default for IterEncoder<'a, S, T, I>
+impl<'a, S, T> OwnedIterEncoder<'a, S, T>
 where
-    for<'b> &'b S: IntoIterator<Item = &'b T>,
+    S: IntoIterator<Item = T>,
+    T: Encode + Archive + 'a,
+{
+    pub fn new() -> Self {
+        Self {
+            iter: None,
+            seq_encoder: SeqEncoder::new(),
+        }
+    }
+}
+
+impl<'a, S, T> Default for OwnedIterEncoder<'a, S, T>
+where
+    S: IntoIterator<Item = T>,
     T: Encode + Archive + 'a,
 {
     fn default() -> Self {
@@ -615,35 +674,20 @@ where
     }
 }
 
-impl<'a, S: ?Sized, T, I: ?Sized> IterEncoder<'a, S, T, I>
+impl<'a, S, T> Encoder for OwnedIterEncoder<'a, S, T>
 where
-    for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + 'a,
-{
-    pub fn new() -> Self {
-        Self {
-            iter: None,
-            seq_encoder: SeqEncoder::new(),
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<'a, S: ?Sized, T, I: ?Sized> Encoder<'a> for IterEncoder<'a, S, T, I>
-where
-    for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + 'a,
+    S: IntoIterator<Item = T>,
+    T: Encode<Input<'a> = T> + Archive + 'a,
     T::Archived: ArchivedLayout,
-    &'a I: ToIterRef<'a, S>,
 {
-    type Input = &'a I;
+    type Input = S;
 
     fn input<Sink: ByteSink + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
-        self.iter = Some(item.to_iter_ref().into_iter());
+        self.iter = Some(item.into_iter());
         self.poll_pending(sink)
     }
 
@@ -653,7 +697,7 @@ where
     ) -> Result<Poll<()>, ZebinError> {
         let iter = self.iter.as_mut().ok_or(ZebinError::SerializationError {
             pos: sink.pos(),
-            message: "IterEncoder polled before input",
+            message: "OwnedIterEncoder polled before input",
         })?;
         loop {
             if self.seq_encoder.poll_pending(sink)?.is_pending() {
@@ -678,19 +722,26 @@ where
         }
     }
 
-    fn finish<Sink: ByteSink + ?Sized>(self, _sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
-        Ok(Poll::Ready(()))
+    fn finish<Sink: ByteSink + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+        self.seq_encoder.finish(sink)
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<I, T> Encode for IterArchive<I, T>
 where
+    I: IntoIterator<Item = T>,
     for<'a> &'a I: IntoIterator<Item = &'a T>,
     T: Encode + Archive,
     T::Archived: ArchivedLayout,
+    for<'a> T: Encode<Input<'a> = T> + 'a,
 {
+    type Input<'a>
+        = IterArchive<I, T>
+    where
+        Self: 'a;
     type Encoder<'a>
-        = IterEncoder<'a, I, T, IterArchive<I, T>>
+        = OwnedIterEncoder<'a, IterArchive<I, T>, T>
     where
         Self: 'a;
 
@@ -698,6 +749,40 @@ where
     where
         Self: 'a,
     {
-        IterEncoder::new()
+        OwnedIterEncoder::new()
     }
 }
+
+impl<I, T> MeasureBody for IterArchive<I, T>
+where
+    for<'a> &'a I: IntoIterator<Item = &'a T>,
+    T: MeasureBody + Archive,
+    T::Archived: ArchivedLayout,
+{
+    fn measure_body(&self) -> Result<usize, ZebinError> {
+        let mut pos = 0usize;
+        let alignment = <T::Archived as ArchivedLayout>::ALIGNMENT.get();
+        let fixed = <T::Archived as ArchivedLayout>::FIXED_SIZE.is_some();
+        for item in (&self.0).into_iter() {
+            pos = pos
+                .checked_add(1)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+            if fixed {
+                let pad = (alignment - (pos % alignment)) % alignment;
+                pos = pos
+                    .checked_add(pad)
+                    .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+            }
+            pos = pos
+                .checked_add(item.measure_body()?)
+                .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        }
+        pos = pos
+            .checked_add(1)
+            .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
+        Ok(pos)
+    }
+}
+
+// Backwards-compatible alias so external uses still resolve.
+pub type IterEncoder<'a, S, T> = OwnedIterEncoder<'a, S, T>;
