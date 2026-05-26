@@ -297,6 +297,7 @@ impl<'a, T: Decode<'a>> SequenceDecodeStrategy<'a, T> for BackwardSequenceStrate
 /// Object model layer: type-level archive and decode contracts.
 pub trait Archive {
     type Archived;
+    const ALLOW_MISSING: bool = false;
 }
 
 /// Contract for providing a static default archived view value.
@@ -328,6 +329,12 @@ impl<T: SchemaAware + ?Sized> SchemaAware for &T {
 /// Contract for decoded views that can restore the source type.
 pub trait Restore<T> {
     fn restore(&self) -> Result<T, ZebinError>;
+
+    fn restore_missing() -> Result<T, ZebinError> {
+        Err(ZebinError::DeserializeError {
+            message: "Missing required field",
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -540,3 +547,18 @@ impl<T: MeasureBody + ?Sized> MeasureBody for &T {
         (**self).measure_body()
     }
 }
+
+/// Helper contract for resolving fields, supporting default error for missing required fields
+/// and None fallback for optional fields.
+pub trait ArchivedField<'a>: Sized + 'a {
+    #[inline]
+    fn resolve_field(
+        view: Option<&Self>,
+        field_id: u16,
+        pos: usize,
+    ) -> Result<&Self, ZebinError> {
+        view.ok_or(ZebinError::Decode(DecodeError::MissingField { field_id, pos }))
+    }
+}
+
+impl<'a, T: FixedLayout + 'a> ArchivedField<'a> for T {}

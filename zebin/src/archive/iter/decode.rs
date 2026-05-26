@@ -315,6 +315,8 @@ impl<'a, A: Decode<'a>> Iterator for ArchivedIterIter<'a, A> {
     }
 }
 
+impl<'a, A: 'a> ArchivedField<'a> for ArchivedIter<'a, A> {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

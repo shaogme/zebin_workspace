@@ -177,17 +177,6 @@ pub fn active_fields_by_id<'a>(record: &'a RecordSpec<'a>) -> Vec<(usize, &'a Fi
     fields
 }
 
-pub fn is_option_type(ty: &Type) -> bool {
-    match ty {
-        Type::Path(path) => path
-            .path
-            .segments
-            .last()
-            .is_some_and(|segment| segment.ident == "Option"),
-        _ => false,
-    }
-}
-
 pub fn field_state_type(field: &FieldSpec<'_>) -> TokenStream {
     if let Some((kind, bits)) = packed::packed_info(field) {
         match kind {

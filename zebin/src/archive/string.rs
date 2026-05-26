@@ -92,6 +92,8 @@ impl Restore<String> for ArchivedStringView<'_> {
     }
 }
 
+impl<'a> ArchivedField<'a> for ArchivedStringView<'a> {}
+
 pub trait ToBytesRef<'a> {
     fn to_bytes_ref(self) -> &'a [u8];
 }

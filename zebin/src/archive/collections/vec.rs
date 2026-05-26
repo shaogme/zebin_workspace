@@ -254,3 +254,5 @@ where
         Ok(queue)
     }
 }
+
+impl<'a, T: 'a> ArchivedField<'a> for ArchivedVec<'a, T> {}

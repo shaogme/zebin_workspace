@@ -469,3 +469,6 @@ impl<const BITS: u8> Restore<Vec<u8>> for ArchivedPackedU8SliceView<'_, BITS> {
         Ok(out)
     }
 }
+
+impl<'a> ArchivedField<'a> for ArchivedPackedBoolSliceView<'a> {}
+impl<'a, const BITS: u8> ArchivedField<'a> for ArchivedPackedU8SliceView<'a, BITS> {}

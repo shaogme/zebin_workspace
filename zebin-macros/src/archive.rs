@@ -4,8 +4,8 @@ use syn::{DeriveInput, Ident, Member};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, archived_name, field_archived_type, field_encoding,
-    field_user_ident, field_view_type, has_schema, input_member, is_option_type, parse_item,
-    variant_archived_name, variant_field_name, variant_method_name,
+    field_user_ident, field_view_type, has_schema, input_member, parse_item, variant_archived_name,
+    variant_field_name, variant_method_name,
 };
 
 fn view_name(name: &Ident) -> Ident {
@@ -85,16 +85,7 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
         let method = field_user_ident(record, index);
         let ty = field_view_type(field);
         let field_id = field.field_id.expect("field ids validated");
-        if is_option_type(field.ty) {
-            quote! {
-                pub fn #method(&self) -> Result<&#ty, zebin::ZebinError> {
-                    match self.#method.as_ref() {
-                        Some(value) => Ok(value),
-                        None => Ok(&zebin::archive::ArchivedOption::None),
-                    }
-                }
-            }
-        } else if field.default || field.default_value.is_some() {
+        if field.default || field.default_value.is_some() {
             let fallback = if let Some(default_value) = &field.default_value {
                 quote! { #default_value }
             } else {
@@ -111,12 +102,7 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
         } else {
             quote! {
                 pub fn #method(&self) -> Result<&#ty, zebin::ZebinError> {
-                    self.#method.as_ref().ok_or_else(|| {
-                        zebin::error::DecodeError::MissingField {
-                            field_id: #field_id,
-                            pos: self.pos,
-                        }.into()
-                    })
+                    <#ty as zebin::io::ArchivedField>::resolve_field(self.#method.as_ref(), #field_id, self.pos)
                 }
             }
         }
@@ -226,13 +212,14 @@ fn record_decode_impl(
         });
         let missing_checks = record.active_fields().zip(vars.iter()).filter_map(
             |((index, field), var)| {
-                if is_option_type(field.ty) || field.default || field.default_value.is_some() {
+                if field.default || field.default_value.is_some() {
                     None
                 } else {
                     let field_id = field.field_id.expect("field ids validated");
                     let field_name = field_user_ident(record, index);
+                    let field_ty = field.ty;
                     Some(quote! {
-                        if #var.is_none() {
+                        if !<#field_ty as zebin::Archive>::ALLOW_MISSING && #var.is_none() {
                             let mut __field_guard = __guard.push_field(stringify!(#field_name));
                             return Err(__field_guard.error(zebin::error::DecodeError::MissingField {
                                 field_id: #field_id,
@@ -245,14 +232,15 @@ fn record_decode_impl(
         );
         let validate_missing_checks = record.active_fields().enumerate().filter_map(
             |(i, (index, field))| {
-                if is_option_type(field.ty) || field.default || field.default_value.is_some() {
+                if field.default || field.default_value.is_some() {
                     None
                 } else {
                     let field_id = field.field_id.expect("field ids validated");
                     let field_name = field_user_ident(record, index);
+                    let field_ty = field.ty;
                     let seen_expr = quote! { __seen[#i] };
                     Some(quote! {
-                        if !#seen_expr {
+                        if !<#field_ty as zebin::Archive>::ALLOW_MISSING && !#seen_expr {
                             let mut __field_guard = __guard.push_field(stringify!(#field_name));
                             return Err(__field_guard.error(zebin::error::DecodeError::MissingField {
                                 field_id: #field_id,
@@ -419,6 +407,7 @@ fn helper_record(
         #view_def
         #decode
         #accessors
+        impl<'a> zebin::io::ArchivedField<'a> for #view<'a> {}
     }
 }
 
@@ -434,15 +423,9 @@ fn restore_field_expr(
 
     if has_schema(record) {
         let member = field_user_ident(record, index);
-        if is_option_type(field.ty) {
-            quote! {
-                match #source.#member.as_ref() {
-                    Some(value) => value.restore()?,
-                    None => ::core::default::Default::default(),
-                }
-            }
-        } else if field.default || field.default_value.is_some() {
-            let ty = field_view_type(field);
+        let field_ty = field.ty;
+        let ty = field_view_type(field);
+        if field.default || field.default_value.is_some() {
             let fallback = if let Some(default_value) = &field.default_value {
                 quote! { #default_value }
             } else {
@@ -452,11 +435,11 @@ fn restore_field_expr(
                 #source.#member.as_ref().unwrap_or(#fallback).restore()?
             }
         } else {
-            let field_id = field.field_id.expect("field ids validated");
             quote! {
-                #source.#member.as_ref()
-                    .ok_or(zebin::error::DecodeError::MissingField { field_id: #field_id, pos: #source.pos })?
-                    .restore()?
+                match #source.#member.as_ref() {
+                    Some(value) => value.restore()?,
+                    None => <#ty as zebin::io::Restore<#field_ty>>::restore_missing()?,
+                }
             }
         }
     } else {
@@ -724,6 +707,8 @@ fn enum_impl(
                 }
             }
         }
+
+        impl<'a> zebin::io::ArchivedField<'a> for #view<'a> {}
     }
 }
 

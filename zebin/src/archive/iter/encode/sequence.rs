@@ -233,7 +233,7 @@ where
 
             #[cfg(feature = "alloc")]
             {
-                if self.element_count % DEFAULT_CHUNK_SIZE == 0 {
+                if self.element_count.is_multiple_of(DEFAULT_CHUNK_SIZE) {
                     let offset = sink.pos() - self.start_pos.expect("start_pos must be set");
                     self.alloc_state.block_offsets.push(offset);
                 }

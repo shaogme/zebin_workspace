@@ -101,9 +101,13 @@ where
 {
     fn restore(&self) -> Result<Option<U>, ZebinError> {
         match self {
-            ArchivedOption::Some(value) => Ok(Some(value.restore()?)),
+            ArchivedOption::Some(value) => Ok(value.restore().map(Some)?),
             ArchivedOption::None => Ok(None),
         }
+    }
+
+    fn restore_missing() -> Result<Option<U>, ZebinError> {
+        Ok(None)
     }
 }
 
@@ -221,6 +225,7 @@ where
     T: Archive,
 {
     type Archived = ArchivedOption<T::Archived>;
+    const ALLOW_MISSING: bool = true;
 }
 
 impl<T> Encode for Option<T>
@@ -255,6 +260,20 @@ where
                 .checked_add(v.measure_body()?)
                 .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?),
             None => Ok(1),
+        }
+    }
+}
+
+impl<'a, T: 'a> ArchivedField<'a> for ArchivedOption<T> {
+    #[inline]
+    fn resolve_field(
+        view: Option<&Self>,
+        _field_id: u16,
+        _pos: usize,
+    ) -> Result<&Self, ZebinError> {
+        match view {
+            Some(v) => Ok(v),
+            None => Ok(&ArchivedOption::None),
         }
     }
 }

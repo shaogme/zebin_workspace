@@ -309,3 +309,5 @@ where
             .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
     }
 }
+
+impl<'a, T: 'a, E: 'a> ArchivedField<'a> for ArchivedResult<T, E> {}

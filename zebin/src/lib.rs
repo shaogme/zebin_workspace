@@ -41,9 +41,10 @@ pub mod prelude {
         },
         error::{ArchiveError, DecodeError, ZebinError},
         io::{
-            Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-            Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware,
-            SinkProgress, Storage, ZebinReader, ZebinWriter, decode, encode_chunked, reader,
+            Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
+            ArchivedLayout, ByteSink, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody,
+            Restore, SchemaAware, SinkProgress, Storage, ZebinReader, ZebinWriter, decode,
+            encode_chunked, reader,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -103,8 +104,9 @@ pub mod io {
     pub use crate::pub_fn::{encode, encode_into};
     pub use crate::read_impl::{Cursor, ZebinReader};
     pub use crate::traits_impl::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedLayout, ByteSink,
-        Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware, SinkProgress,
+        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
+        ArchivedLayout, ByteSink, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
+        SchemaAware, SinkProgress,
     };
     #[cfg(feature = "alloc")]
     pub use crate::traits_impl::{

@@ -611,3 +611,10 @@ where
         Ok((self.0.restore()?, self.1.restore()?))
     }
 }
+
+impl<'a, A, B> ArchivedField<'a> for (A, B)
+where
+    A: ArchivedField<'a>,
+    B: ArchivedField<'a>,
+{
+}

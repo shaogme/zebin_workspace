@@ -546,3 +546,5 @@ where
         Ok(VarIntVec { values: out })
     }
 }
+
+impl<'a, T: 'a> ArchivedField<'a> for ArchivedVarIntVec<T> {}

@@ -351,3 +351,5 @@ impl<T: VarIntNumber> MeasureBody for VarIntView<T> {
         Ok(encoded_len_u64(self.get().to_u64()))
     }
 }
+
+impl<'a, T: 'a> ArchivedField<'a> for VarIntView<T> {}
