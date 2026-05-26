@@ -208,10 +208,3 @@ where
         Ok(())
     }
 }
-
-pub fn measure_body_len<T>(value: &T) -> Result<usize, ZebinError>
-where
-    T: MeasureBody + ?Sized,
-{
-    value.measure_body()
-}

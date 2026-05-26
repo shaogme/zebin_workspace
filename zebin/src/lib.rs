@@ -137,15 +137,6 @@ pub use pub_fn::*;
 
 mod pub_fn {
     use super::prelude::*;
-
-    /// Measure the body length a value will occupy when serialized without the archive header.
-    pub fn measure_serialized_len<T>(value: &T) -> Result<usize, ZebinError>
-    where
-        T: MeasureBody + ?Sized,
-    {
-        crate::write::measure_body_len(value)
-    }
-
     /// Create a reader for the archived root object using the default header.
     pub fn reader<'a, T>(bytes: &'a [u8]) -> Result<ZebinReader<'a, T>, ZebinError>
     where
