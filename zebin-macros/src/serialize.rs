@@ -19,11 +19,7 @@ fn field_slot_ident(field: &crate::shared::FieldSpec<'_>) -> Ident {
 fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut fields = Vec::new();
     if has_schema(record) {
-        fields.push(quote! { pub __zebin_header_cursor: usize });
-        fields.push(quote! { pub __zebin_object_start: usize });
-        fields.push(quote! { pub __zebin_table_start: usize });
-        fields.push(quote! { pub __zebin_table_offset_cursor: usize });
-        fields.push(quote! { pub __zebin_object_len_cursor: usize });
+        fields.push(quote! { pub __schema_encoder: zebin::io::SchemaObjectEncoder });
     }
     for (index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
@@ -40,8 +36,8 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
         if has_schema(record) {
             let len_ident = field_len_ident(record, index);
             fields.push(quote! { pub #len_ident: u32 });
-            let entry_cursor_ident = format_ident!("__field_entry_cursor_{}", index);
-            fields.push(quote! { pub #entry_cursor_ident: usize });
+            let entry_encoder_ident = format_ident!("__field_entry_encoder_{}", index);
+            fields.push(quote! { pub #entry_encoder_ident: zebin::io::FieldEntryEncoder });
         }
     }
     fields
@@ -79,11 +75,7 @@ fn field_measure_expr(
 fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut inits = Vec::new();
     if has_schema(record) {
-        inits.push(quote! { __zebin_header_cursor: 0 });
-        inits.push(quote! { __zebin_object_start: 0 });
-        inits.push(quote! { __zebin_table_start: 0 });
-        inits.push(quote! { __zebin_table_offset_cursor: 0 });
-        inits.push(quote! { __zebin_object_len_cursor: 0 });
+        inits.push(quote! { __schema_encoder: zebin::io::SchemaObjectEncoder::new() });
     }
     for (index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
@@ -100,8 +92,8 @@ fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
         if has_schema(record) {
             let len_ident = field_len_ident(record, index);
             inits.push(quote! { #len_ident: 0 });
-            let entry_cursor_ident = format_ident!("__field_entry_cursor_{}", index);
-            inits.push(quote! { #entry_cursor_ident: 0 });
+            let entry_encoder_ident = format_ident!("__field_entry_encoder_{}", index);
+            inits.push(quote! { #entry_encoder_ident: zebin::io::FieldEntryEncoder::new() });
         }
     }
     inits
@@ -177,22 +169,8 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
             .expect("schema-bearing records require key");
         let schema_revision = record.schema_revision;
         quote! {
-            if self.__zebin_header_cursor == 0 {
-                self.__zebin_object_start = encoder.pos();
-            }
-            if self.__zebin_header_cursor < 12 {
-                let mut __zebin_header = [0u8; 12];
-                __zebin_header[0..4].copy_from_slice(&(#stable_schema_key as u32).to_le_bytes());
-                __zebin_header[4..8].copy_from_slice(&(#schema_revision as u32).to_le_bytes());
-                __zebin_header[8..10].copy_from_slice(&(#field_count as u16).to_le_bytes());
-                __zebin_header[10..12].copy_from_slice(&0u16.to_le_bytes());
-                let __zebin_remaining = 12 - self.__zebin_header_cursor;
-                if encoder.write(&__zebin_header[self.__zebin_header_cursor..])?
-                    .advance_cursor(&mut self.__zebin_header_cursor, __zebin_remaining)
-                    .is_pending()
-                {
-                    return Ok(::core::task::Poll::Pending);
-                }
+            if self.__schema_encoder.poll_write_header(encoder, #stable_schema_key, #schema_revision, #field_count as u16)?.is_pending() {
+                return Ok(::core::task::Poll::Pending);
             }
         }
     } else {
@@ -238,55 +216,27 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let table_write_and_len = if has_schema(record) {
         let table_polls = fields.iter().map(|(index, field)| {
             let len_ident = field_len_ident(record, *index);
-            let entry_cursor_ident = format_ident!("__field_entry_cursor_{}", *index);
+            let entry_encoder_ident = format_ident!("__field_entry_encoder_{}", *index);
             let field_id = field.field_id.expect("field ids validated");
             let encoding = field_encoding(field);
 
             quote! {
-                if self.#entry_cursor_ident < zebin::schema::FieldEntry::SIZE {
-                    let __field_entry_bytes = zebin::schema::FieldEntry {
-                        field_id: #field_id as u16,
-                        encoding: #encoding,
-                        payload_len: self.#len_ident,
-                    }
-                    .to_bytes();
-                    let __zebin_remaining = zebin::schema::FieldEntry::SIZE - self.#entry_cursor_ident;
-                    if encoder.write(&__field_entry_bytes[self.#entry_cursor_ident..])?
-                        .advance_cursor(&mut self.#entry_cursor_ident, __zebin_remaining)
-                        .is_pending()
-                    {
-                        return Ok(::core::task::Poll::Pending);
-                    }
+                if self.#entry_encoder_ident.poll_write(
+                    encoder,
+                    #field_id as u16,
+                    #encoding,
+                    self.#len_ident,
+                )?.is_pending() {
+                    return Ok(::core::task::Poll::Pending);
                 }
             }
         });
 
         quote! {
-            if self.__zebin_table_start == 0 {
-                self.__zebin_table_start = encoder.pos();
-            }
+            self.__schema_encoder.mark_table_start(encoder);
             #(#table_polls)*
-            if self.__zebin_table_offset_cursor < 4 {
-                let __offset_val = (self.__zebin_table_start - self.__zebin_object_start) as u32;
-                let __offset_bytes = __offset_val.to_le_bytes();
-                let __zebin_remaining = 4 - self.__zebin_table_offset_cursor;
-                if encoder.write(&__offset_bytes[self.__zebin_table_offset_cursor..])?
-                    .advance_cursor(&mut self.__zebin_table_offset_cursor, __zebin_remaining)
-                    .is_pending()
-                {
-                    return Ok(::core::task::Poll::Pending);
-                }
-            }
-            if self.__zebin_object_len_cursor < 4 {
-                let __total_len = (encoder.pos() - self.__zebin_object_start + 4 - self.__zebin_object_len_cursor) as u32;
-                let __len_bytes = __total_len.to_le_bytes();
-                let __zebin_remaining = 4 - self.__zebin_object_len_cursor;
-                if encoder.write(&__len_bytes[self.__zebin_object_len_cursor..])?
-                    .advance_cursor(&mut self.__zebin_object_len_cursor, __zebin_remaining)
-                    .is_pending()
-                {
-                    return Ok(::core::task::Poll::Pending);
-                }
+            if self.__schema_encoder.poll_write_footer(encoder)?.is_pending() {
+                return Ok(::core::task::Poll::Pending);
             }
         }
     } else {
@@ -608,8 +558,7 @@ fn enum_impl(
         }
 
         #vis struct #enum_state<'a> {
-            tag: [u8; 4],
-            tag_cursor: usize,
+            tag_encoder: zebin::io::TagEncoder,
             payload: Option<#payload_state<'a>>,
             pending_item: Option<#name>,
         }
@@ -620,20 +569,14 @@ fn enum_impl(
                 let (tag_val, payload_val) = match &item {
                     #(#begin_matches,)*
                 };
-                self.tag = tag_val.to_le_bytes();
+                self.tag_encoder.input(tag_val);
                 self.payload = payload_val;
                 self.pending_item = Some(item);
                 self.poll_pending(sink)
             }
             fn poll_pending<E: zebin::io::ByteSink + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
-                if self.tag_cursor < self.tag.len() {
-                    let __zebin_remaining = self.tag.len() - self.tag_cursor;
-                    if encoder.write(&self.tag[self.tag_cursor..])?
-                        .advance_cursor(&mut self.tag_cursor, __zebin_remaining)
-                        .is_pending()
-                    {
-                        return Ok(::core::task::Poll::Pending);
-                    }
+                if self.tag_encoder.poll_write(encoder)?.is_pending() {
+                    return Ok(::core::task::Poll::Pending);
                 }
                 if let Some(payload) = &mut self.payload {
                     if let Some(item) = self.pending_item.take() {
@@ -666,8 +609,7 @@ fn enum_impl(
             type Encoder<'a> = #enum_state<'a> where Self: 'a;
             fn encoder<'a>() -> Self::Encoder<'a> where Self: 'a {
                 #enum_state {
-                    tag: [0; 4],
-                    tag_cursor: 0,
+                    tag_encoder: zebin::io::TagEncoder::new(),
                     payload: None,
                     pending_item: None,
                 }

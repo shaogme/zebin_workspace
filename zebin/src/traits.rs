@@ -552,12 +552,11 @@ impl<T: MeasureBody + ?Sized> MeasureBody for &T {
 /// and None fallback for optional fields.
 pub trait ArchivedField<'a>: Sized + 'a {
     #[inline]
-    fn resolve_field(
-        view: Option<&Self>,
-        field_id: u16,
-        pos: usize,
-    ) -> Result<&Self, ZebinError> {
-        view.ok_or(ZebinError::Decode(DecodeError::MissingField { field_id, pos }))
+    fn resolve_field(view: Option<&Self>, field_id: u16, pos: usize) -> Result<&Self, ZebinError> {
+        view.ok_or(ZebinError::Decode(DecodeError::MissingField {
+            field_id,
+            pos,
+        }))
     }
 }
 

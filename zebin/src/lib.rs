@@ -115,6 +115,7 @@ pub mod io {
     };
     #[cfg(feature = "mmap")]
     pub use crate::write::encoder::MmapEncoder;
+    pub use crate::write::encoder::{FieldEntryEncoder, SchemaObjectEncoder, TagEncoder};
     pub use crate::write::{ArchiveWriter, ZebinWriter};
 }
 
