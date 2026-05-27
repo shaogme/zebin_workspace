@@ -24,7 +24,7 @@ pub use encode::{IterEncoder, SeqEncoder, measure_block_index_overhead};
 pub(crate) struct DummyContext;
 
 impl ValidationContext for DummyContext {
-    fn push_depth(&mut self) -> Result<(), DecodeError> {
+    fn push_depth(&mut self) -> Result<(), AccessError> {
         Ok(())
     }
 
@@ -36,7 +36,7 @@ impl ValidationContext for DummyContext {
 
     fn record_error_path(&mut self) {}
 
-    fn check_range(&mut self, _pos: usize, _size: usize) -> Result<(), DecodeError> {
+    fn check_range(&mut self, _pos: usize, _size: usize) -> Result<(), AccessError> {
         Ok(())
     }
 
@@ -44,11 +44,11 @@ impl ValidationContext for DummyContext {
         &mut self,
         _pos: usize,
         _alignment: NonZeroUsize,
-    ) -> Result<(), DecodeError> {
+    ) -> Result<(), AccessError> {
         Ok(())
     }
 
-    fn check_sequence_len(&mut self, _len: usize, _pos: usize) -> Result<(), DecodeError> {
+    fn check_sequence_len(&mut self, _len: usize, _pos: usize) -> Result<(), AccessError> {
         Ok(())
     }
 }

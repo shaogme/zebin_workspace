@@ -69,9 +69,9 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<A> Decode for ArchivedVec<'_, A>
+impl<A> Access for ArchivedVec<'_, A>
 where
-    A: Decode,
+    A: Access,
 {
     type View<'a>
         = ArchivedVec<'a, A::View<'a>>
@@ -79,20 +79,20 @@ where
         Self: 'a;
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
     {
         let items =
-            <A::DecodeStrategy as SequenceDecodeStrategy<A>>::decode_sequence(cursor, context)?;
+            <A::DecodeStrategy as SequenceDecodeStrategy<A>>::access_sequence(cursor, context)?;
         Ok(ArchivedVec::new(items))
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -100,27 +100,27 @@ where
     }
 }
 
-impl<T, U> Restore<Vec<U>> for ArchivedVec<'_, T>
+impl<T, U> Deserialize<Vec<U>> for ArchivedVec<'_, T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+    fn deserialize(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.items.len());
         for item in &self.items {
-            out.push(item.restore()?);
+            out.push(item.deserialize()?);
         }
         Ok(out)
     }
 }
 
-impl<T, U> Restore<Vec<U>> for Vec<T>
+impl<T, U> Deserialize<Vec<U>> for Vec<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+    fn deserialize(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len());
         for item in self {
-            out.push(item.restore()?);
+            out.push(item.deserialize()?);
         }
         Ok(out)
     }
@@ -236,27 +236,27 @@ where
     }
 }
 
-impl<T, U> Restore<VecDeque<U>> for ArchivedVec<'_, T>
+impl<T, U> Deserialize<VecDeque<U>> for ArchivedVec<'_, T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
+    fn deserialize(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut queue = VecDeque::with_capacity(self.len());
         for item in self.iter() {
-            queue.push_back(item.restore()?);
+            queue.push_back(item.deserialize()?);
         }
         Ok(queue)
     }
 }
 
-impl<T, U> Restore<VecDeque<U>> for VecDeque<T>
+impl<T, U> Deserialize<VecDeque<U>> for VecDeque<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
+    fn deserialize(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut queue = VecDeque::with_capacity(self.len());
         for item in self {
-            queue.push_back(item.restore()?);
+            queue.push_back(item.deserialize()?);
         }
         Ok(queue)
     }

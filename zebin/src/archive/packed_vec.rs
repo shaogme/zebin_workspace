@@ -579,11 +579,11 @@ impl<'b, const BITS: u8> MeasureBody for PackedSlice<'b, u8, BITS> {
     }
 }
 
-impl<T, const BITS: u8, U> Restore<PackedVec<U, BITS>> for T
+impl<T, const BITS: u8, U> Deserialize<PackedVec<U, BITS>> for T
 where
-    T: Restore<Vec<U>>,
+    T: Deserialize<Vec<U>>,
 {
-    fn restore(&self) -> Result<PackedVec<U, BITS>, ZebinError> {
-        Ok(PackedVec::new(self.restore()?))
+    fn deserialize(&self) -> Result<PackedVec<U, BITS>, ZebinError> {
+        Ok(PackedVec::new(self.deserialize()?))
     }
 }

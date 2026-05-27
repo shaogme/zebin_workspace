@@ -28,7 +28,7 @@ pub enum Packet {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_struct_restore() {
+fn test_struct_deserialize() {
     let user = UserProfile {
         id: 42,
         username: "Alice".to_string(),
@@ -42,7 +42,7 @@ fn test_struct_restore() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_enum_restore() {
+fn test_enum_deserialize() {
     let ping = Packet::Ping;
     let buf_ping = zebin::encode(&ping).unwrap();
     let restored_ping: Packet = zebin::decode::<Packet, _>(&buf_ping).unwrap();
@@ -59,7 +59,7 @@ fn test_enum_restore() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_nested_restore() {
+fn test_nested_deserialize() {
     #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 3)]
     struct Container {
@@ -81,7 +81,7 @@ fn test_nested_restore() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_optional_option_restore() {
+fn test_optional_option_deserialize() {
     #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 4)]
     struct OptionalStruct {
@@ -157,7 +157,7 @@ fn test_enum_restore_no_alloc() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_ref_encode_restore() {
+fn test_ref_encode_deserialize() {
     let user = UserProfile {
         id: 42,
         username: "Alice".to_string(),

@@ -69,7 +69,7 @@ pub(crate) fn decode_block_index<C>(
     cursor: &mut Cursor<'_>,
     context: &mut C,
     len: usize,
-) -> Result<Option<BlockIndex>, DecodeError>
+) -> Result<Option<BlockIndex>, AccessError>
 where
     C: ValidationContext + ?Sized,
 {
@@ -89,7 +89,7 @@ where
     // chunk_size (varint)
     let chunk_size: usize = decode_u64(cursor, context)?;
     if chunk_size == 0 {
-        return Err(DecodeError::ValidationError {
+        return Err(AccessError::ValidationError {
             message: "Block index chunk_size must be > 0",
             pos: cursor.pos(),
         });
@@ -99,7 +99,7 @@ where
     let num_blocks: usize = decode_u64(cursor, context)?;
     let expected_blocks = len.div_ceil(chunk_size);
     if num_blocks != expected_blocks {
-        return Err(DecodeError::ValidationError {
+        return Err(AccessError::ValidationError {
             message: "Block index num_blocks mismatch",
             pos: cursor.pos(),
         });
@@ -143,7 +143,7 @@ where
 pub(crate) fn skip_block_index<C>(
     cursor: &mut Cursor<'_>,
     context: &mut C,
-) -> Result<(), DecodeError>
+) -> Result<(), AccessError>
 where
     C: ValidationContext + ?Sized,
 {

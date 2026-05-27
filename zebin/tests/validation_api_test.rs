@@ -2,7 +2,7 @@ use zebin::{ZebinArchive, ZebinEncode};
 
 #[cfg(feature = "alloc")]
 use zebin::prelude::{
-    DecodeError, ValidationConfig, ValidationPathStack, ZebinError, validate_detailed,
+    AccessError, ValidationConfig, ValidationPathStack, ZebinError, validate_detailed,
     validate_with_config,
 };
 
@@ -52,7 +52,7 @@ fn test_validate_detailed_reports_logical_path() {
 
     assert!(matches!(
         err,
-        ZebinError::Decode(DecodeError::ValidationError {
+        ZebinError::Access(AccessError::ValidationError {
             message: "Invalid bool value",
             ..
         })
@@ -83,7 +83,7 @@ fn test_validate_with_config_uses_custom_depth_limit() {
 
     assert!(matches!(
         err,
-        ZebinError::Decode(DecodeError::RecursionLimitExceeded)
+        ZebinError::Access(AccessError::RecursionLimitExceeded)
     ));
 }
 
@@ -106,7 +106,7 @@ fn test_validate_detailed_reports_schema_field_encoding_path() {
     assert_eq!(stack.to_string(), "flag");
     assert!(matches!(
         err,
-        ZebinError::Decode(DecodeError::UnexpectedFieldEncoding { field_id: 1, .. })
+        ZebinError::Access(AccessError::UnexpectedFieldEncoding { field_id: 1, .. })
     ));
 }
 
@@ -130,7 +130,7 @@ fn test_validate_detailed_reports_schema_field_length_path() {
     assert_eq!(stack.to_string(), "flag");
     assert!(matches!(
         err,
-        ZebinError::Decode(DecodeError::FieldLengthMismatch { field_id: 1, .. })
+        ZebinError::Access(AccessError::FieldLengthMismatch { field_id: 1, .. })
     ));
 }
 
@@ -159,7 +159,7 @@ fn test_validate_detailed_reports_duplicate_schema_field_path() {
     assert_eq!(stack.to_string(), "flag");
     assert!(matches!(
         err,
-        ZebinError::Decode(DecodeError::DuplicateField { field_id: 1, .. })
+        ZebinError::Access(AccessError::DuplicateField { field_id: 1, .. })
     ));
 }
 
@@ -179,7 +179,7 @@ fn test_validate_detailed_reports_trailing_bytes_at_root() {
     assert_eq!(stack.to_string(), "<root>");
     assert!(matches!(
         err,
-        ZebinError::Decode(DecodeError::ValidationError {
+        ZebinError::Access(AccessError::ValidationError {
             message: "Trailing bytes after root object",
             ..
         })
@@ -204,7 +204,7 @@ fn test_reader_rejects_invalid_sequence_marker_before_building_view() {
 
     assert!(matches!(
         err,
-        ZebinError::Decode(DecodeError::ValidationError {
+        ZebinError::Access(AccessError::ValidationError {
             message: "Invalid sequence marker",
             ..
         })

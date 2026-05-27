@@ -40,13 +40,12 @@ pub mod prelude {
             ArchivedPackedBoolSlice, ArchivedPackedU8Slice, IterArchive, PackedBoolSlice,
             PackedSlice, PackedU8Slice, VarInt, VarIntView,
         },
-        error::{ArchiveError, DecodeError, ZebinError},
+        error::{AccessError, ArchiveError, ZebinError},
         io::{
-            Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-            ArchivedLayout, Cursor, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore,
-            SchemaAware, SinkProgress, SliceEncoder, Storage, StorageMut, ZebinReader, ZebinWriter,
-            StorageMode, StaticMode, StreamMode, Sharder, NoSharder,
-            decode, reader, writer,
+            Access, Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
+            ArchivedLayout, Cursor, Deserialize, Encode, Encoder, FixedLayout, MeasureBody,
+            NoSharder, SchemaAware, Sharder, SinkProgress, SliceEncoder, StaticMode, Storage,
+            StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter, decode, reader, writer,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -104,14 +103,16 @@ pub mod io {
     pub use crate::io_impl::storage::mmap::MmapEncoder;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
-    pub use crate::io_impl::storage::{Storage, StorageMut, StorageMode, StaticMode, StreamMode, Sharder, NoSharder};
+    pub use crate::io_impl::storage::{
+        NoSharder, Sharder, StaticMode, Storage, StorageMode, StorageMut, StreamMode,
+    };
     pub use crate::pub_fn::{decode, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};
     pub use crate::read_impl::ZebinReader;
     pub use crate::traits_impl::{
-        Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-        ArchivedLayout, Decode, Encode, Encoder, FixedLayout, MeasureBody, Restore, SchemaAware,
+        Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
+        ArchivedLayout, Deserialize, Encode, Encoder, FixedLayout, MeasureBody, SchemaAware,
         SinkProgress,
     };
     #[cfg(feature = "alloc")]
@@ -131,7 +132,7 @@ pub mod error {
 pub use crate::archive_impl::ArchivedOption;
 pub use crate::error::ZebinError;
 pub use crate::read_impl::ZebinReader;
-pub use crate::traits_impl::{Archive, Decode, Encode, MeasureBody};
+pub use crate::traits_impl::{Access, Archive, Encode, MeasureBody};
 pub use crate::write::ZebinWriter;
 
 pub use memoffset;
@@ -146,7 +147,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage,
-        T::Archived: Decode,
+        T::Archived: Access,
     {
         ZebinReader::new(storage, ValidationConfig::default())
     }
@@ -156,8 +157,8 @@ mod pub_fn {
     where
         T: Archive + 'a,
         S: Storage + 'a,
-        T::Archived: Decode + 'a,
-        for<'b> <T::Archived as Decode>::View<'b>: Restore<T>,
+        T::Archived: Access + 'a,
+        for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
     {
         ZebinReader::<T, S>::decode(storage)
     }
@@ -167,7 +168,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage + 'a,
-        T::Archived: Decode,
+        T::Archived: Access,
     {
         ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), None)
     }
@@ -181,7 +182,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage + 'a,
-        T::Archived: Decode,
+        T::Archived: Access,
     {
         ZebinReader::<T, S>::validate(storage, config, stack)
     }
@@ -194,7 +195,7 @@ mod pub_fn {
     where
         T: Archive,
         S: Storage + 'a,
-        T::Archived: Decode,
+        T::Archived: Access,
     {
         ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), Some(stack))
     }

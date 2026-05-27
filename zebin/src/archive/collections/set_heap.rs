@@ -48,29 +48,29 @@ where
     }
 }
 
-impl<T, U> Restore<BTreeSet<U>> for ArchivedVec<'_, T>
+impl<T, U> Deserialize<BTreeSet<U>> for ArchivedVec<'_, T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<BTreeSet<U>, ZebinError> {
+    fn deserialize(&self) -> Result<BTreeSet<U>, ZebinError> {
         let mut set = BTreeSet::new();
         for item in self.iter() {
-            set.insert(item.restore()?);
+            set.insert(item.deserialize()?);
         }
         Ok(set)
     }
 }
 
-impl<T, U> Restore<BTreeSet<U>> for BTreeSet<T>
+impl<T, U> Deserialize<BTreeSet<U>> for BTreeSet<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<BTreeSet<U>, ZebinError> {
+    fn deserialize(&self) -> Result<BTreeSet<U>, ZebinError> {
         let mut set = BTreeSet::new();
         for item in self {
-            set.insert(item.restore()?);
+            set.insert(item.deserialize()?);
         }
         Ok(set)
     }
@@ -113,29 +113,29 @@ where
     }
 }
 
-impl<T, U> Restore<BinaryHeap<U>> for ArchivedVec<'_, T>
+impl<T, U> Deserialize<BinaryHeap<U>> for ArchivedVec<'_, T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<BinaryHeap<U>, ZebinError> {
+    fn deserialize(&self) -> Result<BinaryHeap<U>, ZebinError> {
         let mut heap = BinaryHeap::with_capacity(self.len());
         for item in self.iter() {
-            heap.push(item.restore()?);
+            heap.push(item.deserialize()?);
         }
         Ok(heap)
     }
 }
 
-impl<T, U> Restore<BinaryHeap<U>> for BinaryHeap<T>
+impl<T, U> Deserialize<BinaryHeap<U>> for BinaryHeap<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<BinaryHeap<U>, ZebinError> {
+    fn deserialize(&self) -> Result<BinaryHeap<U>, ZebinError> {
         let mut heap = BinaryHeap::with_capacity(self.len());
         for item in self {
-            heap.push(item.restore()?);
+            heap.push(item.deserialize()?);
         }
         Ok(heap)
     }
@@ -182,30 +182,30 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<T, U> Restore<std::collections::HashSet<U>> for ArchivedVec<'_, T>
+impl<T, U> Deserialize<std::collections::HashSet<U>> for ArchivedVec<'_, T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
     U: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<std::collections::HashSet<U>, ZebinError> {
+    fn deserialize(&self) -> Result<std::collections::HashSet<U>, ZebinError> {
         let mut set = std::collections::HashSet::with_capacity(self.len());
         for item in self.iter() {
-            set.insert(item.restore()?);
+            set.insert(item.deserialize()?);
         }
         Ok(set)
     }
 }
 
 #[cfg(feature = "std")]
-impl<T, U> Restore<std::collections::HashSet<U>> for std::collections::HashSet<T>
+impl<T, U> Deserialize<std::collections::HashSet<U>> for std::collections::HashSet<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
     U: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<std::collections::HashSet<U>, ZebinError> {
+    fn deserialize(&self) -> Result<std::collections::HashSet<U>, ZebinError> {
         let mut set = std::collections::HashSet::with_capacity(self.len());
         for item in self {
-            set.insert(item.restore()?);
+            set.insert(item.deserialize()?);
         }
         Ok(set)
     }

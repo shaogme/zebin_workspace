@@ -49,9 +49,9 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<A> Decode for ArchivedOption<A>
+impl<A> Access for ArchivedOption<A>
 where
-    A: Decode,
+    A: Access,
 {
     type View<'a>
         = ArchivedOption<A::View<'a>>
@@ -60,10 +60,10 @@ where
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -73,13 +73,13 @@ where
             0 => Ok(ArchivedOption::None),
             1 => {
                 let mut guard = context.push_variant("Some");
-                Ok(ArchivedOption::Some(A::decode(cursor, &mut *guard)?))
+                Ok(ArchivedOption::Some(A::access(cursor, &mut *guard)?))
             }
             _ => Err(context.validation_error("Invalid Option discriminant", pos)),
         }
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -102,13 +102,13 @@ impl<T: 'static> ArchivedDefault for ArchivedOption<T> {
     }
 }
 
-impl<T, U> Restore<Option<U>> for ArchivedOption<T>
+impl<T, U> Deserialize<Option<U>> for ArchivedOption<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<Option<U>, ZebinError> {
+    fn deserialize(&self) -> Result<Option<U>, ZebinError> {
         match self {
-            ArchivedOption::Some(value) => Ok(value.restore().map(Some)?),
+            ArchivedOption::Some(value) => Ok(value.deserialize().map(Some)?),
             ArchivedOption::None => Ok(None),
         }
     }
@@ -118,13 +118,13 @@ where
     }
 }
 
-impl<T, U> Restore<Option<U>> for Option<T>
+impl<T, U> Deserialize<Option<U>> for Option<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<Option<U>, ZebinError> {
+    fn deserialize(&self) -> Result<Option<U>, ZebinError> {
         match self {
-            Some(value) => Ok(Some(value.restore()?)),
+            Some(value) => Ok(Some(value.deserialize()?)),
             None => Ok(None),
         }
     }

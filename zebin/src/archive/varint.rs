@@ -79,7 +79,7 @@ pub trait VarIntNumber: Copy {
     const MAX_BYTES: usize;
 
     fn to_u64(self) -> u64;
-    fn try_from_u64(value: u64) -> Result<Self, DecodeError>;
+    fn try_from_u64(value: u64) -> Result<Self, AccessError>;
 }
 
 macro_rules! impl_varint_number {
@@ -92,34 +92,34 @@ macro_rules! impl_varint_number {
                     self as u64
                 }
 
-                fn try_from_u64(value: u64) -> Result<Self, DecodeError> {
-                    <$t>::try_from(value).map_err(|_| DecodeError::ValidationError {
+                fn try_from_u64(value: u64) -> Result<Self, AccessError> {
+                    <$t>::try_from(value).map_err(|_| AccessError::ValidationError {
                         message: "VarInt value out of range",
                         pos: 0,
                     })
                 }
             }
 
-            impl Restore<$t> for VarInt<$t> {
-                fn restore(&self) -> Result<$t, ZebinError> {
+            impl Deserialize<$t> for VarInt<$t> {
+                fn deserialize(&self) -> Result<$t, ZebinError> {
                     Ok(self.value)
                 }
             }
 
-            impl Restore<VarInt<$t>> for VarInt<$t> {
-                fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
+            impl Deserialize<VarInt<$t>> for VarInt<$t> {
+                fn deserialize(&self) -> Result<VarInt<$t>, ZebinError> {
                     Ok(*self)
                 }
             }
 
-            impl Restore<$t> for VarIntView<$t> {
-                fn restore(&self) -> Result<$t, ZebinError> {
+            impl Deserialize<$t> for VarIntView<$t> {
+                fn deserialize(&self) -> Result<$t, ZebinError> {
                     Ok(self.value)
                 }
             }
 
-            impl Restore<VarInt<$t>> for VarIntView<$t> {
-                fn restore(&self) -> Result<VarInt<$t>, ZebinError> {
+            impl Deserialize<VarInt<$t>> for VarIntView<$t> {
+                fn deserialize(&self) -> Result<VarInt<$t>, ZebinError> {
                     Ok(VarInt { value: self.value })
                 }
             }
@@ -170,7 +170,7 @@ pub(crate) fn encode_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-pub(crate) fn decode_u64<T, C>(cursor: &mut Cursor<'_>, context: &mut C) -> Result<T, DecodeError>
+pub(crate) fn decode_u64<T, C>(cursor: &mut Cursor<'_>, context: &mut C) -> Result<T, AccessError>
 where
     T: VarIntNumber,
     C: ValidationContext + ?Sized,
@@ -197,7 +197,7 @@ where
     }
 }
 
-impl<T> Decode for ArchivedVarInt<T>
+impl<T> Access for ArchivedVarInt<T>
 where
     T: VarIntNumber,
 {
@@ -208,10 +208,10 @@ where
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -220,7 +220,7 @@ where
         Ok(VarIntView { value })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {

@@ -26,17 +26,17 @@ where
     type Archived = [T::Archived; N];
 }
 
-impl<T, U, const N: usize> Restore<[U; N]> for [T; N]
+impl<T, U, const N: usize> Deserialize<[U; N]> for [T; N]
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<[U; N], ZebinError> {
+    fn deserialize(&self) -> Result<[U; N], ZebinError> {
         let mut out = core::mem::MaybeUninit::<[U; N]>::uninit();
         let out_ptr = out.as_mut_ptr() as *mut U;
         let mut initialized = 0usize;
 
         while initialized < N {
-            match self[initialized].restore() {
+            match self[initialized].deserialize() {
                 Ok(value) => unsafe {
                     out_ptr.add(initialized).write(value);
                     initialized += 1;
@@ -67,9 +67,9 @@ where
     const ALIGNMENT: NonZeroUsize = A::ALIGNMENT;
 }
 
-impl<A, const N: usize> Decode for [A; N]
+impl<A, const N: usize> Access for [A; N]
 where
-    A: Decode,
+    A: Access,
 {
     type View<'a>
         = [A::View<'a>; N]
@@ -78,10 +78,10 @@ where
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -92,7 +92,7 @@ where
 
         while initialized < N {
             let mut guard = context.push_index(initialized);
-            match A::decode(cursor, &mut *guard) {
+            match A::access(cursor, &mut *guard) {
                 Ok(value) => unsafe {
                     out_ptr.add(initialized).write(value);
                     initialized += 1;
@@ -111,7 +111,7 @@ where
         Ok(unsafe { out.assume_init() })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {

@@ -67,7 +67,7 @@ impl<'a, 'p> Validator<'a, 'p> {
         self.config
     }
 
-    pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), DecodeError> {
+    pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
         if size == 0 {
             if pos <= self.data.len() {
                 return Ok(());
@@ -88,13 +88,13 @@ impl<'a, 'p> Validator<'a, 'p> {
         &mut self,
         pos: usize,
         alignment: NonZeroUsize,
-    ) -> Result<(), DecodeError> {
+    ) -> Result<(), AccessError> {
         let alignment_value = alignment.get();
         let remainder = pos % alignment_value;
         if remainder != 0 {
             let actual =
                 NonZeroUsize::new(remainder).expect("misaligned position has non-zero remainder");
-            return Err(self.error(DecodeError::AlignmentError {
+            return Err(self.error(AccessError::AlignmentError {
                 expected: alignment,
                 actual,
                 pos,
@@ -103,9 +103,9 @@ impl<'a, 'p> Validator<'a, 'p> {
         Ok(())
     }
 
-    pub fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), DecodeError> {
+    pub fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), AccessError> {
         if len > self.config.max_sequence_len {
-            return Err(self.error(DecodeError::ValidationError {
+            return Err(self.error(AccessError::ValidationError {
                 message: "Sequence length limit exceeded",
                 pos,
             }));
@@ -113,9 +113,9 @@ impl<'a, 'p> Validator<'a, 'p> {
         Ok(())
     }
 
-    pub fn push_depth(&mut self) -> Result<(), DecodeError> {
+    pub fn push_depth(&mut self) -> Result<(), AccessError> {
         if self.depth >= self.config.max_depth {
-            return Err(self.error(DecodeError::RecursionLimitExceeded));
+            return Err(self.error(AccessError::RecursionLimitExceeded));
         }
         self.depth += 1;
         Ok(())
@@ -153,13 +153,13 @@ impl<'a, 'p> Validator<'a, 'p> {
         self.data
     }
 
-    fn validation_error(&mut self, message: &'static str, pos: usize) -> DecodeError {
-        self.error(DecodeError::ValidationError { message, pos })
+    fn validation_error(&mut self, message: &'static str, pos: usize) -> AccessError {
+        self.error(AccessError::ValidationError { message, pos })
     }
 }
 
 impl ValidationContext for Validator<'_, '_> {
-    fn push_depth(&mut self) -> Result<(), DecodeError> {
+    fn push_depth(&mut self) -> Result<(), AccessError> {
         self.push_depth()
     }
 
@@ -179,15 +179,15 @@ impl ValidationContext for Validator<'_, '_> {
         self.record_error_path()
     }
 
-    fn check_range(&mut self, pos: usize, size: usize) -> Result<(), DecodeError> {
+    fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
         self.check_range(pos, size)
     }
 
-    fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), DecodeError> {
+    fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), AccessError> {
         self.check_alignment(pos, alignment)
     }
 
-    fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), DecodeError> {
+    fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), AccessError> {
         self.check_sequence_len(len, pos)
     }
 }

@@ -1,4 +1,4 @@
-use crate::io::{Storage, Sharder};
+use crate::io::{Sharder, Storage};
 use crate::prelude::*;
 
 /// Safe access layer output that keeps the validated byte slice alive.
@@ -35,10 +35,10 @@ where
         self.offset >= self.storage.as_slice().len()
     }
 
-    pub fn read(&mut self) -> Result<<T::Archived as Decode>::View<'_>, ZebinError>
+    pub fn read(&mut self) -> Result<<T::Archived as Access>::View<'_>, ZebinError>
     where
         T: Archive,
-        T::Archived: Decode,
+        T::Archived: Access,
     {
         let len = self.storage.as_slice().len();
         if self.offset >= len {
@@ -52,20 +52,20 @@ where
 
         let mut validator = Validator::with_config(remaining, self.config, None);
         let mut cursor = Cursor::new(remaining, H::SIZE);
-        let root = T::Archived::decode(&mut cursor, &mut validator)?;
+        let view = T::Archived::access(&mut cursor, &mut validator)?;
         self.offset += cursor.pos();
-        Ok(root)
+        Ok(view)
     }
 
     pub fn decode(storage: S) -> Result<T, ZebinError>
     where
         T: Archive,
-        T::Archived: Decode,
-        for<'b> <T::Archived as Decode>::View<'b>: Restore<T>,
+        T::Archived: Access,
+        for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
     {
         let mut reader = Self::new(storage, ValidationConfig::default())?;
         let view = reader.read()?;
-        view.restore()
+        view.deserialize()
     }
 
     pub fn validate(
@@ -75,7 +75,7 @@ where
     ) -> Result<(), ZebinError>
     where
         T: Archive,
-        T::Archived: Decode,
+        T::Archived: Access,
     {
         let bytes = storage.as_slice();
         let header = H::parse(bytes)?;
@@ -92,7 +92,7 @@ fn validate_root<T>(
 ) -> Result<(), ZebinError>
 where
     T: Archive,
-    T::Archived: Decode,
+    T::Archived: Access,
 {
     let mut cursor = Cursor::new(bytes, root_pos);
     let (result, error_path) = {
@@ -118,7 +118,7 @@ fn validate_root_object_encoding<T, H>(header: &H) -> Result<(), ZebinError>
 where
     T: Archive,
     H: ArchiveHeaderTrait,
-    T::Archived: Decode,
+    T::Archived: Access,
 {
     let actual = ObjectEncoding::from_byte(header.flags()).ok_or(
         crate::error::ParseHeaderError::InvalidObjectEncoding {
@@ -128,7 +128,7 @@ where
     )?;
     let expected = <T::Archived as ArchivedLayout>::OBJECT_ENCODING;
     if actual != expected {
-        return Err(DecodeError::UnexpectedObjectEncoding {
+        return Err(AccessError::UnexpectedObjectEncoding {
             expected,
             actual,
             pos: H::SIZE.saturating_sub(1),

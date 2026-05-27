@@ -63,7 +63,10 @@ fn test_chunked_writer_resume() {
     }
 
     impl StorageMut for LimitedSink<'_> {
-        type Sharder<'b> = zebin::io::NoSharder where Self: 'b;
+        type Sharder<'b>
+            = zebin::io::NoSharder
+        where
+            Self: 'b;
 
         fn pos(&self) -> usize {
             self.buf.len()
@@ -256,7 +259,10 @@ impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
             self.current_index += 1;
             Ok(())
         } else {
-            Err(ZebinError::BufferTooSmall { pos: 0, required: 1 })
+            Err(ZebinError::BufferTooSmall {
+                pos: 0,
+                required: 1,
+            })
         }
     }
 }
@@ -264,7 +270,10 @@ impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
 #[cfg(feature = "alloc")]
 impl zebin::io::Storage for ShardedStorage {
     type Mode = zebin::io::StreamMode;
-    type Sharder<'a> = &'a mut ShardedStorage where Self: 'a;
+    type Sharder<'a>
+        = &'a mut ShardedStorage
+    where
+        Self: 'a;
 
     fn as_slice(&self) -> &[u8] {
         if self.current_index < self.shards.len() {

@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 /// Fixed-width archived overlay contract.
 ///
 /// Only plain fixed-size overlays implement this trait. Variable-width archive
-/// forms are decoded through [`Decode`] instead of pretending to have a stable
+/// forms are decoded through [`Access`] instead of pretending to have a stable
 /// in-place layout.
 pub trait FixedLayout: Sized {
     const ALIGNMENT: NonZeroUsize;
@@ -46,40 +46,40 @@ pub trait ArchivedLayout {
 }
 
 /// Read-side decode contract for consuming a value from a sequential cursor.
-pub trait Decode: ArchivedLayout + Sized {
+pub trait Access: ArchivedLayout + Sized {
     type View<'a>
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
     type DecodeStrategy: SequenceDecodeStrategy<Self>;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a;
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized;
 }
 
 /// Strategy for decoding and validating a sequence of elements.
 #[cfg(feature = "alloc")]
-pub trait SequenceDecodeStrategy<T: Decode> {
-    fn decode_sequence<'a, C>(
+pub trait SequenceDecodeStrategy<T: Access> {
+    fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View<'a>>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, AccessError>
     where
         C: ValidationContext + ?Sized;
 
     fn validate_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<(), DecodeError>
+    ) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized;
 }
@@ -89,11 +89,11 @@ pub trait SequenceDecodeStrategy<T: Decode> {
 pub struct FixedSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<T: Decode> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
-    fn decode_sequence<'a, C>(
+impl<T: Access> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
+    fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View<'a>>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -108,7 +108,7 @@ impl<T: Decode> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
             }
             cursor.align(T::ALIGNMENT, context)?;
             let mut guard = context.push_index(index);
-            items.push(T::decode(cursor, &mut *guard)?);
+            items.push(T::access(cursor, &mut *guard)?);
             index += 1;
         }
         // Skip trailing block index if present.
@@ -116,7 +116,7 @@ impl<T: Decode> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
         Ok(items)
     }
 
-    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -144,11 +144,11 @@ impl<T: Decode> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
 pub struct ForwardSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<T: Decode> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
-    fn decode_sequence<'a, C>(
+impl<T: Access> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
+    fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View<'a>>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -162,7 +162,7 @@ impl<T: Decode> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
                 return Err(context.validation_error("Invalid sequence marker", cursor.pos() - 1));
             }
             let mut guard = context.push_index(index);
-            items.push(T::decode(cursor, &mut *guard)?);
+            items.push(T::access(cursor, &mut *guard)?);
             index += 1;
         }
         // Skip trailing block index if present.
@@ -170,7 +170,7 @@ impl<T: Decode> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
         Ok(items)
     }
 
-    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -197,11 +197,11 @@ impl<T: Decode> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
 pub struct BackwardSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<T: Decode> SequenceDecodeStrategy<T> for BackwardSequenceStrategy {
-    fn decode_sequence<'a, C>(
+impl<T: Access> SequenceDecodeStrategy<T> for BackwardSequenceStrategy {
+    fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Vec<T::View<'a>>, DecodeError>
+    ) -> Result<Vec<T::View<'a>>, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -242,7 +242,7 @@ impl<T: Decode> SequenceDecodeStrategy<T> for BackwardSequenceStrategy {
             let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
             let mut guard = context.push_index(index);
 
-            let view = T::decode(&mut element_cursor, &mut *guard)?;
+            let view = T::access(&mut element_cursor, &mut *guard)?;
             temp_items.push(view);
 
             current_end = element_start - 1;
@@ -254,7 +254,7 @@ impl<T: Decode> SequenceDecodeStrategy<T> for BackwardSequenceStrategy {
         Ok(temp_items)
     }
 
-    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -337,8 +337,8 @@ impl<T: SchemaAware + ?Sized> SchemaAware for &T {
 }
 
 /// Contract for decoded views that can restore the source type.
-pub trait Restore<T> {
-    fn restore(&self) -> Result<T, ZebinError>;
+pub trait Deserialize<T> {
+    fn deserialize(&self) -> Result<T, ZebinError>;
 
     fn restore_missing() -> Result<T, ZebinError> {
         Err(ZebinError::DeserializeError {
@@ -553,7 +553,7 @@ impl<T: MeasureBody + ?Sized> MeasureBody for &T {
 pub trait ArchivedField<'a>: Sized + 'a {
     #[inline]
     fn resolve_field(view: Option<&Self>, field_id: u16, pos: usize) -> Result<&Self, ZebinError> {
-        view.ok_or(ZebinError::Decode(DecodeError::MissingField {
+        view.ok_or(ZebinError::Access(AccessError::MissingField {
             field_id,
             pos,
         }))

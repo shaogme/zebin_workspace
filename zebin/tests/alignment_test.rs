@@ -49,7 +49,10 @@ fn test_aligned_containers_chunked_writer_matches_full_encode() {
     }
 
     impl StorageMut for LimitedSink<'_> {
-        type Sharder<'b> = zebin::io::NoSharder where Self: 'b;
+        type Sharder<'b>
+            = zebin::io::NoSharder
+        where
+            Self: 'b;
 
         fn pos(&self) -> usize {
             self.buf.len()

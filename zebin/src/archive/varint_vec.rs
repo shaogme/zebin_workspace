@@ -101,17 +101,17 @@ impl<T> ArchivedLayout for ArchivedVarIntVec<T> {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
 }
 
-impl<T: VarIntNumber> Decode for ArchivedVarIntVec<T> {
+impl<T: VarIntNumber> Access for ArchivedVarIntVec<T> {
     type View<'a>
         = ArchivedVarIntVec<T>
     where
         Self: 'a;
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -125,7 +125,7 @@ impl<T: VarIntNumber> Decode for ArchivedVarIntVec<T> {
         Ok(ArchivedVarIntVec { values })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -523,41 +523,41 @@ impl<'a, T: VarIntNumber> MeasureBody for PackedVarIntSlice<'a, T> {
     }
 }
 
-impl<T: VarIntNumber> Restore<Vec<T>> for ArchivedVarIntVec<T> {
-    fn restore(&self) -> Result<Vec<T>, ZebinError> {
+impl<T: VarIntNumber> Deserialize<Vec<T>> for ArchivedVarIntVec<T> {
+    fn deserialize(&self) -> Result<Vec<T>, ZebinError> {
         Ok(self.values.clone())
     }
 }
 
-impl<T: VarIntNumber> Restore<VarIntVec<T>> for ArchivedVarIntVec<T> {
-    fn restore(&self) -> Result<VarIntVec<T>, ZebinError> {
+impl<T: VarIntNumber> Deserialize<VarIntVec<T>> for ArchivedVarIntVec<T> {
+    fn deserialize(&self) -> Result<VarIntVec<T>, ZebinError> {
         Ok(VarIntVec {
             values: self.values.clone(),
         })
     }
 }
 
-impl<T, U> Restore<VarIntVec<U>> for VarIntVec<T>
+impl<T, U> Deserialize<VarIntVec<U>> for VarIntVec<T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<VarIntVec<U>, ZebinError> {
+    fn deserialize(&self) -> Result<VarIntVec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.values.len());
         for item in &self.values {
-            out.push(item.restore()?);
+            out.push(item.deserialize()?);
         }
         Ok(VarIntVec { values: out })
     }
 }
 
-impl<'a, T, U> Restore<VarIntVec<U>> for PackedVarIntSlice<'a, T>
+impl<'a, T, U> Deserialize<VarIntVec<U>> for PackedVarIntSlice<'a, T>
 where
-    T: Restore<U>,
+    T: Deserialize<U>,
 {
-    fn restore(&self) -> Result<VarIntVec<U>, ZebinError> {
+    fn deserialize(&self) -> Result<VarIntVec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.values.len());
         for item in self.values {
-            out.push(item.restore()?);
+            out.push(item.deserialize()?);
         }
         Ok(VarIntVec { values: out })
     }

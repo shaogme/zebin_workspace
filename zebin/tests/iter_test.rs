@@ -39,7 +39,7 @@ fn test_iter_archive_lazy() {
     let wrapped = IterArchive::new(set);
     let bytes = zebin::encode(wrapped).expect("failed to encode");
 
-    // 不做 Restore，直接获取零拷贝延迟反序列化视图
+    // 不做 Deserialize，直接获取零拷贝延迟反序列化视图
     let mut reader = zebin::reader::<IterArchive<BTreeSet<u64>, u64>, _>(&bytes)
         .expect("failed to create reader");
     let archived_iter = reader.read().unwrap();
@@ -65,16 +65,17 @@ fn test_iter_archive_restore_explicit() {
         .expect("failed to create reader");
     let archived_iter = reader.read().unwrap();
 
-    use zebin::prelude::Restore;
+    use zebin::prelude::Deserialize;
 
     // 显式恢复为 Vec
-    let restored_vec: Vec<u64> = archived_iter.restore().expect("failed to restore Vec");
+    let restored_vec: Vec<u64> = archived_iter.deserialize().expect("failed to restore Vec");
     assert_eq!(restored_vec, vec![100, 200]);
 
     // 显式恢复为 VecDeque
     use std::collections::VecDeque;
-    let restored_deque: VecDeque<u64> =
-        archived_iter.restore().expect("failed to restore VecDeque");
+    let restored_deque: VecDeque<u64> = archived_iter
+        .deserialize()
+        .expect("failed to restore VecDeque");
     let expected_deque: VecDeque<u64> = vec![100, 200].into();
     assert_eq!(restored_deque, expected_deque);
 }
@@ -136,11 +137,11 @@ fn test_small_sequence_no_index() {
     let wrapped = IterArchive::new(data.clone());
     let bytes = zebin::encode(wrapped).expect("encode");
 
-    // Decode as Vec (via ForwardSequenceStrategy) – should work.
+    // Access as Vec (via ForwardSequenceStrategy) – should work.
     let decoded: Vec<u64> = zebin::decode::<Vec<u64>, _>(&bytes).expect("decode Vec");
     assert_eq!(decoded, data);
 
-    // Decode as IterArchive – should also work and still support get().
+    // Access as IterArchive – should also work and still support get().
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
     assert_eq!(archived.len(), 30);
@@ -204,7 +205,7 @@ fn test_backward_compat_iter_to_vec() {
     let wrapped = IterArchive::new(data.clone());
     let bytes = zebin::encode(wrapped).expect("encode");
 
-    // Decode as Vec<u64> – ForwardSequenceStrategy must skip block index.
+    // Access as Vec<u64> – ForwardSequenceStrategy must skip block index.
     let decoded: Vec<u64> = zebin::decode::<Vec<u64>, _>(&bytes).expect("decode");
     assert_eq!(decoded, data);
 }
@@ -216,7 +217,7 @@ fn test_backward_compat_vec_to_iter() {
     let data: Vec<u64> = (0..200).collect();
     let bytes = zebin::encode(data.clone()).expect("encode");
 
-    // Decode as IterArchive – should still work (no block index, linear fallback).
+    // Access as IterArchive – should still work (no block index, linear fallback).
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
     assert_eq!(archived.len(), 200);
@@ -240,8 +241,8 @@ fn test_chunked_index_variable_length_elements() {
     // Spot-check several positions across block boundaries.
     for &i in &[0, 1, 63, 64, 65, 127, 128, 129, 190, 199] {
         let val: String = {
-            use zebin::prelude::Restore;
-            archived.get(i).unwrap().restore().unwrap()
+            use zebin::prelude::Deserialize;
+            archived.get(i).unwrap().deserialize().unwrap()
         };
         assert_eq!(val, format!("item_{:05}", i), "mismatch at {i}");
     }

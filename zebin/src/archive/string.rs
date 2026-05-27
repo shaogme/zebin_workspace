@@ -50,17 +50,17 @@ impl ArchivedLayout for ArchivedString {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::LengthPrefixed;
 }
 
-impl Decode for ArchivedString {
+impl Access for ArchivedString {
     type View<'a>
         = ArchivedStringView<'a>
     where
         Self: 'a;
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -73,7 +73,7 @@ impl Decode for ArchivedString {
         Ok(ArchivedStringView { value })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -93,8 +93,8 @@ impl ArchivedDefault for ArchivedStringView<'_> {
     }
 }
 
-impl Restore<String> for ArchivedStringView<'_> {
-    fn restore(&self) -> Result<String, ZebinError> {
+impl Deserialize<String> for ArchivedStringView<'_> {
+    fn deserialize(&self) -> Result<String, ZebinError> {
         Ok(self.value.to_string())
     }
 }
@@ -319,14 +319,14 @@ impl MeasureBody for str {
     }
 }
 
-impl Restore<String> for String {
-    fn restore(&self) -> Result<String, ZebinError> {
+impl Deserialize<String> for String {
+    fn deserialize(&self) -> Result<String, ZebinError> {
         Ok(self.clone())
     }
 }
 
-impl Restore<String> for str {
-    fn restore(&self) -> Result<String, ZebinError> {
+impl Deserialize<String> for str {
+    fn deserialize(&self) -> Result<String, ZebinError> {
         Ok(self.to_string())
     }
 }

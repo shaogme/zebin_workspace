@@ -113,9 +113,9 @@ fn test_borrowed_container_round_trip() {
     assert_eq!(unsafe { archived.borrowed_text.as_str() }, "borrowed");
     assert_eq!(unsafe { archived.owned_text.as_str() }, "owned");
 
-    use zebin::prelude::Restore;
-    let borrowed: Vec<u32> = archived.borrowed_numbers.restore().unwrap();
+    use zebin::prelude::Deserialize;
+    let borrowed: Vec<u32> = archived.borrowed_numbers.deserialize().unwrap();
     assert_eq!(borrowed, vec![1, 2, 3]);
-    let owned: Vec<u32> = archived.owned_numbers.restore().unwrap();
+    let owned: Vec<u32> = archived.owned_numbers.deserialize().unwrap();
     assert_eq!(owned, vec![4, 5, 6]);
 }

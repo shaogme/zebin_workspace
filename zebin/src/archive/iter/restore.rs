@@ -14,13 +14,13 @@ use std::collections::{HashMap, HashSet};
 use super::{DummyContext, IterArchive, decode::ArchivedIter};
 
 #[cfg(feature = "alloc")]
-pub(crate) fn decode_next_element<'a, T: Decode>(
+pub(crate) fn access_next_element<'a, T: Access>(
     cursor: &mut Cursor<'a>,
 ) -> Result<T::View<'a>, ZebinError> {
     let mut context = DummyContext;
     let marker = cursor.read_u8(&mut context)?;
     if marker != 1 {
-        return Err(ZebinError::Decode(DecodeError::ValidationError {
+        return Err(ZebinError::Access(AccessError::ValidationError {
             message: "Invalid sequence marker",
             pos: cursor.pos() - 1,
         }));
@@ -28,120 +28,120 @@ pub(crate) fn decode_next_element<'a, T: Decode>(
     if <T as ArchivedLayout>::FIXED_SIZE.is_some() {
         cursor.align(<T as ArchivedLayout>::ALIGNMENT, &mut context)?;
     }
-    Ok(T::decode(cursor, &mut context)?)
+    Ok(T::access(cursor, &mut context)?)
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<Vec<U>> for ArchivedIter<'_, T>
+impl<T, U> Deserialize<Vec<U>> for ArchivedIter<'_, T>
 where
-    T: Decode,
-    for<'a> T::View<'a>: Restore<U>,
+    T: Access,
+    for<'a> T::View<'a>: Deserialize<U>,
 {
-    fn restore(&self) -> Result<Vec<U>, ZebinError> {
+    fn deserialize(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor)?;
-            out.push(view.restore()?);
+            let view = access_next_element::<T>(&mut cursor)?;
+            out.push(view.deserialize()?);
         }
         Ok(out)
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<VecDeque<U>> for ArchivedIter<'_, T>
+impl<T, U> Deserialize<VecDeque<U>> for ArchivedIter<'_, T>
 where
-    T: Decode,
-    for<'a> T::View<'a>: Restore<U>,
+    T: Access,
+    for<'a> T::View<'a>: Deserialize<U>,
 {
-    fn restore(&self) -> Result<VecDeque<U>, ZebinError> {
+    fn deserialize(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut out = VecDeque::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor)?;
-            out.push_back(view.restore()?);
+            let view = access_next_element::<T>(&mut cursor)?;
+            out.push_back(view.deserialize()?);
         }
         Ok(out)
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<BTreeSet<U>> for ArchivedIter<'_, T>
+impl<T, U> Deserialize<BTreeSet<U>> for ArchivedIter<'_, T>
 where
-    T: Decode,
-    for<'a> T::View<'a>: Restore<U>,
+    T: Access,
+    for<'a> T::View<'a>: Deserialize<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<BTreeSet<U>, ZebinError> {
+    fn deserialize(&self) -> Result<BTreeSet<U>, ZebinError> {
         let mut out = BTreeSet::new();
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor)?;
-            out.insert(view.restore()?);
+            let view = access_next_element::<T>(&mut cursor)?;
+            out.insert(view.deserialize()?);
         }
         Ok(out)
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Restore<BinaryHeap<U>> for ArchivedIter<'_, T>
+impl<T, U> Deserialize<BinaryHeap<U>> for ArchivedIter<'_, T>
 where
-    T: Decode,
-    for<'a> T::View<'a>: Restore<U>,
+    T: Access,
+    for<'a> T::View<'a>: Deserialize<U>,
     U: Ord,
 {
-    fn restore(&self) -> Result<BinaryHeap<U>, ZebinError> {
+    fn deserialize(&self) -> Result<BinaryHeap<U>, ZebinError> {
         let mut out = BinaryHeap::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor)?;
-            out.push(view.restore()?);
+            let view = access_next_element::<T>(&mut cursor)?;
+            out.push(view.deserialize()?);
         }
         Ok(out)
     }
 }
 
 #[cfg(feature = "std")]
-impl<T, U> Restore<HashSet<U>> for ArchivedIter<'_, T>
+impl<T, U> Deserialize<HashSet<U>> for ArchivedIter<'_, T>
 where
-    T: Decode,
-    for<'a> T::View<'a>: Restore<U>,
+    T: Access,
+    for<'a> T::View<'a>: Deserialize<U>,
     U: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<HashSet<U>, ZebinError> {
+    fn deserialize(&self) -> Result<HashSet<U>, ZebinError> {
         let mut out = HashSet::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor)?;
-            out.insert(view.restore()?);
+            let view = access_next_element::<T>(&mut cursor)?;
+            out.insert(view.deserialize()?);
         }
         Ok(out)
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, I, U> Restore<IterArchive<I, U>> for ArchivedIter<'_, T>
+impl<T, I, U> Deserialize<IterArchive<I, U>> for ArchivedIter<'_, T>
 where
-    Self: Restore<I>,
+    Self: Deserialize<I>,
 {
-    fn restore(&self) -> Result<IterArchive<I, U>, ZebinError> {
-        Ok(IterArchive::new(self.restore()?))
+    fn deserialize(&self) -> Result<IterArchive<I, U>, ZebinError> {
+        Ok(IterArchive::new(self.deserialize()?))
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<T, UK, UV> Restore<BTreeMap<UK, UV>> for ArchivedIter<'_, T>
+impl<T, UK, UV> Deserialize<BTreeMap<UK, UV>> for ArchivedIter<'_, T>
 where
-    T: Decode,
-    for<'a> T::View<'a>: Restore<(UK, UV)>,
+    T: Access,
+    for<'a> T::View<'a>: Deserialize<(UK, UV)>,
     UK: Ord,
 {
-    fn restore(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
+    fn deserialize(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
         let mut map = BTreeMap::new();
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor)?;
-            let (k, v) = view.restore()?;
+            let view = access_next_element::<T>(&mut cursor)?;
+            let (k, v) = view.deserialize()?;
             map.insert(k, v);
         }
         Ok(map)
@@ -149,18 +149,18 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<T, UK, UV> Restore<HashMap<UK, UV>> for ArchivedIter<'_, T>
+impl<T, UK, UV> Deserialize<HashMap<UK, UV>> for ArchivedIter<'_, T>
 where
-    T: Decode,
-    for<'a> T::View<'a>: Restore<(UK, UV)>,
+    T: Access,
+    for<'a> T::View<'a>: Deserialize<(UK, UV)>,
     UK: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<HashMap<UK, UV>, ZebinError> {
+    fn deserialize(&self) -> Result<HashMap<UK, UV>, ZebinError> {
         let mut map = HashMap::with_capacity(self.len);
         let mut cursor = Cursor::new(self.bytes, self.start_pos);
         for _ in 0..self.len {
-            let view = decode_next_element::<T>(&mut cursor)?;
-            let (k, v) = view.restore()?;
+            let view = access_next_element::<T>(&mut cursor)?;
+            let (k, v) = view.deserialize()?;
             map.insert(k, v);
         }
         Ok(map)

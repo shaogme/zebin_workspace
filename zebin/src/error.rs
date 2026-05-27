@@ -29,7 +29,7 @@ impl core::error::Error for ParseHeaderError {}
 
 /// Errors that can occur during validation or sequential decoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecodeError {
+pub enum AccessError {
     Infallible,
     AlignmentError {
         expected: NonZeroUsize,
@@ -79,11 +79,11 @@ pub enum DecodeError {
     RecursionLimitExceeded,
 }
 
-impl core::fmt::Display for DecodeError {
+impl core::fmt::Display for AccessError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            DecodeError::Infallible => write!(f, "infallible error"),
-            DecodeError::AlignmentError {
+            AccessError::Infallible => write!(f, "infallible error"),
+            AccessError::AlignmentError {
                 expected,
                 actual,
                 pos,
@@ -92,11 +92,11 @@ impl core::fmt::Display for DecodeError {
                 "alignment error at {pos}: expected alignment {}, actual remainder {}",
                 expected, actual
             ),
-            DecodeError::InvalidFieldTable { pos } => write!(f, "invalid field table at {pos}"),
-            DecodeError::ValidationError { message, pos } => {
+            AccessError::InvalidFieldTable { pos } => write!(f, "invalid field table at {pos}"),
+            AccessError::ValidationError { message, pos } => {
                 write!(f, "validation error at {pos}: {message}")
             }
-            DecodeError::UnexpectedObjectEncoding {
+            AccessError::UnexpectedObjectEncoding {
                 expected,
                 actual,
                 pos,
@@ -104,13 +104,13 @@ impl core::fmt::Display for DecodeError {
                 f,
                 "object encoding mismatch at {pos}: expected {expected:?}, found {actual:?}"
             ),
-            DecodeError::MissingField { field_id, pos } => {
+            AccessError::MissingField { field_id, pos } => {
                 write!(f, "missing field {field_id} at {pos}")
             }
-            DecodeError::DuplicateField { field_id, pos } => {
+            AccessError::DuplicateField { field_id, pos } => {
                 write!(f, "duplicate field {field_id} at {pos}")
             }
-            DecodeError::UnexpectedFieldEncoding {
+            AccessError::UnexpectedFieldEncoding {
                 field_id,
                 expected,
                 actual,
@@ -119,7 +119,7 @@ impl core::fmt::Display for DecodeError {
                 f,
                 "field {field_id} encoding mismatch at {pos}: expected {expected:?}, found {actual:?}"
             ),
-            DecodeError::FieldLengthMismatch {
+            AccessError::FieldLengthMismatch {
                 field_id,
                 expected,
                 actual,
@@ -128,22 +128,22 @@ impl core::fmt::Display for DecodeError {
                 f,
                 "field {field_id} length mismatch at {pos}: expected {expected}, consumed {actual}"
             ),
-            DecodeError::FieldOverflow { field, pos } => write!(f, "{field} overflow at {pos}"),
-            DecodeError::FieldOutOfBounds { field, pos } => {
+            AccessError::FieldOverflow { field, pos } => write!(f, "{field} overflow at {pos}"),
+            AccessError::FieldOutOfBounds { field, pos } => {
                 write!(f, "{field} out of bounds at {pos}")
             }
-            DecodeError::RecursionLimitExceeded => write!(f, "recursion limit exceeded"),
+            AccessError::RecursionLimitExceeded => write!(f, "recursion limit exceeded"),
         }
     }
 }
 
-impl From<core::convert::Infallible> for DecodeError {
+impl From<core::convert::Infallible> for AccessError {
     fn from(error: core::convert::Infallible) -> Self {
         match error {}
     }
 }
 
-impl core::error::Error for DecodeError {}
+impl core::error::Error for AccessError {}
 
 /// Errors that can occur during the archiving process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,7 +187,7 @@ pub enum ZebinError {
         revision: SchemaRevision,
     },
     LayoutRegistryFull,
-    Decode(DecodeError),
+    Access(AccessError),
     ArchiveError(ArchiveError),
     HeaderParseError(ParseHeaderError),
     #[cfg(feature = "mmap")]
@@ -196,9 +196,9 @@ pub enum ZebinError {
     Io(std::io::Error),
 }
 
-impl From<DecodeError> for ZebinError {
-    fn from(error: DecodeError) -> Self {
-        ZebinError::Decode(error)
+impl From<AccessError> for ZebinError {
+    fn from(error: AccessError) -> Self {
+        ZebinError::Access(error)
     }
 }
 
@@ -229,7 +229,7 @@ impl core::fmt::Display for ZebinError {
                 write!(f, "layout collision for key {key} revision {revision}")
             }
             ZebinError::LayoutRegistryFull => write!(f, "layout registry capacity exceeded"),
-            ZebinError::Decode(err) => write!(f, "{}", err),
+            ZebinError::Access(err) => write!(f, "{}", err),
             ZebinError::ArchiveError(err) => write!(f, "{}", err),
             ZebinError::HeaderParseError(err) => write!(f, "header parse error: {}", err),
             #[cfg(feature = "mmap")]

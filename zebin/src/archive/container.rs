@@ -164,32 +164,32 @@ impl Encode for Box<str> {
     }
 }
 
-impl<A, T> Restore<Box<T>> for A
+impl<A, T> Deserialize<Box<T>> for A
 where
     T: Sized,
-    A: Restore<T>,
+    A: Deserialize<T>,
 {
-    fn restore(&self) -> Result<Box<T>, ZebinError> {
-        Ok(Box::new(self.restore()?))
+    fn deserialize(&self) -> Result<Box<T>, ZebinError> {
+        Ok(Box::new(self.deserialize()?))
     }
 }
 
-impl<A> Restore<Box<str>> for A
+impl<A> Deserialize<Box<str>> for A
 where
-    A: Restore<alloc::string::String>,
+    A: Deserialize<alloc::string::String>,
 {
-    fn restore(&self) -> Result<Box<str>, ZebinError> {
-        Ok(self.restore()?.into_boxed_str())
+    fn deserialize(&self) -> Result<Box<str>, ZebinError> {
+        Ok(self.deserialize()?.into_boxed_str())
     }
 }
 
-impl<A, T> Restore<Box<[T]>> for A
+impl<A, T> Deserialize<Box<[T]>> for A
 where
     T: Clone,
-    A: Restore<alloc::vec::Vec<T>>,
+    A: Deserialize<alloc::vec::Vec<T>>,
 {
-    fn restore(&self) -> Result<Box<[T]>, ZebinError> {
-        Ok(self.restore()?.into_boxed_slice())
+    fn deserialize(&self) -> Result<Box<[T]>, ZebinError> {
+        Ok(self.deserialize()?.into_boxed_slice())
     }
 }
 
@@ -380,32 +380,32 @@ where
     }
 }
 
-impl<A, T> Restore<Rc<T>> for A
+impl<A, T> Deserialize<Rc<T>> for A
 where
     T: Sized,
-    A: Restore<T>,
+    A: Deserialize<T>,
 {
-    fn restore(&self) -> Result<Rc<T>, ZebinError> {
-        Ok(Rc::new(self.restore()?))
+    fn deserialize(&self) -> Result<Rc<T>, ZebinError> {
+        Ok(Rc::new(self.deserialize()?))
     }
 }
 
-impl<A> Restore<Rc<str>> for A
+impl<A> Deserialize<Rc<str>> for A
 where
-    A: Restore<alloc::string::String>,
+    A: Deserialize<alloc::string::String>,
 {
-    fn restore(&self) -> Result<Rc<str>, ZebinError> {
-        Ok(self.restore()?.into())
+    fn deserialize(&self) -> Result<Rc<str>, ZebinError> {
+        Ok(self.deserialize()?.into())
     }
 }
 
-impl<A, T> Restore<Rc<[T]>> for A
+impl<A, T> Deserialize<Rc<[T]>> for A
 where
     T: Clone,
-    A: Restore<alloc::vec::Vec<T>>,
+    A: Deserialize<alloc::vec::Vec<T>>,
 {
-    fn restore(&self) -> Result<Rc<[T]>, ZebinError> {
-        Ok(self.restore()?.into())
+    fn deserialize(&self) -> Result<Rc<[T]>, ZebinError> {
+        Ok(self.deserialize()?.into())
     }
 }
 
@@ -447,32 +447,32 @@ where
     }
 }
 
-impl<A, T> Restore<Arc<T>> for A
+impl<A, T> Deserialize<Arc<T>> for A
 where
     T: Sized,
-    A: Restore<T>,
+    A: Deserialize<T>,
 {
-    fn restore(&self) -> Result<Arc<T>, ZebinError> {
-        Ok(Arc::new(self.restore()?))
+    fn deserialize(&self) -> Result<Arc<T>, ZebinError> {
+        Ok(Arc::new(self.deserialize()?))
     }
 }
 
-impl<A> Restore<Arc<str>> for A
+impl<A> Deserialize<Arc<str>> for A
 where
-    A: Restore<alloc::string::String>,
+    A: Deserialize<alloc::string::String>,
 {
-    fn restore(&self) -> Result<Arc<str>, ZebinError> {
-        Ok(self.restore()?.into())
+    fn deserialize(&self) -> Result<Arc<str>, ZebinError> {
+        Ok(self.deserialize()?.into())
     }
 }
 
-impl<A, T> Restore<Arc<[T]>> for A
+impl<A, T> Deserialize<Arc<[T]>> for A
 where
     T: Clone,
-    A: Restore<alloc::vec::Vec<T>>,
+    A: Deserialize<alloc::vec::Vec<T>>,
 {
-    fn restore(&self) -> Result<Arc<[T]>, ZebinError> {
-        Ok(self.restore()?.into())
+    fn deserialize(&self) -> Result<Arc<[T]>, ZebinError> {
+        Ok(self.deserialize()?.into())
     }
 }
 
@@ -515,12 +515,12 @@ where
     }
 }
 
-impl<'a, A, T> Restore<Cow<'a, T>> for A
+impl<'a, A, T> Deserialize<Cow<'a, T>> for A
 where
     T: ToOwned + Archive + ?Sized,
-    A: Restore<T::Owned>,
+    A: Deserialize<T::Owned>,
 {
-    fn restore(&self) -> Result<Cow<'a, T>, ZebinError> {
-        Ok(Cow::Owned(self.restore()?))
+    fn deserialize(&self) -> Result<Cow<'a, T>, ZebinError> {
+        Ok(Cow::Owned(self.deserialize()?))
     }
 }

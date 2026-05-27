@@ -32,7 +32,7 @@ impl<'a, A> ArchivedIter<'a, A> {
 
     pub fn iter<'s>(&'s self) -> ArchivedIterIter<'s, A>
     where
-        A: Decode,
+        A: Access,
     {
         ArchivedIterIter {
             cursor: Cursor::new(self.bytes, self.start_pos),
@@ -47,12 +47,12 @@ impl<'a, A> ArchivedIter<'a, A> {
     /// the block in O(1), scan at most `chunk_size` elements inside).
     /// Without a block index the method falls back to a full linear
     /// scan from the beginning.
-    pub fn get(&self, index: usize) -> Result<A::View<'a>, DecodeError>
+    pub fn get(&self, index: usize) -> Result<A::View<'a>, AccessError>
     where
-        A: Decode,
+        A: Access,
     {
         if index >= self.len {
-            return Err(DecodeError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "ArchivedIter::get index out of bounds",
                 pos: self.start_pos,
             });
@@ -75,7 +75,7 @@ impl<'a, A> ArchivedIter<'a, A> {
                 for _ in 0..intra {
                     let marker = cursor.read_u8(&mut ctx)?;
                     if marker != 1 {
-                        return Err(DecodeError::ValidationError {
+                        return Err(AccessError::ValidationError {
                             message: "Invalid sequence marker during indexed access",
                             pos: cursor.pos() - 1,
                         });
@@ -85,10 +85,10 @@ impl<'a, A> ArchivedIter<'a, A> {
                     }
                     A::validate(&mut cursor, &mut ctx)?;
                 }
-                // Decode the target element.
+                // Access the target element.
                 let marker = cursor.read_u8(&mut ctx)?;
                 if marker != 1 {
-                    return Err(DecodeError::ValidationError {
+                    return Err(AccessError::ValidationError {
                         message: "Invalid sequence marker during indexed access",
                         pos: cursor.pos() - 1,
                     });
@@ -96,7 +96,7 @@ impl<'a, A> ArchivedIter<'a, A> {
                 if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
                     cursor.align(<A as ArchivedLayout>::ALIGNMENT, &mut ctx)?;
                 }
-                return A::decode(&mut cursor, &mut ctx);
+                return A::access(&mut cursor, &mut ctx);
             }
         }
 
@@ -106,7 +106,7 @@ impl<'a, A> ArchivedIter<'a, A> {
         for _ in 0..index {
             let marker = cursor.read_u8(&mut ctx)?;
             if marker != 1 {
-                return Err(DecodeError::ValidationError {
+                return Err(AccessError::ValidationError {
                     message: "Invalid sequence marker",
                     pos: cursor.pos() - 1,
                 });
@@ -118,7 +118,7 @@ impl<'a, A> ArchivedIter<'a, A> {
         }
         let marker = cursor.read_u8(&mut ctx)?;
         if marker != 1 {
-            return Err(DecodeError::ValidationError {
+            return Err(AccessError::ValidationError {
                 message: "Invalid sequence marker",
                 pos: cursor.pos() - 1,
             });
@@ -126,7 +126,7 @@ impl<'a, A> ArchivedIter<'a, A> {
         if <A as ArchivedLayout>::FIXED_SIZE.is_some() {
             cursor.align(<A as ArchivedLayout>::ALIGNMENT, &mut ctx)?;
         }
-        A::decode(&mut cursor, &mut ctx)
+        A::access(&mut cursor, &mut ctx)
     }
 
     /// Create an iterator starting at `start` (0-indexed).
@@ -135,7 +135,7 @@ impl<'a, A> ArchivedIter<'a, A> {
     /// containing block in O(1); otherwise a linear skip is performed.
     pub fn iter_from<'s>(&'s self, start: usize) -> ArchivedIterIter<'s, A>
     where
-        A: Decode,
+        A: Access,
     {
         if start >= self.len {
             return ArchivedIterIter {
@@ -203,9 +203,9 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<A> Decode for ArchivedIter<'_, A>
+impl<A> Access for ArchivedIter<'_, A>
 where
-    A: Decode,
+    A: Access,
 {
     type View<'a>
         = ArchivedIter<'a, A>
@@ -215,16 +215,16 @@ where
     #[cfg(feature = "alloc")]
     type DecodeStrategy = crate::io::ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
     {
         let start_pos = cursor.pos();
-        let len = Self::decode_sequence_body(cursor, context)?;
+        let len = Self::access_sequence_body(cursor, context)?;
 
         // Try to parse trailing block index.
         let block_index = decode_block_index(cursor, context, len)?;
@@ -238,11 +238,11 @@ where
         })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
-        let len = Self::decode_sequence_body(cursor, context)?;
+        let len = Self::access_sequence_body(cursor, context)?;
         // Also consume block index bytes during validation.
         let _ = decode_block_index::<C>(cursor, context, len)?;
         Ok(())
@@ -250,12 +250,12 @@ where
 }
 
 impl<'marker, A> ArchivedIter<'marker, A> {
-    fn decode_sequence_body<'a, C>(
+    fn access_sequence_body<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<usize, DecodeError>
+    ) -> Result<usize, AccessError>
     where
-        A: Decode,
+        A: Access,
         C: ValidationContext + ?Sized,
     {
         let mut len = 0usize;
@@ -264,13 +264,13 @@ impl<'marker, A> ArchivedIter<'marker, A> {
             if marker == 0 {
                 break;
             } else if marker != 1 {
-                return Err(DecodeError::ValidationError {
+                return Err(AccessError::ValidationError {
                     message: "Invalid sequence marker",
                     pos: cursor.pos() - 1,
                 });
             }
             if len >= MAX_SEQUENCE_LEN {
-                return Err(DecodeError::ValidationError {
+                return Err(AccessError::ValidationError {
                     message: "Sequence length exceeds safety limit",
                     pos: cursor.pos() - 1,
                 });
@@ -293,8 +293,8 @@ pub struct ArchivedIterIter<'a, A> {
     pub(crate) _marker: PhantomData<A>,
 }
 
-impl<'a, A: Decode + 'a> Iterator for ArchivedIterIter<'a, A> {
-    type Item = Result<A::View<'a>, DecodeError>;
+impl<'a, A: Access + 'a> Iterator for ArchivedIterIter<'a, A> {
+    type Item = Result<A::View<'a>, AccessError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
@@ -311,9 +311,9 @@ impl<'a, A: Decode + 'a> Iterator for ArchivedIterIter<'a, A> {
                 {
                     return Some(Err(e));
                 }
-                Some(A::decode(&mut self.cursor, &mut context))
+                Some(A::access(&mut self.cursor, &mut context))
             }
-            Ok(_) => Some(Err(DecodeError::ValidationError {
+            Ok(_) => Some(Err(AccessError::ValidationError {
                 message: "Invalid sequence marker",
                 pos: self.cursor.pos() - 1,
             })),

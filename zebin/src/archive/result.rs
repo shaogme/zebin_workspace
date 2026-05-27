@@ -56,10 +56,10 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<A, B> Decode for ArchivedResult<A, B>
+impl<A, B> Access for ArchivedResult<A, B>
 where
-    A: Decode,
-    B: Decode,
+    A: Access,
+    B: Access,
 {
     type View<'a>
         = ArchivedResult<A::View<'a>, B::View<'a>>
@@ -68,10 +68,10 @@ where
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -80,17 +80,17 @@ where
         match cursor.read_u8(context)? {
             0 => {
                 let mut guard = context.push_variant("Ok");
-                Ok(ArchivedResult::Ok(A::decode(cursor, &mut *guard)?))
+                Ok(ArchivedResult::Ok(A::access(cursor, &mut *guard)?))
             }
             1 => {
                 let mut guard = context.push_variant("Err");
-                Ok(ArchivedResult::Err(B::decode(cursor, &mut *guard)?))
+                Ok(ArchivedResult::Err(B::access(cursor, &mut *guard)?))
             }
             _ => Err(context.validation_error("Invalid Result discriminant", pos)),
         }
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -109,28 +109,28 @@ where
     }
 }
 
-impl<T, E, U, V> Restore<Result<U, V>> for ArchivedResult<T, E>
+impl<T, E, U, V> Deserialize<Result<U, V>> for ArchivedResult<T, E>
 where
-    T: Restore<U>,
-    E: Restore<V>,
+    T: Deserialize<U>,
+    E: Deserialize<V>,
 {
-    fn restore(&self) -> Result<Result<U, V>, ZebinError> {
+    fn deserialize(&self) -> Result<Result<U, V>, ZebinError> {
         match self {
-            ArchivedResult::Ok(value) => Ok(Ok(value.restore()?)),
-            ArchivedResult::Err(value) => Ok(Err(value.restore()?)),
+            ArchivedResult::Ok(value) => Ok(Ok(value.deserialize()?)),
+            ArchivedResult::Err(value) => Ok(Err(value.deserialize()?)),
         }
     }
 }
 
-impl<T, E, U, V> Restore<Result<U, V>> for Result<T, E>
+impl<T, E, U, V> Deserialize<Result<U, V>> for Result<T, E>
 where
-    T: Restore<U>,
-    E: Restore<V>,
+    T: Deserialize<U>,
+    E: Deserialize<V>,
 {
-    fn restore(&self) -> Result<Result<U, V>, ZebinError> {
+    fn deserialize(&self) -> Result<Result<U, V>, ZebinError> {
         match self {
-            Ok(value) => Ok(Ok(value.restore()?)),
-            Err(value) => Ok(Err(value.restore()?)),
+            Ok(value) => Ok(Ok(value.deserialize()?)),
+            Err(value) => Ok(Err(value.deserialize()?)),
         }
     }
 }

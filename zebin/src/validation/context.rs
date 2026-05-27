@@ -3,7 +3,7 @@ use core::num::NonZeroUsize;
 
 /// Validation context used while sequentially decoding archive data.
 pub trait ValidationContext {
-    fn push_depth(&mut self) -> Result<(), DecodeError>;
+    fn push_depth(&mut self) -> Result<(), AccessError>;
 
     fn pop_depth(&mut self);
 
@@ -13,7 +13,7 @@ pub trait ValidationContext {
 
     fn record_error_path(&mut self);
 
-    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self>, DecodeError> {
+    fn guard(&mut self) -> Result<ArchivedDepthGuard<'_, Self>, AccessError> {
         ArchivedDepthGuard::new(self)
     }
 
@@ -29,19 +29,19 @@ pub trait ValidationContext {
         PathGuard::new(self, ValidationPathSegment::Variant(name))
     }
 
-    fn check_range(&mut self, pos: usize, size: usize) -> Result<(), DecodeError>;
+    fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError>;
 
-    fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), DecodeError>;
+    fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), AccessError>;
 
-    fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), DecodeError>;
+    fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), AccessError>;
 
-    fn error(&mut self, error: DecodeError) -> DecodeError {
+    fn error(&mut self, error: AccessError) -> AccessError {
         self.record_error_path();
         error
     }
 
-    fn validation_error(&mut self, message: &'static str, pos: usize) -> DecodeError {
-        self.error(DecodeError::ValidationError { message, pos })
+    fn validation_error(&mut self, message: &'static str, pos: usize) -> AccessError {
+        self.error(AccessError::ValidationError { message, pos })
     }
 }
 
@@ -54,12 +54,12 @@ impl<'a, C> ArchivedDepthGuard<'a, C>
 where
     C: ValidationContext + ?Sized,
 {
-    pub fn new(context: &'a mut C) -> Result<Self, DecodeError> {
+    pub fn new(context: &'a mut C) -> Result<Self, AccessError> {
         context.push_depth()?;
         Ok(Self { context })
     }
 
-    pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), DecodeError> {
+    pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
         self.context.check_range(pos, size)
     }
 
@@ -67,7 +67,7 @@ where
         &mut self,
         pos: usize,
         alignment: NonZeroUsize,
-    ) -> Result<(), DecodeError> {
+    ) -> Result<(), AccessError> {
         self.context.check_alignment(pos, alignment)
     }
 }

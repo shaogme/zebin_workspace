@@ -45,11 +45,11 @@ use alloc::vec::Vec;
 pub(crate) fn packed_byte_len(
     value_count: usize,
     bits_per_value: usize,
-) -> Result<usize, DecodeError> {
+) -> Result<usize, AccessError> {
     let total_bits =
         value_count
             .checked_mul(bits_per_value)
-            .ok_or(DecodeError::ValidationError {
+            .ok_or(AccessError::ValidationError {
                 message: "Packed length calculation overflow",
                 pos: 0,
             })?;
@@ -107,7 +107,7 @@ impl ArchivedLayout for ArchivedPackedBoolSlice {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 }
 
-impl Decode for ArchivedPackedBoolSlice {
+impl Access for ArchivedPackedBoolSlice {
     type View<'a>
         = ArchivedPackedBoolSliceView<'a>
     where
@@ -115,10 +115,10 @@ impl Decode for ArchivedPackedBoolSlice {
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -129,7 +129,7 @@ impl Decode for ArchivedPackedBoolSlice {
         Ok(ArchivedPackedBoolSliceView { len, bytes })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -186,7 +186,7 @@ impl<const BITS: u8> ArchivedLayout for ArchivedPackedU8Slice<BITS> {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::PackedBits;
 }
 
-impl<const BITS: u8> Decode for ArchivedPackedU8Slice<BITS> {
+impl<const BITS: u8> Access for ArchivedPackedU8Slice<BITS> {
     type View<'a>
         = ArchivedPackedU8SliceView<'a, BITS>
     where
@@ -194,10 +194,10 @@ impl<const BITS: u8> Decode for ArchivedPackedU8Slice<BITS> {
     #[cfg(feature = "alloc")]
     type DecodeStrategy = ForwardSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -223,7 +223,7 @@ impl<const BITS: u8> Decode for ArchivedPackedU8Slice<BITS> {
         Ok(ArchivedPackedU8SliceView { len, bytes })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -364,7 +364,7 @@ impl<'a> MeasureBody for ArchivedPackedBoolSliceView<'a> {
             packed_byte_len(self.len(), 1).map_err(|e| ZebinError::SerializationError {
                 pos: 0,
                 message: match e {
-                    DecodeError::ValidationError { message, .. } => message,
+                    AccessError::ValidationError { message, .. } => message,
                     _ => "packed length overflow",
                 },
             })?;
@@ -380,7 +380,7 @@ impl<'a, const BITS: u8> MeasureBody for ArchivedPackedU8SliceView<'a, BITS> {
             ZebinError::SerializationError {
                 pos: 0,
                 message: match e {
-                    DecodeError::ValidationError { message, .. } => message,
+                    AccessError::ValidationError { message, .. } => message,
                     _ => "packed length overflow",
                 },
             }
@@ -466,8 +466,8 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl Restore<Vec<bool>> for ArchivedPackedBoolSliceView<'_> {
-    fn restore(&self) -> Result<Vec<bool>, ZebinError> {
+impl Deserialize<Vec<bool>> for ArchivedPackedBoolSliceView<'_> {
+    fn deserialize(&self) -> Result<Vec<bool>, ZebinError> {
         let mut out = Vec::with_capacity(self.len());
         for i in 0..self.len() {
             out.push(self.get(i).unwrap());
@@ -477,8 +477,8 @@ impl Restore<Vec<bool>> for ArchivedPackedBoolSliceView<'_> {
 }
 
 #[cfg(feature = "alloc")]
-impl<const BITS: u8> Restore<Vec<u8>> for ArchivedPackedU8SliceView<'_, BITS> {
-    fn restore(&self) -> Result<Vec<u8>, ZebinError> {
+impl<const BITS: u8> Deserialize<Vec<u8>> for ArchivedPackedU8SliceView<'_, BITS> {
+    fn deserialize(&self) -> Result<Vec<u8>, ZebinError> {
         let mut out = Vec::with_capacity(self.len());
         for i in 0..self.len() {
             out.push(self.get(i).unwrap());

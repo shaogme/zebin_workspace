@@ -85,7 +85,7 @@ impl FieldEntry {
         bytes
     }
 
-    pub fn decode<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self, DecodeError>
+    pub fn access<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -101,7 +101,7 @@ impl FieldEntry {
             .ok_or_else(|| context.validation_error("Unknown field encoding", entry_pos + 2))?;
 
         if reserved != Self::RESERVED {
-            return Err(context.error(DecodeError::InvalidFieldTable { pos: entry_pos + 3 }));
+            return Err(context.error(AccessError::InvalidFieldTable { pos: entry_pos + 3 }));
         }
 
         Ok(Self {
@@ -117,12 +117,12 @@ impl FieldEntry {
         expected_encoding: FieldEncoding,
         already_seen: bool,
         context: &mut C,
-    ) -> Result<(), DecodeError>
+    ) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
         if self.encoding != expected_encoding {
-            return Err(context.error(DecodeError::UnexpectedFieldEncoding {
+            return Err(context.error(AccessError::UnexpectedFieldEncoding {
                 field_id: self.field_id,
                 expected: expected_encoding,
                 actual: self.encoding,
@@ -130,7 +130,7 @@ impl FieldEntry {
             }));
         }
         if already_seen {
-            return Err(context.error(DecodeError::DuplicateField {
+            return Err(context.error(AccessError::DuplicateField {
                 field_id: self.field_id,
                 pos: entry_pos,
             }));
@@ -143,12 +143,12 @@ impl FieldEntry {
         entry_pos: usize,
         consumed: usize,
         context: &mut C,
-    ) -> Result<(), DecodeError>
+    ) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
         if consumed != self.payload_len as usize {
-            return Err(context.error(DecodeError::FieldLengthMismatch {
+            return Err(context.error(AccessError::FieldLengthMismatch {
                 field_id: self.field_id,
                 expected: self.payload_len as usize,
                 actual: consumed,
@@ -170,11 +170,11 @@ pub struct SchemaObjectHeader {
 }
 
 impl SchemaObjectHeader {
-    pub fn decode_and_verify<'a, C>(
+    pub fn access_and_verify<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
         expected_key: StableSchemaKey,
-    ) -> Result<Self, DecodeError>
+    ) -> Result<Self, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -191,13 +191,13 @@ impl SchemaObjectHeader {
         let reserved = u16::from_le_bytes([bytes[10], bytes[11]]);
 
         if reserved != 0 {
-            return Err(context.error(DecodeError::InvalidFieldTable {
+            return Err(context.error(AccessError::InvalidFieldTable {
                 pos: object_start + 10,
             }));
         }
 
         if field_count as usize > MAX_SCHEMA_FIELDS {
-            return Err(context.error(DecodeError::InvalidFieldTable { pos: object_start }));
+            return Err(context.error(AccessError::InvalidFieldTable { pos: object_start }));
         }
 
         Ok(Self {
@@ -228,7 +228,7 @@ impl<'a> FieldTableReader<'a> {
         cursor: &mut Cursor<'a>,
         field_count: usize,
         _context: &mut C,
-    ) -> Result<Self, DecodeError>
+    ) -> Result<Self, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -238,7 +238,7 @@ impl<'a> FieldTableReader<'a> {
         })
     }
 
-    pub fn next<C>(&mut self, context: &mut C) -> Result<Option<NextField<'a>>, DecodeError>
+    pub fn next<C>(&mut self, context: &mut C) -> Result<Option<NextField<'a>>, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -246,7 +246,7 @@ impl<'a> FieldTableReader<'a> {
             return Ok(None);
         }
         let entry_pos = self.cursor.pos();
-        let entry = FieldEntry::decode(&mut self.cursor, context)?;
+        let entry = FieldEntry::access(&mut self.cursor, context)?;
         let payload = self
             .cursor
             .read_exact(entry.payload_len as usize, context)?;
@@ -266,10 +266,10 @@ pub fn process_field_table<'a, C, F>(
     field_count: usize,
     context: &mut C,
     mut handler: F,
-) -> Result<(), DecodeError>
+) -> Result<(), AccessError>
 where
     C: ValidationContext + ?Sized,
-    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), DecodeError>,
+    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), AccessError>,
 {
     let mut reader = FieldTableReader::new(cursor, field_count, context)?;
     while let Some(NextField {
@@ -290,10 +290,10 @@ pub fn process_trailing_field_table<'a, C, F>(
     field_count: usize,
     context: &mut C,
     mut handler: F,
-) -> Result<(), DecodeError>
+) -> Result<(), AccessError>
 where
     C: ValidationContext + ?Sized,
-    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), DecodeError>,
+    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), AccessError>,
 {
     let object_start = cursor.pos() - 12;
     let object_end = cursor.bytes().len();
@@ -332,7 +332,7 @@ where
     let mut table_cursor = cursor.with_pos(table_abs_pos);
     for i in 0..field_count {
         entry_positions[i] = table_cursor.pos();
-        entries[i] = FieldEntry::decode(&mut table_cursor, context)?;
+        entries[i] = FieldEntry::access(&mut table_cursor, context)?;
     }
 
     let mut payload_pos = object_start + 12;

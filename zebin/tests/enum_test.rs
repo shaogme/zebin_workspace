@@ -109,7 +109,7 @@ fn test_invalid_enum_discriminant() {
 
     let err = zebin::validate::<UnitMode, _>(&&buf[..written]).unwrap_err();
     match err {
-        ZebinError::Decode(zebin::error::DecodeError::ValidationError { .. }) => {}
+        ZebinError::Access(zebin::error::AccessError::ValidationError { .. }) => {}
         other => panic!("expected validation error, got {other:?}"),
     }
 }
@@ -138,7 +138,7 @@ fn test_recursive_enum_depth_limit() {
     let err = zebin::validate::<RecursiveNode, _>(&buf).unwrap_err();
     assert!(matches!(
         err,
-        ZebinError::Decode(zebin::error::DecodeError::RecursionLimitExceeded)
+        ZebinError::Access(zebin::error::AccessError::RecursionLimitExceeded)
     ));
 }
 
@@ -159,6 +159,6 @@ fn test_enum_layout_mismatch_rejected() {
     let err = zebin::validate::<StructPacket, _>(&buf).unwrap_err();
     assert!(matches!(
         err,
-        ZebinError::Decode(zebin::error::DecodeError::UnexpectedFieldEncoding { .. })
+        ZebinError::Access(zebin::error::AccessError::UnexpectedFieldEncoding { .. })
     ));
 }

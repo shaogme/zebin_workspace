@@ -86,32 +86,32 @@ where
     }
 }
 
-impl<K, V, UK, UV> Restore<BTreeMap<UK, UV>> for ArchivedVec<'_, (K, V)>
+impl<K, V, UK, UV> Deserialize<BTreeMap<UK, UV>> for ArchivedVec<'_, (K, V)>
 where
-    K: Restore<UK>,
-    V: Restore<UV>,
+    K: Deserialize<UK>,
+    V: Deserialize<UV>,
     UK: Ord,
 {
-    fn restore(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
+    fn deserialize(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
         let mut map = BTreeMap::new();
         for item in self.iter() {
-            let (k, v) = item.restore()?;
+            let (k, v) = item.deserialize()?;
             map.insert(k, v);
         }
         Ok(map)
     }
 }
 
-impl<K, V, UK, UV> Restore<BTreeMap<UK, UV>> for BTreeMap<K, V>
+impl<K, V, UK, UV> Deserialize<BTreeMap<UK, UV>> for BTreeMap<K, V>
 where
-    K: Restore<UK>,
-    V: Restore<UV>,
+    K: Deserialize<UK>,
+    V: Deserialize<UV>,
     UK: Ord,
 {
-    fn restore(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
+    fn deserialize(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
         let mut map = BTreeMap::new();
         for (k, v) in self {
-            map.insert(k.restore()?, v.restore()?);
+            map.insert(k.deserialize()?, v.deserialize()?);
         }
         Ok(map)
     }
@@ -198,16 +198,16 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, UK, UV> Restore<std::collections::HashMap<UK, UV>> for ArchivedVec<'_, (K, V)>
+impl<K, V, UK, UV> Deserialize<std::collections::HashMap<UK, UV>> for ArchivedVec<'_, (K, V)>
 where
-    K: Restore<UK>,
-    V: Restore<UV>,
+    K: Deserialize<UK>,
+    V: Deserialize<UV>,
     UK: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<std::collections::HashMap<UK, UV>, ZebinError> {
+    fn deserialize(&self) -> Result<std::collections::HashMap<UK, UV>, ZebinError> {
         let mut map = std::collections::HashMap::with_capacity(self.len());
         for item in self.iter() {
-            let (k, v) = item.restore()?;
+            let (k, v) = item.deserialize()?;
             map.insert(k, v);
         }
         Ok(map)
@@ -215,16 +215,17 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, UK, UV> Restore<std::collections::HashMap<UK, UV>> for std::collections::HashMap<K, V>
+impl<K, V, UK, UV> Deserialize<std::collections::HashMap<UK, UV>>
+    for std::collections::HashMap<K, V>
 where
-    K: Restore<UK>,
-    V: Restore<UV>,
+    K: Deserialize<UK>,
+    V: Deserialize<UV>,
     UK: Eq + core::hash::Hash,
 {
-    fn restore(&self) -> Result<std::collections::HashMap<UK, UV>, ZebinError> {
+    fn deserialize(&self) -> Result<std::collections::HashMap<UK, UV>, ZebinError> {
         let mut map = std::collections::HashMap::with_capacity(self.len());
         for (k, v) in self {
-            map.insert(k.restore()?, v.restore()?);
+            map.insert(k.deserialize()?, v.deserialize()?);
         }
         Ok(map)
     }

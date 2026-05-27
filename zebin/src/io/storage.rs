@@ -33,14 +33,19 @@ pub struct NoSharder;
 impl Sharder for NoSharder {
     #[inline]
     fn advance(&mut self) -> Result<(), ZebinError> {
-        Err(ZebinError::BufferTooSmall { pos: 0, required: 1 })
+        Err(ZebinError::BufferTooSmall {
+            pos: 0,
+            required: 1,
+        })
     }
 }
 
 /// Unified storage layer: byte-backed read access contract.
 pub trait Storage {
     type Mode: StorageMode;
-    type Sharder<'a>: Sharder where Self: 'a;
+    type Sharder<'a>: Sharder
+    where
+        Self: 'a;
 
     fn as_slice(&self) -> &[u8];
     fn sharder(&mut self) -> Self::Sharder<'_>;
@@ -48,7 +53,9 @@ pub trait Storage {
 
 /// Unified storage layer: byte-backed write access contract.
 pub trait StorageMut {
-    type Sharder<'a>: Sharder where Self: 'a;
+    type Sharder<'a>: Sharder
+    where
+        Self: 'a;
 
     fn pos(&self) -> usize;
     fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
@@ -59,7 +66,10 @@ pub trait StorageMut {
 
 impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
     type Mode = StaticMode;
-    type Sharder<'a> = NoSharder where Self: 'a;
+    type Sharder<'a>
+        = NoSharder
+    where
+        Self: 'a;
 
     #[inline]
     fn as_slice(&self) -> &[u8] {
@@ -74,7 +84,10 @@ impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
 
 impl<S: Storage + ?Sized> Storage for &mut S {
     type Mode = S::Mode;
-    type Sharder<'a> = S::Sharder<'a> where Self: 'a;
+    type Sharder<'a>
+        = S::Sharder<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn as_slice(&self) -> &[u8] {
@@ -88,7 +101,10 @@ impl<S: Storage + ?Sized> Storage for &mut S {
 }
 
 impl<S: StorageMut + ?Sized> StorageMut for &mut S {
-    type Sharder<'a> = S::Sharder<'a> where Self: 'a;
+    type Sharder<'a>
+        = S::Sharder<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn pos(&self) -> usize {
@@ -118,7 +134,10 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
 
 impl Storage for [u8] {
     type Mode = StaticMode;
-    type Sharder<'a> = NoSharder where Self: 'a;
+    type Sharder<'a>
+        = NoSharder
+    where
+        Self: 'a;
 
     #[inline]
     fn as_slice(&self) -> &[u8] {
@@ -134,7 +153,10 @@ impl Storage for [u8] {
 #[cfg(feature = "alloc")]
 impl Storage for Vec<u8> {
     type Mode = StaticMode;
-    type Sharder<'a> = NoSharder where Self: 'a;
+    type Sharder<'a>
+        = NoSharder
+    where
+        Self: 'a;
 
     #[inline]
     fn as_slice(&self) -> &[u8] {
@@ -192,7 +214,10 @@ impl<'a> SliceEncoder<'a> {
 }
 
 impl StorageMut for SliceEncoder<'_> {
-    type Sharder<'b> = NoSharder where Self: 'b;
+    type Sharder<'b>
+        = NoSharder
+    where
+        Self: 'b;
 
     fn pos(&self) -> usize {
         self.archive_pos
@@ -255,7 +280,10 @@ impl VecEncoder {
 
 #[cfg(feature = "alloc")]
 impl StorageMut for VecEncoder {
-    type Sharder<'b> = NoSharder where Self: 'b;
+    type Sharder<'b>
+        = NoSharder
+    where
+        Self: 'b;
 
     fn pos(&self) -> usize {
         self.archive_pos

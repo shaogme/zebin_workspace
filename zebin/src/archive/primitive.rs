@@ -104,7 +104,7 @@ macro_rules! impl_archive_for_primitive {
                 };
             }
 
-            impl Decode for $t {
+            impl Access for $t {
                 type View<'a>
                     = Self
                 where
@@ -112,10 +112,10 @@ macro_rules! impl_archive_for_primitive {
                 #[cfg(feature = "alloc")]
                 type DecodeStrategy = crate::io::FixedSequenceStrategy;
 
-                fn decode<'a, C>(
+                fn access<'a, C>(
                     cursor: &mut Cursor<'a>,
                     context: &mut C,
-                ) -> Result<Self::View<'a>, DecodeError>
+                ) -> Result<Self::View<'a>, AccessError>
                 where
                     C: ValidationContext + ?Sized,
                     Self: 'a
@@ -129,7 +129,7 @@ macro_rules! impl_archive_for_primitive {
                 fn validate<'a, C>(
                     cursor: &mut Cursor<'a>,
                     context: &mut C,
-                ) -> Result<(), DecodeError>
+                ) -> Result<(), AccessError>
                 where
                     C: ValidationContext + ?Sized,
                 {
@@ -166,8 +166,8 @@ macro_rules! impl_archive_for_primitive {
                 }
             }
 
-            impl Restore<$t> for $t {
-                fn restore(&self) -> Result<$t, ZebinError> {
+            impl Deserialize<$t> for $t {
+                fn deserialize(&self) -> Result<$t, ZebinError> {
                     Ok(*self)
                 }
             }
@@ -205,7 +205,7 @@ impl ArchivedLayout for bool {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 }
 
-impl Decode for bool {
+impl Access for bool {
     type View<'a>
         = bool
     where
@@ -213,10 +213,10 @@ impl Decode for bool {
     #[cfg(feature = "alloc")]
     type DecodeStrategy = FixedSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -230,11 +230,11 @@ impl Decode for bool {
         }
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
-        Self::decode(cursor, context).map(|_| ())
+        Self::access(cursor, context).map(|_| ())
     }
 }
 
@@ -272,8 +272,8 @@ impl ArchivedDefault for bool {
     }
 }
 
-impl Restore<bool> for bool {
-    fn restore(&self) -> Result<bool, ZebinError> {
+impl Deserialize<bool> for bool {
+    fn deserialize(&self) -> Result<bool, ZebinError> {
         Ok(*self)
     }
 }
@@ -345,7 +345,7 @@ impl ArchivedLayout for () {
     const ALIGNMENT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 }
 
-impl Decode for () {
+impl Access for () {
     type View<'a>
         = ()
     where
@@ -353,10 +353,10 @@ impl Decode for () {
     #[cfg(feature = "alloc")]
     type DecodeStrategy = FixedSequenceStrategy;
 
-    fn decode<'a, C>(
+    fn access<'a, C>(
         _cursor: &mut Cursor<'a>,
         _context: &mut C,
-    ) -> Result<Self::View<'a>, DecodeError>
+    ) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a,
@@ -364,7 +364,7 @@ impl Decode for () {
         Ok(())
     }
 
-    fn validate<'a, C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a, C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -403,8 +403,8 @@ impl ArchivedDefault for () {
     }
 }
 
-impl Restore<()> for () {
-    fn restore(&self) -> Result<(), ZebinError> {
+impl Deserialize<()> for () {
+    fn deserialize(&self) -> Result<(), ZebinError> {
         Ok(())
     }
 }
@@ -602,7 +602,7 @@ impl<A: ArchivedLayout, B: ArchivedLayout> ArchivedLayout for (A, B) {
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<A: Decode, B: Decode> Decode for (A, B) {
+impl<A: Access, B: Access> Access for (A, B) {
     type View<'a2>
         = (A::View<'a2>, B::View<'a2>)
     where
@@ -610,20 +610,20 @@ impl<A: Decode, B: Decode> Decode for (A, B) {
     #[cfg(feature = "alloc")]
     type DecodeStrategy = crate::io::ForwardSequenceStrategy;
 
-    fn decode<'a2, C>(
+    fn access<'a2, C>(
         cursor: &mut Cursor<'a2>,
         context: &mut C,
-    ) -> Result<Self::View<'a2>, DecodeError>
+    ) -> Result<Self::View<'a2>, AccessError>
     where
         C: ValidationContext + ?Sized,
         Self: 'a2,
     {
-        let key = A::decode(cursor, context)?;
-        let value = B::decode(cursor, context)?;
+        let key = A::access(cursor, context)?;
+        let value = B::access(cursor, context)?;
         Ok((key, value))
     }
 
-    fn validate<'a2, C>(cursor: &mut Cursor<'a2>, context: &mut C) -> Result<(), DecodeError>
+    fn validate<'a2, C>(cursor: &mut Cursor<'a2>, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -633,13 +633,13 @@ impl<A: Decode, B: Decode> Decode for (A, B) {
     }
 }
 
-impl<A, B, U, V> Restore<(U, V)> for (A, B)
+impl<A, B, U, V> Deserialize<(U, V)> for (A, B)
 where
-    A: Restore<U>,
-    B: Restore<V>,
+    A: Deserialize<U>,
+    B: Deserialize<V>,
 {
-    fn restore(&self) -> Result<(U, V), ZebinError> {
-        Ok((self.0.restore()?, self.1.restore()?))
+    fn deserialize(&self) -> Result<(U, V), ZebinError> {
+        Ok((self.0.deserialize()?, self.1.deserialize()?))
     }
 }
 
