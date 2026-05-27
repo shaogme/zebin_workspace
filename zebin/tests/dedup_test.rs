@@ -1,15 +1,15 @@
 #![cfg(feature = "alloc")]
 
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 #[zebin(schema_key = 860116326)]
 pub struct Child {
     #[zebin(id = 0)]
     pub value: u32,
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub struct Parent {
     pub children: Vec<Child>,
 }

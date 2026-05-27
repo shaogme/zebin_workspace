@@ -1,11 +1,11 @@
 #![cfg(feature = "alloc")]
 
 use zebin::{
-    ZebinArchive, ZebinSerialize,
+    ZebinAccess, ZebinDeserialize, ZebinSerialize,
     archive::{PackedBoolSlice, PackedBoolVec, PackedU8Slice, PackedU8Vec},
 };
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct PackedAttrStruct {
     #[zebin(packed)]
     flags: Vec<bool>,
@@ -14,14 +14,14 @@ struct PackedAttrStruct {
     plain: u32,
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct PackedTupleStruct(
     #[zebin(packed)] Vec<bool>,
     #[zebin(packed = 4)] Vec<u8>,
     u32,
 );
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 enum PackedVariantEnum {
     Empty,
     Packed(

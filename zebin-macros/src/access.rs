@@ -1,11 +1,11 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{DeriveInput, Ident, Member};
+use syn::{DeriveInput, Ident};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, archived_name, field_archived_type, field_encoding,
-    field_user_ident, field_view_type, has_schema, input_member, parse_item, variant_archived_name,
-    variant_field_name, variant_method_name,
+    field_user_ident, field_view_type, has_schema, parse_item, variant_archived_name,
+    variant_method_name,
 };
 
 fn view_name(name: &Ident) -> Ident {
@@ -14,17 +14,6 @@ fn view_name(name: &Ident) -> Ident {
 
 fn variant_view_name(enum_name: &Ident, variant: &Ident) -> Ident {
     format_ident!("{}{}View", enum_name, variant)
-}
-
-fn view_member(record: &RecordSpec<'_>, index: usize) -> Member {
-    match record.style {
-        RecordStyle::Named => Member::Named(field_user_ident(record, index)),
-        RecordStyle::Unnamed => {
-            let active_index = record.fields[..index].iter().filter(|f| !f.skip).count();
-            Member::Unnamed(syn::Index::from(active_index))
-        }
-        RecordStyle::Unit => unreachable!("unit has no fields"),
-    }
 }
 
 fn record_view_definition(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
@@ -419,85 +408,15 @@ fn helper_record(
     }
 }
 
-fn deserialize_field_expr(
-    record: &RecordSpec<'_>,
-    index: usize,
-    source: proc_macro2::TokenStream,
-) -> proc_macro2::TokenStream {
-    let field = &record.fields[index];
-    if field.skip {
-        return quote! { ::core::default::Default::default() };
-    }
-
-    if has_schema(record) {
-        let member = field_user_ident(record, index);
-        let field_ty = field.ty;
-        let ty = field_view_type(field);
-        if field.default || field.default_value.is_some() {
-            let fallback = if let Some(default_value) = &field.default_value {
-                quote! { #default_value }
-            } else {
-                quote! { <#ty as zebin::io::ArchivedDefault>::archived_default() }
-            };
-            quote! {
-                #source.#member.as_ref().unwrap_or(#fallback).deserialize()?
-            }
-        } else {
-            quote! {
-                match #source.#member.as_ref() {
-                    Some(value) => value.deserialize()?,
-                    None => <#ty as zebin::io::Deserialize<#field_ty>>::deserialize_missing()?,
-                }
-            }
-        }
-    } else {
-        let member = view_member(record, index);
-        quote! { #source.#member.deserialize()? }
-    }
-}
-
-fn record_deserialize_impl(
-    name: &Ident,
-    view: &Ident,
-    record: &RecordSpec<'_>,
-) -> proc_macro2::TokenStream {
-    let fields = record.fields.iter().enumerate().map(|(index, _)| {
-        let source = quote! { self };
-        let expr = deserialize_field_expr(record, index, source);
-        match record.style {
-            RecordStyle::Named => {
-                let member = input_member(record, index);
-                quote! { #member: #expr }
-            }
-            RecordStyle::Unnamed => quote! { #expr },
-            RecordStyle::Unit => quote! {},
-        }
-    });
-    let constructor = match record.style {
-        RecordStyle::Named => quote! { #name { #(#fields,)* } },
-        RecordStyle::Unnamed => quote! { #name( #(#fields,)* ) },
-        RecordStyle::Unit => quote! { #name },
-    };
-    quote! {
-        impl<'a> zebin::io::Deserialize<#name> for #view<'a> {
-            fn deserialize(&self) -> Result<#name, zebin::ZebinError> {
-                Ok(#constructor)
-            }
-        }
-    }
-}
-
 fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let marker = archived_name(name);
     let view = view_name(name);
     let helper = helper_record(&marker, &view, record);
-    let deserialize = record_deserialize_impl(name, &view, record);
     quote! {
         #helper
         impl zebin::Archive for #name {
             type Archived = #marker;
         }
-        #deserialize
     }
 }
 
@@ -618,36 +537,6 @@ fn enum_impl(
         })
         .collect();
 
-    let deserialize_arms: Vec<_> = variants.iter().map(|variant| {
-        let view_variant = variant.rename.as_ref().unwrap_or(variant.ident);
-        let original_variant = variant.ident;
-        if variant.record.style == RecordStyle::Unit {
-            quote! { #view::#view_variant => Ok(#name::#original_variant) }
-        } else {
-            let payload_ident = variant_field_name(original_variant);
-            let fields = variant.record.fields.iter().enumerate().map(|(index, _)| {
-                let expr = deserialize_field_expr(&variant.record, index, quote! { #payload_ident });
-                match variant.record.style {
-                    RecordStyle::Named => {
-                        let member = input_member(&variant.record, index);
-                        quote! { #member: #expr }
-                    }
-                    RecordStyle::Unnamed => quote! { #expr },
-                    RecordStyle::Unit => quote! {},
-                }
-            });
-            match variant.record.style {
-                RecordStyle::Named => quote! {
-                    #view::#view_variant(#payload_ident) => Ok(#name::#original_variant { #(#fields,)* })
-                },
-                RecordStyle::Unnamed => quote! {
-                    #view::#view_variant(#payload_ident) => Ok(#name::#original_variant( #(#fields,)* ))
-                },
-                RecordStyle::Unit => unreachable!(),
-            }
-        }
-    }).collect();
-
     quote! {
         #(#helpers)*
 
@@ -709,15 +598,6 @@ fn enum_impl(
 
         impl zebin::Archive for #name {
             type Archived = #marker;
-        }
-
-        impl<'a> zebin::io::Deserialize<#name> for #view<'a> {
-            fn deserialize(&self) -> Result<#name, zebin::ZebinError> {
-                match self {
-                    #view::__ZebinMarker(_) => unreachable!("marker variant is never constructed"),
-                    #(#deserialize_arms,)*
-                }
-            }
         }
 
         impl<'a> zebin::io::ArchivedField<'a> for #view<'a> {}

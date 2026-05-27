@@ -6,11 +6,11 @@ use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
 use zebin::prelude::{SinkProgress, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
-use zebin::{ZebinArchive, ZebinError, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize};
 use zebin::{access, writer};
 
 #[cfg(feature = "alloc")]
-#[derive(Debug, PartialEq, Eq, ZebinArchive, ZebinSerialize, Clone)]
+#[derive(Debug, PartialEq, Eq, ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct AlignedContainers {
     values: Vec<u64>,
     fixed: [u64; 3],

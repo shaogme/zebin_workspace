@@ -9,10 +9,10 @@ use zebin::io::SliceSerializer;
 use zebin::prelude::{SinkProgress, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::reader;
-use zebin::{ZebinArchive, ZebinSerialize, writer};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub struct UserProfile {
     pub id: u64,
     pub username: String,
@@ -148,7 +148,7 @@ fn test_chunked_writer_resume() {
     assert_eq!(sink.buf, expected);
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub struct SimpleUser {
     pub id: u64,
 }

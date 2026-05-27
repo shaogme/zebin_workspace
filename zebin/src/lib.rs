@@ -57,7 +57,7 @@ pub mod prelude {
             validate_detailed, validate_with_config,
         },
     };
-    pub use zebin_macros::{ZebinArchive, ZebinSerialize};
+    pub use zebin_macros::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 }
 // --- 子模块结构 (方案 2) ---
 

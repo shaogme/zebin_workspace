@@ -1,7 +1,7 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 #[zebin(schema_key = 324478056)]
 #[zebin(revision = 3)]
 pub struct VersionedUser {
@@ -88,7 +88,7 @@ fn test_safe_access() {
     }
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 #[zebin(schema_key = 987654321)]
 #[zebin(revision = 5)]
 pub struct VersionedSensor {

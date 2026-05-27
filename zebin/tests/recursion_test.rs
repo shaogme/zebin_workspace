@@ -1,8 +1,8 @@
 #![cfg(feature = "alloc")]
 
-use zebin::{ZebinArchive, ZebinError, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize};
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub struct Node {
     pub children: Vec<Node>,
 }
@@ -34,7 +34,7 @@ fn test_recursion_limit() {
 
 use zebin::archive::IterArchive;
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub struct IterNode {
     pub children: IterArchive<Vec<IterNode>, IterNode>,
 }

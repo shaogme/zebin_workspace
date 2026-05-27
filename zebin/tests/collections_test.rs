@@ -53,9 +53,9 @@ mod alloc_tests {
 #[cfg(feature = "std")]
 mod std_tests {
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-    use zebin::{ZebinArchive, ZebinSerialize};
+    use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
-    #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+    #[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 100)]
     pub struct CollectionContainer {
         #[zebin(id = 0)]

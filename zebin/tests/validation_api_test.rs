@@ -1,4 +1,4 @@
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
 #[cfg(feature = "alloc")]
 use zebin::prelude::{
@@ -6,25 +6,25 @@ use zebin::prelude::{
     validate_with_config,
 };
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct Child {
     flag: bool,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct Parent {
     children: Vec<Child>,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct Node {
     children: Vec<Node>,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 #[zebin(schema_key = 0x5151)]
 struct SchemaRecord {
     #[zebin(id = 1)]

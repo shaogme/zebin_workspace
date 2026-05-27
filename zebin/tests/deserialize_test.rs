@@ -1,8 +1,8 @@
 use zebin::io::SliceSerializer;
-use zebin::{ZebinArchive, ZebinSerialize, deserialize, writer};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, deserialize, writer};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 1)]
 pub struct UserProfile {
     #[zebin(id = 0)]
@@ -14,7 +14,7 @@ pub struct UserProfile {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 pub enum Packet {
     Ping,
     #[zebin(schema_key = 2)]
@@ -60,7 +60,7 @@ fn test_enum_deserialize() {
 #[cfg(feature = "alloc")]
 #[test]
 fn test_nested_deserialize() {
-    #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+    #[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 3)]
     struct Container {
         #[zebin(id = 0)]
@@ -82,7 +82,7 @@ fn test_nested_deserialize() {
 #[cfg(feature = "alloc")]
 #[test]
 fn test_optional_option_deserialize() {
-    #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+    #[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 4)]
     struct OptionalStruct {
         #[zebin(id = 0)]
@@ -111,7 +111,7 @@ fn test_optional_option_deserialize() {
     assert_eq!(deserialized_none, obj_none);
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 pub struct SimpleProfile {
     pub id: u64,
     pub val: u32,
@@ -129,7 +129,7 @@ fn test_struct_deserialize_no_alloc() {
     assert_eq!(deserialized, profile);
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 pub enum SimplePacket {
     Ping,
     Data(u32),

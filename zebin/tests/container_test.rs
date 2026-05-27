@@ -3,9 +3,9 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, collections::VecDeque};
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct NativeContainers {
     maybe_name: Option<String>,
     boxed_name: Box<str>,
@@ -15,7 +15,7 @@ struct NativeContainers {
     queue: VecDeque<String>,
 }
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct BorrowedContainers {
     borrowed_text: Cow<'static, str>,
     owned_text: Cow<'static, str>,

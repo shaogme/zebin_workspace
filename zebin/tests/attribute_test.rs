@@ -1,9 +1,9 @@
 #[cfg(feature = "alloc")]
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
 #[cfg(feature = "alloc")]
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 pub struct AttributeTest {
     pub id: u64,
 
@@ -37,7 +37,7 @@ fn test_rename_and_skip() {
 
 #[cfg(feature = "alloc")]
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub struct TupleTest(u32, #[zebin(skip)] String, u64);
 
 #[cfg(feature = "alloc")]
@@ -54,7 +54,7 @@ fn test_tuple_skip() {
 
 #[cfg(feature = "alloc")]
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub enum EnumTest {
     Variant1 {
         id: u32,

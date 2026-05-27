@@ -1,8 +1,8 @@
 #[cfg(feature = "alloc")]
-use zebin::{ZebinArchive, ZebinSerialize};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 0x100)]
 pub struct Version1 {
     #[zebin(id = 1)]
@@ -12,7 +12,7 @@ pub struct Version1 {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 0x100)]
 pub struct Version2 {
     #[zebin(id = 1)]
@@ -82,7 +82,7 @@ fn test_version2_with_all_fields() {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 pub enum MessageV1 {
     #[zebin(schema_key = 0x201)]
     Login {
@@ -92,7 +92,7 @@ pub enum MessageV1 {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 pub enum MessageV2 {
     #[zebin(schema_key = 0x201)]
     Login {

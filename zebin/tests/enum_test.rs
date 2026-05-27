@@ -1,14 +1,14 @@
 use zebin::io::SliceSerializer;
-use zebin::{ZebinArchive, ZebinError, ZebinSerialize, access, writer};
+use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize, access, writer};
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 enum UnitMode {
     Idle,
     Busy,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 enum TuplePacket {
     Empty,
     #[zebin(schema_key = 573785173)]
@@ -16,7 +16,7 @@ enum TuplePacket {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 enum StructPacket {
     Ping,
     #[zebin(schema_key = 1432778632)]
@@ -29,7 +29,7 @@ enum StructPacket {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 enum RecursiveNode {
     Leaf,
     Branch { children: Vec<RecursiveNode> },

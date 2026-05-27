@@ -9,11 +9,11 @@ use std::{
 
 use zebin::prelude::{
     ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, Mmap, MmapMut, MmapSerializer, Serialize,
-    Serializer, StorageMut, ZebinArchive, ZebinError, ZebinSerialize,
+    Serializer, StorageMut, ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize,
 };
 use zebin::{access, serialize};
 
-#[derive(ZebinArchive, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 pub struct MmapUser {
     pub id: u64,
     pub name: String,
