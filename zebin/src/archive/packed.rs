@@ -322,39 +322,39 @@ impl<'a, 'b, const BITS: u8> ToPackedViewInfo<'b> for &'b ArchivedPackedU8SliceV
     }
 }
 
-impl<'a> Encode for ArchivedPackedBoolSliceView<'a> {
+impl<'a> Serialize for ArchivedPackedBoolSliceView<'a> {
     type Input<'b>
         = &'b ArchivedPackedBoolSliceView<'a>
     where
         Self: 'b;
-    type Encoder<'b>
-        = PackedViewEncoder<'b, ArchivedPackedBoolSliceView<'a>>
+    type Serializer<'b>
+        = PackedViewSerializer<'b, ArchivedPackedBoolSliceView<'a>>
     where
         Self: 'b;
 
-    fn encoder<'b>() -> Self::Encoder<'b>
+    fn serializer<'b>() -> Self::Serializer<'b>
     where
         Self: 'b,
     {
-        PackedViewEncoder::new_empty()
+        PackedViewSerializer::new_empty()
     }
 }
 
-impl<'a, const BITS: u8> Encode for ArchivedPackedU8SliceView<'a, BITS> {
+impl<'a, const BITS: u8> Serialize for ArchivedPackedU8SliceView<'a, BITS> {
     type Input<'b>
         = &'b ArchivedPackedU8SliceView<'a, BITS>
     where
         Self: 'b;
-    type Encoder<'b>
-        = PackedViewEncoder<'b, ArchivedPackedU8SliceView<'a, BITS>>
+    type Serializer<'b>
+        = PackedViewSerializer<'b, ArchivedPackedU8SliceView<'a, BITS>>
     where
         Self: 'b;
 
-    fn encoder<'b>() -> Self::Encoder<'b>
+    fn serializer<'b>() -> Self::Serializer<'b>
     where
         Self: 'b,
     {
-        PackedViewEncoder::new_empty()
+        PackedViewSerializer::new_empty()
     }
 }
 
@@ -392,7 +392,7 @@ impl<'a, const BITS: u8> MeasureBody for ArchivedPackedU8SliceView<'a, BITS> {
 }
 
 /// State for serializing an already-packed view.
-pub struct PackedViewEncoder<'a, I = ()> {
+pub struct PackedViewSerializer<'a, I = ()> {
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     bytes: &'a [u8],
@@ -400,7 +400,7 @@ pub struct PackedViewEncoder<'a, I = ()> {
     _phantom: core::marker::PhantomData<&'a I>,
 }
 
-impl<'a, I> PackedViewEncoder<'a, I> {
+impl<'a, I> PackedViewSerializer<'a, I> {
     pub fn new_empty() -> Self {
         Self {
             len_prefix: [0; 4],
@@ -412,7 +412,7 @@ impl<'a, I> PackedViewEncoder<'a, I> {
     }
 }
 
-impl<'a, I> Encoder for PackedViewEncoder<'a, I>
+impl<'a, I> Serializer for PackedViewSerializer<'a, I>
 where
     &'a I: ToPackedViewInfo<'a>,
 {

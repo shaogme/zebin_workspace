@@ -11,7 +11,7 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut fields = Vec::new();
     if has_schema(record) {
         fields.push(
-            quote! { pub __schema_encoder: zebin::utils::macro_helpers::SchemaObjectEncoder },
+            quote! { pub __schema_serializer: zebin::utils::macro_helpers::SchemaObjectSerializer },
         );
     }
     for (_index, field) in record.active_fields() {
@@ -28,8 +28,8 @@ fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     fields
 }
 
-/// Build expression that produces `usize` for the encoded length of a field.
-/// Walks via `MeasureBody` (no encoder, no consumption).
+/// Build expression that produces `usize` for the serialized length of a field.
+/// Walks via `MeasureBody` (no serializer, no consumption).
 fn field_measure_expr(
     field: &crate::shared::FieldSpec<'_>,
     value: proc_macro2::TokenStream,
@@ -55,21 +55,22 @@ fn state_init(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
     let mut inits = Vec::new();
     if has_schema(record) {
         inits.push(
-            quote! { __schema_encoder: zebin::utils::macro_helpers::SchemaObjectEncoder::new() },
+            quote! { __schema_serializer: zebin::utils::macro_helpers::SchemaObjectSerializer::new() },
         );
     }
     for (_index, field) in record.active_fields() {
         let state_ident = &field.state_ident;
-        let init_encoder = if let Some(_wrapper) = crate::shared::packed_wrapper_type_expr(field) {
+        let init_serializer = if let Some(_wrapper) = crate::shared::packed_wrapper_type_expr(field)
+        {
             quote! { ::core::default::Default::default() }
         } else {
             let ty = field.ty;
-            quote! { <#ty as zebin::Encode>::encoder() }
+            quote! { <#ty as zebin::Serialize>::serializer() }
         };
         if has_schema(record) {
-            inits.push(quote! { #state_ident: zebin::utils::macro_helpers::SchemaFieldState::new(#init_encoder) });
+            inits.push(quote! { #state_ident: zebin::utils::macro_helpers::SchemaFieldState::new(#init_serializer) });
         } else {
-            inits.push(quote! { #state_ident: zebin::utils::macro_helpers::FieldState::new(#init_encoder) });
+            inits.push(quote! { #state_ident: zebin::utils::macro_helpers::FieldState::new(#init_serializer) });
         }
     }
     inits
@@ -142,7 +143,7 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
             .expect("schema-bearing records require key");
         let schema_revision = record.schema_revision;
         quote! {
-            if self.__schema_encoder.poll_write_header(encoder, #stable_schema_key, #schema_revision, #field_count as u16)?.is_pending() {
+            if self.__schema_serializer.poll_write_header(serializer, #stable_schema_key, #schema_revision, #field_count as u16)?.is_pending() {
                 return Ok(::core::task::Poll::Pending);
             }
         }
@@ -153,7 +154,7 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     let payload_polls = fields.iter().map(|(_, field)| {
         let state_ident = &field.state_ident;
         quote! {
-            if self.#state_ident.poll_write(encoder)?.is_pending() {
+            if self.#state_ident.poll_write(serializer)?.is_pending() {
                 return Ok(::core::task::Poll::Pending);
             }
         }
@@ -167,7 +168,7 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
 
             quote! {
                 if self.#state_ident.poll_write_entry(
-                    encoder,
+                    serializer,
                     #field_id as u16,
                     #encoding,
                 )?.is_pending() {
@@ -177,9 +178,9 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
         });
 
         quote! {
-            self.__schema_encoder.mark_table_start(encoder);
+            self.__schema_serializer.mark_table_start(serializer);
             #(#table_polls)*
-            if self.__schema_encoder.poll_write_footer(encoder)?.is_pending() {
+            if self.__schema_serializer.poll_write_footer(serializer)?.is_pending() {
                 return Ok(::core::task::Poll::Pending);
             }
         }
@@ -209,7 +210,7 @@ fn record_state_def(
     }
 }
 
-/// Generates the `Encoder` impl for a record state struct.
+/// Generates the `Serializer` impl for a record state struct.
 fn record_state_input_impl(
     state_name: &Ident,
     input_ty: proc_macro2::TokenStream,
@@ -256,7 +257,7 @@ fn record_state_input_impl(
         }
     });
     quote! {
-        impl<'a> zebin::io::Encoder for #state_name<'a> {
+        impl<'a> zebin::io::Serializer for #state_name<'a> {
             type Input = #input_ty;
             fn input<S: zebin::io::StorageMut + ?Sized>(&mut self, item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #[allow(irrefutable_let_patterns)]
@@ -266,7 +267,7 @@ fn record_state_input_impl(
                 #(#measure_and_store)*
                 self.poll_pending(sink)
             }
-            fn poll_pending<E: zebin::io::StorageMut + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending<E: zebin::io::StorageMut + ?Sized>(&mut self, serializer: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #logic
             }
             fn finish<S: zebin::io::StorageMut + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
@@ -292,10 +293,10 @@ fn struct_impl(
     quote! {
         #state_def
         #state_impl
-        impl zebin::Encode for #name {
+        impl zebin::Serialize for #name {
             type Input<'a> = #name where Self: 'a;
-            type Encoder<'a> = #s_name<'a> where Self: 'a;
-            fn encoder<'a>() -> Self::Encoder<'a> where Self: 'a {
+            type Serializer<'a> = #s_name<'a> where Self: 'a;
+            fn serializer<'a>() -> Self::Serializer<'a> where Self: 'a {
                 #s_name {
                     _marker: ::core::marker::PhantomData,
                     #(#inits,)*
@@ -405,7 +406,7 @@ fn enum_impl(
         .filter(|variant| variant.record.style != RecordStyle::Unit)
         .map(|variant| {
             let ident = variant.ident;
-            quote! { #payload_state::#ident(state) => state.poll_pending(encoder) }
+            quote! { #payload_state::#ident(state) => state.poll_pending(serializer) }
         })
         .collect();
 
@@ -474,7 +475,7 @@ fn enum_impl(
             #(#payload_variants,)*
         }
 
-        impl<'a> zebin::io::Encoder for #payload_state<'a> {
+        impl<'a> zebin::io::Serializer for #payload_state<'a> {
             type Input = #name;
             fn input<S: zebin::io::StorageMut + ?Sized>(&mut self, item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
@@ -482,7 +483,7 @@ fn enum_impl(
                     #(#payload_input_arms,)*
                 }
             }
-            fn poll_pending<E: zebin::io::StorageMut + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending<E: zebin::io::StorageMut + ?Sized>(&mut self, serializer: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
                     #(#payload_polls,)*
@@ -497,10 +498,10 @@ fn enum_impl(
         }
 
         #vis struct #enum_state<'a> {
-            inner: zebin::utils::macro_helpers::EnumEncoder<#payload_state<'a>>,
+            inner: zebin::utils::macro_helpers::EnumSerializer<#payload_state<'a>>,
         }
 
-        impl<'a> zebin::io::Encoder for #enum_state<'a> {
+        impl<'a> zebin::io::Serializer for #enum_state<'a> {
             type Input = #name;
             fn input<S: zebin::io::StorageMut + ?Sized>(&mut self, item: Self::Input, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 let (tag_val, payload_val) = match &item {
@@ -509,20 +510,20 @@ fn enum_impl(
                 self.inner.fill(tag_val, payload_val, item);
                 self.poll_pending(sink)
             }
-            fn poll_pending<E: zebin::io::StorageMut + ?Sized>(&mut self, encoder: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
-                self.inner.poll_write_pending(encoder)
+            fn poll_pending<E: zebin::io::StorageMut + ?Sized>(&mut self, serializer: &mut E) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+                self.inner.poll_write_pending(serializer)
             }
             fn finish<S: zebin::io::StorageMut + ?Sized>(self, sink: &mut S) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.inner.finish_inner(sink)
             }
         }
 
-        impl zebin::Encode for #name {
+        impl zebin::Serialize for #name {
             type Input<'a> = #name where Self: 'a;
-            type Encoder<'a> = #enum_state<'a> where Self: 'a;
-            fn encoder<'a>() -> Self::Encoder<'a> where Self: 'a {
+            type Serializer<'a> = #enum_state<'a> where Self: 'a;
+            fn serializer<'a>() -> Self::Serializer<'a> where Self: 'a {
                 #enum_state {
-                    inner: zebin::utils::macro_helpers::EnumEncoder::new(),
+                    inner: zebin::utils::macro_helpers::EnumSerializer::new(),
                 }
             }
         }

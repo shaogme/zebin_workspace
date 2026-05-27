@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::task::Poll;
 
 use crate::{
-    archive_impl::varint::{VarIntNumber, deserialize_u64, encode_u64, encoded_len_u64},
+    archive_impl::varint::{VarIntNumber, deserialize_u64, serialize_u64, serialized_len_u64},
     io::ForwardSequenceStrategy,
     prelude::*,
 };
@@ -146,8 +146,8 @@ impl<T> Archive for ArchivedVarIntVec<T> {
     type Archived = Self;
 }
 
-/// Owned-input encoder for `VarIntVec<T>`.
-pub struct OwnedVarIntVecEncoder<T: VarIntNumber> {
+/// Owned-input serializer for `VarIntVec<T>`.
+pub struct OwnedVarIntVecSerializer<T: VarIntNumber> {
     values: Vec<T>,
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -157,7 +157,7 @@ pub struct OwnedVarIntVecEncoder<T: VarIntNumber> {
     current_val_len: usize,
 }
 
-impl<T: VarIntNumber> OwnedVarIntVecEncoder<T> {
+impl<T: VarIntNumber> OwnedVarIntVecSerializer<T> {
     pub fn new() -> Self {
         Self {
             values: Vec::new(),
@@ -171,13 +171,13 @@ impl<T: VarIntNumber> OwnedVarIntVecEncoder<T> {
     }
 }
 
-impl<T: VarIntNumber> Default for OwnedVarIntVecEncoder<T> {
+impl<T: VarIntNumber> Default for OwnedVarIntVecSerializer<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: VarIntNumber> Encoder for OwnedVarIntVecEncoder<T> {
+impl<T: VarIntNumber> Serializer for OwnedVarIntVecSerializer<T> {
     type Input = VarIntVec<T>;
 
     fn input<S: StorageMut + ?Sized>(
@@ -213,8 +213,8 @@ impl<T: VarIntNumber> Encoder for OwnedVarIntVecEncoder<T> {
         while self.index < self.values.len() {
             if self.current_val_len == 0 {
                 let val = self.values[self.index].to_u64();
-                self.current_val_len = encoded_len_u64(val);
-                encode_u64(val, &mut self.current_val_buf[..self.current_val_len]);
+                self.current_val_len = serialized_len_u64(val);
+                serialize_u64(val, &mut self.current_val_buf[..self.current_val_len]);
                 self.cursor = 0;
             }
 
@@ -239,44 +239,44 @@ impl<T: VarIntNumber> Encoder for OwnedVarIntVecEncoder<T> {
     }
 }
 
-impl<T: VarIntNumber> Encode for VarIntVec<T> {
+impl<T: VarIntNumber> Serialize for VarIntVec<T> {
     type Input<'a>
         = VarIntVec<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = OwnedVarIntVecEncoder<T>
+    type Serializer<'a>
+        = OwnedVarIntVecSerializer<T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        OwnedVarIntVecEncoder::new()
+        OwnedVarIntVecSerializer::new()
     }
 }
 
-impl<T: VarIntNumber> Encode for ArchivedVarIntVec<T> {
+impl<T: VarIntNumber> Serialize for ArchivedVarIntVec<T> {
     type Input<'a>
         = ArchivedVarIntVec<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = OwnedArchivedVarIntVecEncoder<T>
+    type Serializer<'a>
+        = OwnedArchivedVarIntVecSerializer<T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        OwnedArchivedVarIntVecEncoder::new()
+        OwnedArchivedVarIntVecSerializer::new()
     }
 }
 
-/// Owned-input encoder for `ArchivedVarIntVec<T>`.
-pub struct OwnedArchivedVarIntVecEncoder<T: VarIntNumber> {
+/// Owned-input serializer for `ArchivedVarIntVec<T>`.
+pub struct OwnedArchivedVarIntVecSerializer<T: VarIntNumber> {
     values: Vec<T>,
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -286,7 +286,7 @@ pub struct OwnedArchivedVarIntVecEncoder<T: VarIntNumber> {
     current_val_len: usize,
 }
 
-impl<T: VarIntNumber> OwnedArchivedVarIntVecEncoder<T> {
+impl<T: VarIntNumber> OwnedArchivedVarIntVecSerializer<T> {
     pub fn new() -> Self {
         Self {
             values: Vec::new(),
@@ -300,13 +300,13 @@ impl<T: VarIntNumber> OwnedArchivedVarIntVecEncoder<T> {
     }
 }
 
-impl<T: VarIntNumber> Default for OwnedArchivedVarIntVecEncoder<T> {
+impl<T: VarIntNumber> Default for OwnedArchivedVarIntVecSerializer<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: VarIntNumber> Encoder for OwnedArchivedVarIntVecEncoder<T> {
+impl<T: VarIntNumber> Serializer for OwnedArchivedVarIntVecSerializer<T> {
     type Input = ArchivedVarIntVec<T>;
 
     fn input<S: StorageMut + ?Sized>(
@@ -342,8 +342,8 @@ impl<T: VarIntNumber> Encoder for OwnedArchivedVarIntVecEncoder<T> {
         while self.index < self.values.len() {
             if self.current_val_len == 0 {
                 let val = self.values[self.index].to_u64();
-                self.current_val_len = encoded_len_u64(val);
-                encode_u64(val, &mut self.current_val_buf[..self.current_val_len]);
+                self.current_val_len = serialized_len_u64(val);
+                serialize_u64(val, &mut self.current_val_buf[..self.current_val_len]);
                 self.cursor = 0;
             }
 
@@ -372,26 +372,26 @@ impl<'a, T: VarIntNumber> Archive for PackedVarIntSlice<'a, T> {
     type Archived = ArchivedVarIntVec<T>;
 }
 
-impl<'a, T: VarIntNumber> Encode for PackedVarIntSlice<'a, T> {
+impl<'a, T: VarIntNumber> Serialize for PackedVarIntSlice<'a, T> {
     type Input<'b>
         = PackedVarIntSlice<'a, T>
     where
         Self: 'b;
-    type Encoder<'b>
-        = PackedVarIntSliceEncoder<'a, T>
+    type Serializer<'b>
+        = PackedVarIntSliceSerializer<'a, T>
     where
         Self: 'b;
 
-    fn encoder<'b>() -> Self::Encoder<'b>
+    fn serializer<'b>() -> Self::Serializer<'b>
     where
         Self: 'b,
     {
-        PackedVarIntSliceEncoder::new()
+        PackedVarIntSliceSerializer::new()
     }
 }
 
-/// Owned-input encoder for `PackedVarIntSlice` (its borrow lives in `'a`).
-pub struct PackedVarIntSliceEncoder<'a, T: VarIntNumber> {
+/// Owned-input serializer for `PackedVarIntSlice` (its borrow lives in `'a`).
+pub struct PackedVarIntSliceSerializer<'a, T: VarIntNumber> {
     values: Option<&'a [T]>,
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -401,7 +401,7 @@ pub struct PackedVarIntSliceEncoder<'a, T: VarIntNumber> {
     current_val_len: usize,
 }
 
-impl<'a, T: VarIntNumber> PackedVarIntSliceEncoder<'a, T> {
+impl<'a, T: VarIntNumber> PackedVarIntSliceSerializer<'a, T> {
     pub fn new() -> Self {
         Self {
             values: None,
@@ -415,13 +415,13 @@ impl<'a, T: VarIntNumber> PackedVarIntSliceEncoder<'a, T> {
     }
 }
 
-impl<'a, T: VarIntNumber> Default for PackedVarIntSliceEncoder<'a, T> {
+impl<'a, T: VarIntNumber> Default for PackedVarIntSliceSerializer<'a, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T: VarIntNumber> Encoder for PackedVarIntSliceEncoder<'a, T> {
+impl<'a, T: VarIntNumber> Serializer for PackedVarIntSliceSerializer<'a, T> {
     type Input = PackedVarIntSlice<'a, T>;
 
     fn input<S: StorageMut + ?Sized>(
@@ -457,12 +457,12 @@ impl<'a, T: VarIntNumber> Encoder for PackedVarIntSliceEncoder<'a, T> {
 
         let values = self
             .values
-            .expect("PackedVarIntSliceEncoder polled before input");
+            .expect("PackedVarIntSliceSerializer polled before input");
         while self.index < values.len() {
             if self.current_val_len == 0 {
                 let val = values[self.index].to_u64();
-                self.current_val_len = encoded_len_u64(val);
-                encode_u64(val, &mut self.current_val_buf[..self.current_val_len]);
+                self.current_val_len = serialized_len_u64(val);
+                serialize_u64(val, &mut self.current_val_buf[..self.current_val_len]);
                 self.cursor = 0;
             }
 
@@ -492,7 +492,7 @@ impl<T: VarIntNumber> MeasureBody for VarIntVec<T> {
         let mut total = 4usize;
         for v in &self.values {
             total = total
-                .checked_add(encoded_len_u64(v.to_u64()))
+                .checked_add(serialized_len_u64(v.to_u64()))
                 .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
         }
         Ok(total)
@@ -504,7 +504,7 @@ impl<T: VarIntNumber> MeasureBody for ArchivedVarIntVec<T> {
         let mut total = 4usize;
         for v in &self.values {
             total = total
-                .checked_add(encoded_len_u64(v.to_u64()))
+                .checked_add(serialized_len_u64(v.to_u64()))
                 .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
         }
         Ok(total)
@@ -516,7 +516,7 @@ impl<'a, T: VarIntNumber> MeasureBody for PackedVarIntSlice<'a, T> {
         let mut total = 4usize;
         for v in self.values {
             total = total
-                .checked_add(encoded_len_u64(v.to_u64()))
+                .checked_add(serialized_len_u64(v.to_u64()))
                 .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })?;
         }
         Ok(total)

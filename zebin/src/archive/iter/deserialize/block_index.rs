@@ -169,11 +169,11 @@ mod tests {
     use super::*;
 
     fn append_varint(value: u64, buf: &mut Vec<u8>) {
-        use crate::archive_impl::varint::{encode_u64, encoded_len_u64};
-        let len = encoded_len_u64(value);
+        use crate::archive_impl::varint::{serialize_u64, serialized_len_u64};
+        let len = serialized_len_u64(value);
         let start = buf.len();
         buf.resize(start + len, 0);
-        encode_u64(value, &mut buf[start..]);
+        serialize_u64(value, &mut buf[start..]);
     }
 
     #[test]

@@ -58,7 +58,7 @@ impl Storage for Mmap {
     }
 }
 
-/// Writable memory-mapped storage backend used by [`MmapEncoder`].
+/// Writable memory-mapped storage backend used by [`MmapSerializer`].
 ///
 /// Wraps [`memmap2::MmapMut`] so callers don't need a direct dependency on
 /// `memmap2`. Dereferences to `[u8]` for indexing and slicing.
@@ -114,18 +114,18 @@ impl core::ops::DerefMut for MmapMut {
     }
 }
 
-/// Encoder that writes into a pre-sized memory-mapped file.
+/// Serializer that writes into a pre-sized memory-mapped file.
 ///
 /// The mmap must be sized to fit the entire archive before construction.
 /// All writes return `SinkProgress::Complete`; if a write would exceed the
 /// map, `ZebinError::BufferTooSmall` is returned.
-pub struct MmapEncoder {
+pub struct MmapSerializer {
     mmap: MmapMut,
     archive_pos: usize,
     written: usize,
 }
 
-impl MmapEncoder {
+impl MmapSerializer {
     pub fn new(mmap: MmapMut, archive_pos: usize) -> Self {
         Self {
             mmap,
@@ -175,7 +175,7 @@ impl MmapEncoder {
     }
 }
 
-impl StorageMut for MmapEncoder {
+impl StorageMut for MmapSerializer {
     type Sharder<'a>
         = crate::io::NoSharder
     where

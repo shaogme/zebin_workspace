@@ -131,37 +131,37 @@ where
 }
 
 /// Resumable serialization state for `Option<T>`.
-pub struct OptionEncoder<'a, T>
+pub struct OptionSerializer<'a, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     value: Option<T>,
     prefix: [u8; 1],
     prefix_cursor: usize,
-    inner: <T as Encode>::Encoder<'a>,
+    inner: <T as Serialize>::Serializer<'a>,
     inner_started: bool,
     has_inner: bool,
 }
 
-impl<'a, T> OptionEncoder<'a, T>
+impl<'a, T> OptionSerializer<'a, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub(crate) fn new_empty() -> Self {
         Self {
             value: None,
             prefix: [0],
             prefix_cursor: 1,
-            inner: T::encoder(),
+            inner: T::serializer(),
             inner_started: false,
             has_inner: false,
         }
     }
 }
 
-impl<'a, T> Encoder for OptionEncoder<'a, T>
+impl<'a, T> Serializer for OptionSerializer<'a, T>
 where
-    T: Encode<Input<'a> = T> + Archive + 'a,
+    T: Serialize<Input<'a> = T> + Archive + 'a,
 {
     type Input = Option<T>;
 
@@ -238,25 +238,25 @@ where
     const ALLOW_MISSING: bool = true;
 }
 
-impl<T> Encode for Option<T>
+impl<T> Serialize for Option<T>
 where
-    T: Encode + Archive,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    T: Serialize + Archive,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = Option<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = OptionEncoder<'a, T>
+    type Serializer<'a>
+        = OptionSerializer<'a, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        OptionEncoder::new_empty()
+        OptionSerializer::new_empty()
     }
 }
 

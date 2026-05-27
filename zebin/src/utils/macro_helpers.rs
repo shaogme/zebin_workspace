@@ -1,16 +1,16 @@
 use crate::{
     error::ZebinError,
-    io::{Encoder, StorageMut},
+    io::{Serializer, StorageMut},
     schema::FieldEncoding,
 };
 
-/// Helper encoder to serialize a field entry reentrantly.
+/// Helper serializer to serialize a field entry reentrantly.
 #[derive(Default, Debug, Clone)]
-pub struct FieldEntryEncoder {
+pub struct FieldEntrySerializer {
     cursor: usize,
 }
 
-impl FieldEntryEncoder {
+impl FieldEntrySerializer {
     pub const fn new() -> Self {
         Self { cursor: 0 }
     }
@@ -43,14 +43,14 @@ impl FieldEntryEncoder {
     }
 }
 
-/// Helper encoder to serialize an enum tag reentrantly.
+/// Helper serializer to serialize an enum tag reentrantly.
 #[derive(Default, Debug, Clone)]
-pub struct TagEncoder {
+pub struct TagSerializer {
     bytes: [u8; 4],
     cursor: usize,
 }
 
-impl TagEncoder {
+impl TagSerializer {
     pub const fn new() -> Self {
         Self {
             bytes: [0; 4],
@@ -84,16 +84,16 @@ impl TagEncoder {
 }
 
 /// Helper state manager for field serialization.
-pub struct FieldState<E: Encoder> {
-    pub encoder: E,
+pub struct FieldState<E: Serializer> {
+    pub serializer: E,
     pub started: bool,
     pub slot: Option<E::Input>,
 }
 
-impl<E: Encoder> FieldState<E> {
-    pub fn new(encoder: E) -> Self {
+impl<E: Serializer> FieldState<E> {
+    pub fn new(serializer: E) -> Self {
         Self {
-            encoder,
+            serializer,
             started: false,
             slot: None,
         }
@@ -115,7 +115,7 @@ impl<E: Encoder> FieldState<E> {
                 .slot
                 .take()
                 .expect("field already consumed or slot is empty");
-            match self.encoder.input(val, sink)? {
+            match self.serializer.input(val, sink)? {
                 core::task::Poll::Pending => {
                     self.started = true;
                     return Ok(core::task::Poll::Pending);
@@ -125,7 +125,7 @@ impl<E: Encoder> FieldState<E> {
                 }
             }
         } else {
-            match self.encoder.poll_pending(sink)? {
+            match self.serializer.poll_pending(sink)? {
                 core::task::Poll::Pending => return Ok(core::task::Poll::Pending),
                 core::task::Poll::Ready(()) => {}
             }
@@ -138,40 +138,40 @@ impl<E: Encoder> FieldState<E> {
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.encoder.finish(sink)
+        self.serializer.finish(sink)
     }
 }
 
-impl<E: Encoder + Default> Default for FieldState<E> {
+impl<E: Serializer + Default> Default for FieldState<E> {
     fn default() -> Self {
         Self {
-            encoder: E::default(),
+            serializer: E::default(),
             started: false,
             slot: None,
         }
     }
 }
 
-impl<E: Encoder + core::fmt::Debug> core::fmt::Debug for FieldState<E>
+impl<E: Serializer + core::fmt::Debug> core::fmt::Debug for FieldState<E>
 where
     E::Input: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("FieldState")
-            .field("encoder", &self.encoder)
+            .field("serializer", &self.serializer)
             .field("started", &self.started)
             .field("slot", &self.slot)
             .finish()
     }
 }
 
-impl<E: Encoder + Clone> Clone for FieldState<E>
+impl<E: Serializer + Clone> Clone for FieldState<E>
 where
     E::Input: Clone,
 {
     fn clone(&self) -> Self {
         Self {
-            encoder: self.encoder.clone(),
+            serializer: self.serializer.clone(),
             started: self.started,
             slot: self.slot.clone(),
         }
@@ -179,18 +179,18 @@ where
 }
 
 /// Helper state manager for schema field serialization.
-pub struct SchemaFieldState<E: Encoder> {
+pub struct SchemaFieldState<E: Serializer> {
     pub state: FieldState<E>,
     pub len: u32,
-    pub entry_encoder: FieldEntryEncoder,
+    pub entry_serializer: FieldEntrySerializer,
 }
 
-impl<E: Encoder> SchemaFieldState<E> {
-    pub fn new(encoder: E) -> Self {
+impl<E: Serializer> SchemaFieldState<E> {
+    pub fn new(serializer: E) -> Self {
         Self {
-            state: FieldState::new(encoder),
+            state: FieldState::new(serializer),
             len: 0,
-            entry_encoder: FieldEntryEncoder::new(),
+            entry_serializer: FieldEntrySerializer::new(),
         }
     }
 
@@ -211,7 +211,7 @@ impl<E: Encoder> SchemaFieldState<E> {
         field_id: u16,
         encoding: FieldEncoding,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.entry_encoder
+        self.entry_serializer
             .poll_write(sink, field_id, encoding, self.len)
     }
 
@@ -228,21 +228,21 @@ impl<E: Encoder> SchemaFieldState<E> {
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.state.encoder.finish(sink)
+        self.state.serializer.finish(sink)
     }
 }
 
-impl<E: Encoder + Default> Default for SchemaFieldState<E> {
+impl<E: Serializer + Default> Default for SchemaFieldState<E> {
     fn default() -> Self {
         Self {
             state: FieldState::default(),
             len: 0,
-            entry_encoder: FieldEntryEncoder::default(),
+            entry_serializer: FieldEntrySerializer::default(),
         }
     }
 }
 
-impl<E: Encoder + core::fmt::Debug> core::fmt::Debug for SchemaFieldState<E>
+impl<E: Serializer + core::fmt::Debug> core::fmt::Debug for SchemaFieldState<E>
 where
     E::Input: core::fmt::Debug,
 {
@@ -250,12 +250,12 @@ where
         f.debug_struct("SchemaFieldState")
             .field("state", &self.state)
             .field("len", &self.len)
-            .field("entry_encoder", &self.entry_encoder)
+            .field("entry_serializer", &self.entry_serializer)
             .finish()
     }
 }
 
-impl<E: Encoder + Clone> Clone for SchemaFieldState<E>
+impl<E: Serializer + Clone> Clone for SchemaFieldState<E>
 where
     E::Input: Clone,
 {
@@ -263,22 +263,22 @@ where
         Self {
             state: self.state.clone(),
             len: self.len,
-            entry_encoder: self.entry_encoder.clone(),
+            entry_serializer: self.entry_serializer.clone(),
         }
     }
 }
 
-/// Helper encoder to handle Enum Tag and Payload serialization.
-pub struct EnumEncoder<P: Encoder> {
-    tag_encoder: TagEncoder,
+/// Helper serializer to handle Enum Tag and Payload serialization.
+pub struct EnumSerializer<P: Serializer> {
+    tag_serializer: TagSerializer,
     payload: Option<P>,
     pending_item: Option<P::Input>,
 }
 
-impl<P: Encoder> EnumEncoder<P> {
+impl<P: Serializer> EnumSerializer<P> {
     pub fn new() -> Self {
         Self {
-            tag_encoder: TagEncoder::new(),
+            tag_serializer: TagSerializer::new(),
             payload: None,
             pending_item: None,
         }
@@ -286,7 +286,7 @@ impl<P: Encoder> EnumEncoder<P> {
 
     #[inline]
     pub fn fill(&mut self, tag: u32, payload: Option<P>, item: P::Input) {
-        self.tag_encoder.input(tag);
+        self.tag_serializer.input(tag);
         self.payload = payload;
         self.pending_item = Some(item);
     }
@@ -296,7 +296,7 @@ impl<P: Encoder> EnumEncoder<P> {
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        if self.tag_encoder.poll_write(sink)?.is_pending() {
+        if self.tag_serializer.poll_write(sink)?.is_pending() {
             return Ok(core::task::Poll::Pending);
         }
         if let Some(payload) = &mut self.payload {
@@ -328,45 +328,45 @@ impl<P: Encoder> EnumEncoder<P> {
     }
 }
 
-impl<P: Encoder + Default> Default for EnumEncoder<P> {
+impl<P: Serializer + Default> Default for EnumSerializer<P> {
     fn default() -> Self {
         Self {
-            tag_encoder: TagEncoder::default(),
+            tag_serializer: TagSerializer::default(),
             payload: None,
             pending_item: None,
         }
     }
 }
 
-impl<P: Encoder + core::fmt::Debug> core::fmt::Debug for EnumEncoder<P>
+impl<P: Serializer + core::fmt::Debug> core::fmt::Debug for EnumSerializer<P>
 where
     P::Input: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("EnumEncoder")
-            .field("tag_encoder", &self.tag_encoder)
+        f.debug_struct("EnumSerializer")
+            .field("tag_serializer", &self.tag_serializer)
             .field("payload", &self.payload)
             .field("pending_item", &self.pending_item)
             .finish()
     }
 }
 
-impl<P: Encoder + Clone> Clone for EnumEncoder<P>
+impl<P: Serializer + Clone> Clone for EnumSerializer<P>
 where
     P::Input: Clone,
 {
     fn clone(&self) -> Self {
         Self {
-            tag_encoder: self.tag_encoder.clone(),
+            tag_serializer: self.tag_serializer.clone(),
             payload: self.payload.clone(),
             pending_item: self.pending_item.clone(),
         }
     }
 }
 
-/// Helper encoder to handle Schema-Aware object header and footer writing in a reentrant manner.
+/// Helper serializer to handle Schema-Aware object header and footer writing in a reentrant manner.
 #[derive(Default, Debug, Clone)]
-pub struct SchemaObjectEncoder {
+pub struct SchemaObjectSerializer {
     header_cursor: usize,
     object_start: usize,
     table_start: usize,
@@ -374,7 +374,7 @@ pub struct SchemaObjectEncoder {
     object_len_cursor: usize,
 }
 
-impl SchemaObjectEncoder {
+impl SchemaObjectSerializer {
     pub const fn new() -> Self {
         Self {
             header_cursor: 0,

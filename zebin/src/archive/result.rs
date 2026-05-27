@@ -135,17 +135,17 @@ where
     }
 }
 
-pub struct ResultEncoder<'a, T, E>
+pub struct ResultSerializer<'a, T, E>
 where
-    T: Encode + Archive + 'a,
-    E: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
+    E: Serialize + Archive + 'a,
 {
-    state: ResultEncoderState<T, E>,
-    ok_encoder: <T as Encode>::Encoder<'a>,
-    err_encoder: <E as Encode>::Encoder<'a>,
+    state: ResultSerializerState<T, E>,
+    ok_serializer: <T as Serialize>::Serializer<'a>,
+    err_serializer: <E as Serialize>::Serializer<'a>,
 }
 
-enum ResultEncoderState<T, E> {
+enum ResultSerializerState<T, E> {
     Uninitialized,
     Ok {
         val: Option<T>,
@@ -159,24 +159,24 @@ enum ResultEncoderState<T, E> {
     },
 }
 
-impl<'a, T, E> ResultEncoder<'a, T, E>
+impl<'a, T, E> ResultSerializer<'a, T, E>
 where
-    T: Encode + Archive + 'a,
-    E: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
+    E: Serialize + Archive + 'a,
 {
     pub(crate) fn new_empty() -> Self {
         Self {
-            state: ResultEncoderState::Uninitialized,
-            ok_encoder: T::encoder(),
-            err_encoder: E::encoder(),
+            state: ResultSerializerState::Uninitialized,
+            ok_serializer: T::serializer(),
+            err_serializer: E::serializer(),
         }
     }
 }
 
-impl<'a, T, E> Encoder for ResultEncoder<'a, T, E>
+impl<'a, T, E> Serializer for ResultSerializer<'a, T, E>
 where
-    T: Encode<Input<'a> = T> + Archive + 'a,
-    E: Encode<Input<'a> = E> + Archive + 'a,
+    T: Serialize<Input<'a> = T> + Archive + 'a,
+    E: Serialize<Input<'a> = E> + Archive + 'a,
 {
     type Input = Result<T, E>;
 
@@ -186,12 +186,12 @@ where
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.state = match item {
-            Ok(inner) => ResultEncoderState::Ok {
+            Ok(inner) => ResultSerializerState::Ok {
                 val: Some(inner),
                 prefix_cursor: 0,
                 started: false,
             },
-            Err(inner) => ResultEncoderState::Err {
+            Err(inner) => ResultSerializerState::Err {
                 val: Some(inner),
                 prefix_cursor: 0,
                 started: false,
@@ -205,8 +205,8 @@ where
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         match &mut self.state {
-            ResultEncoderState::Uninitialized => Ok(Poll::Ready(())),
-            ResultEncoderState::Ok {
+            ResultSerializerState::Uninitialized => Ok(Poll::Ready(())),
+            ResultSerializerState::Ok {
                 val,
                 prefix_cursor,
                 started,
@@ -223,17 +223,17 @@ where
                 let progress = if !*started {
                     let v = val.take().ok_or(ZebinError::SerializationError {
                         pos: sink.pos(),
-                        message: "ResultEncoder lost Ok value",
+                        message: "ResultSerializer lost Ok value",
                     })?;
                     *started = true;
-                    self.ok_encoder.input(v, sink)?
+                    self.ok_serializer.input(v, sink)?
                 } else {
-                    self.ok_encoder.poll_pending(sink)?
+                    self.ok_serializer.poll_pending(sink)?
                 };
 
                 Ok(progress)
             }
-            ResultEncoderState::Err {
+            ResultSerializerState::Err {
                 val,
                 prefix_cursor,
                 started,
@@ -250,12 +250,12 @@ where
                 let progress = if !*started {
                     let v = val.take().ok_or(ZebinError::SerializationError {
                         pos: sink.pos(),
-                        message: "ResultEncoder lost Err value",
+                        message: "ResultSerializer lost Err value",
                     })?;
                     *started = true;
-                    self.err_encoder.input(v, sink)?
+                    self.err_serializer.input(v, sink)?
                 } else {
-                    self.err_encoder.poll_pending(sink)?
+                    self.err_serializer.poll_pending(sink)?
                 };
 
                 Ok(progress)
@@ -265,9 +265,9 @@ where
 
     fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         match self.state {
-            ResultEncoderState::Uninitialized => Ok(Poll::Ready(())),
-            ResultEncoderState::Ok { .. } => self.ok_encoder.finish(sink),
-            ResultEncoderState::Err { .. } => self.err_encoder.finish(sink),
+            ResultSerializerState::Uninitialized => Ok(Poll::Ready(())),
+            ResultSerializerState::Ok { .. } => self.ok_serializer.finish(sink),
+            ResultSerializerState::Err { .. } => self.err_serializer.finish(sink),
         }
     }
 }
@@ -280,27 +280,27 @@ where
     type Archived = ArchivedResult<T::Archived, E::Archived>;
 }
 
-impl<T, E> Encode for Result<T, E>
+impl<T, E> Serialize for Result<T, E>
 where
-    T: Encode + Archive,
-    E: Encode + Archive,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
-    for<'a> E: Encode<Input<'a> = E> + 'a,
+    T: Serialize + Archive,
+    E: Serialize + Archive,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
+    for<'a> E: Serialize<Input<'a> = E> + 'a,
 {
     type Input<'a>
         = Result<T, E>
     where
         Self: 'a;
-    type Encoder<'a>
-        = ResultEncoder<'a, T, E>
+    type Serializer<'a>
+        = ResultSerializer<'a, T, E>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        ResultEncoder::new_empty()
+        ResultSerializer::new_empty()
     }
 }
 

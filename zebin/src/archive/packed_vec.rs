@@ -13,9 +13,9 @@ pub trait ToPackedData<'a> {
     fn to_packed_data(self) -> (PackedData<'a>, u8);
 }
 
-/// Packed sequence encoder shared by the packed APIs.
+/// Packed sequence serializer shared by the packed APIs.
 #[doc(hidden)]
-pub struct PackedSequenceEncoder<'a, I = ()> {
+pub struct PackedSequenceSerializer<'a, I = ()> {
     data: PackedData<'a>,
     bits_per_value: u8,
     len_prefix: [u8; 4],
@@ -28,7 +28,7 @@ pub struct PackedSequenceEncoder<'a, I = ()> {
     _phantom: core::marker::PhantomData<&'a I>,
 }
 
-impl<'a, I> PackedSequenceEncoder<'a, I> {
+impl<'a, I> PackedSequenceSerializer<'a, I> {
     pub fn new_bool(values: &'a [bool]) -> Self {
         Self::new(PackedData::Bool(values), 1, values.len())
     }
@@ -114,7 +114,7 @@ impl<'a, I> PackedSequenceEncoder<'a, I> {
     }
 }
 
-impl<'a, I> Encoder for PackedSequenceEncoder<'a, I>
+impl<'a, I> Serializer for PackedSequenceSerializer<'a, I>
 where
     I: ToPackedData<'a>,
 {
@@ -293,12 +293,12 @@ impl Archive for PackedVec<bool, 1> {
     type Archived = ArchivedPackedBoolSlice;
 }
 
-/// Owned-input encoder for `PackedVec<bool, 1>`.
+/// Owned-input serializer for `PackedVec<bool, 1>`.
 ///
-/// Holds the vector while streaming; the inner `PackedSequenceEncoder`
+/// Holds the vector while streaming; the inner `PackedSequenceSerializer`
 /// borrows from it via a self-referential pattern made safe by pinning the
 /// owner inside this struct.
-pub struct PackedBoolVecEncoder {
+pub struct PackedBoolVecSerializer {
     owner: Option<PackedVec<bool, 1>>,
     bits: alloc::vec::Vec<u8>,
     len_prefix: [u8; 4],
@@ -306,7 +306,7 @@ pub struct PackedBoolVecEncoder {
     cursor: usize,
 }
 
-impl PackedBoolVecEncoder {
+impl PackedBoolVecSerializer {
     pub fn new() -> Self {
         Self {
             owner: None,
@@ -318,13 +318,13 @@ impl PackedBoolVecEncoder {
     }
 }
 
-impl Default for PackedBoolVecEncoder {
+impl Default for PackedBoolVecSerializer {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Encoder for PackedBoolVecEncoder {
+impl Serializer for PackedBoolVecSerializer {
     type Input = PackedVec<bool, 1>;
 
     fn input<S: StorageMut + ?Sized>(
@@ -375,21 +375,21 @@ impl Encoder for PackedBoolVecEncoder {
     }
 }
 
-impl Encode for PackedVec<bool, 1> {
+impl Serialize for PackedVec<bool, 1> {
     type Input<'a>
         = PackedVec<bool, 1>
     where
         Self: 'a;
-    type Encoder<'a>
-        = PackedBoolVecEncoder
+    type Serializer<'a>
+        = PackedBoolVecSerializer
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        PackedBoolVecEncoder::new()
+        PackedBoolVecSerializer::new()
     }
 }
 
@@ -397,8 +397,8 @@ impl<const BITS: u8> Archive for PackedVec<u8, BITS> {
     type Archived = ArchivedPackedU8Slice<BITS>;
 }
 
-/// Owned-input encoder for `PackedVec<u8, BITS>`.
-pub struct PackedU8VecEncoder<const BITS: u8> {
+/// Owned-input serializer for `PackedVec<u8, BITS>`.
+pub struct PackedU8VecSerializer<const BITS: u8> {
     owner: Option<PackedVec<u8, BITS>>,
     bits: alloc::vec::Vec<u8>,
     len_prefix: [u8; 4],
@@ -406,7 +406,7 @@ pub struct PackedU8VecEncoder<const BITS: u8> {
     cursor: usize,
 }
 
-impl<const BITS: u8> PackedU8VecEncoder<BITS> {
+impl<const BITS: u8> PackedU8VecSerializer<BITS> {
     pub fn new() -> Self {
         Self {
             owner: None,
@@ -418,13 +418,13 @@ impl<const BITS: u8> PackedU8VecEncoder<BITS> {
     }
 }
 
-impl<const BITS: u8> Default for PackedU8VecEncoder<BITS> {
+impl<const BITS: u8> Default for PackedU8VecSerializer<BITS> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const BITS: u8> Encoder for PackedU8VecEncoder<BITS> {
+impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
     type Input = PackedVec<u8, BITS>;
 
     fn input<S: StorageMut + ?Sized>(
@@ -495,57 +495,57 @@ impl<const BITS: u8> Encoder for PackedU8VecEncoder<BITS> {
     }
 }
 
-impl<const BITS: u8> Encode for PackedVec<u8, BITS> {
+impl<const BITS: u8> Serialize for PackedVec<u8, BITS> {
     type Input<'a>
         = PackedVec<u8, BITS>
     where
         Self: 'a;
-    type Encoder<'a>
-        = PackedU8VecEncoder<BITS>
+    type Serializer<'a>
+        = PackedU8VecSerializer<BITS>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        PackedU8VecEncoder::new()
+        PackedU8VecSerializer::new()
     }
 }
 
-impl<'b> Encode for PackedSlice<'b, bool, 1> {
+impl<'b> Serialize for PackedSlice<'b, bool, 1> {
     type Input<'a>
         = PackedSlice<'b, bool, 1>
     where
         Self: 'a;
-    type Encoder<'a>
-        = PackedSequenceEncoder<'a, PackedSlice<'b, bool, 1>>
+    type Serializer<'a>
+        = PackedSequenceSerializer<'a, PackedSlice<'b, bool, 1>>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        PackedSequenceEncoder::new_empty()
+        PackedSequenceSerializer::new_empty()
     }
 }
 
-impl<'b, const BITS: u8> Encode for PackedSlice<'b, u8, BITS> {
+impl<'b, const BITS: u8> Serialize for PackedSlice<'b, u8, BITS> {
     type Input<'a>
         = PackedSlice<'b, u8, BITS>
     where
         Self: 'a;
-    type Encoder<'a>
-        = PackedSequenceEncoder<'a, PackedSlice<'b, u8, BITS>>
+    type Serializer<'a>
+        = PackedSequenceSerializer<'a, PackedSlice<'b, u8, BITS>>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        PackedSequenceEncoder::new_empty()
+        PackedSequenceSerializer::new_empty()
     }
 }
 

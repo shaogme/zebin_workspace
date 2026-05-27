@@ -1,9 +1,9 @@
 #[cfg(feature = "alloc")]
-use zebin::{ZebinArchive, ZebinEncode};
+use zebin::{ZebinArchive, ZebinSerialize};
 
 #[cfg(feature = "alloc")]
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
 pub struct AttributeTest {
     pub id: u64,
 
@@ -27,7 +27,7 @@ fn test_rename_and_skip() {
         also_ignored: "Secret".to_string(),
     };
 
-    let buf = zebin::encode(user).unwrap();
+    let buf = zebin::serialize(user).unwrap();
     let archived = zebin::access::<AttributeTest, _>(&buf).unwrap();
 
     assert_eq!(archived.id, 42);
@@ -37,14 +37,14 @@ fn test_rename_and_skip() {
 
 #[cfg(feature = "alloc")]
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 pub struct TupleTest(u32, #[zebin(skip)] String, u64);
 
 #[cfg(feature = "alloc")]
 #[test]
 fn test_tuple_skip() {
     let t = TupleTest(1, "ignored".to_string(), 2);
-    let buf = zebin::encode(t).unwrap();
+    let buf = zebin::serialize(t).unwrap();
     let archived = zebin::access::<TupleTest, _>(&buf).unwrap();
 
     assert_eq!(archived.0, 1);
@@ -54,7 +54,7 @@ fn test_tuple_skip() {
 
 #[cfg(feature = "alloc")]
 #[allow(dead_code)]
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 pub enum EnumTest {
     Variant1 {
         id: u32,
@@ -75,7 +75,7 @@ fn test_enum_skip_rename() {
         id: 10,
         secret: "hidden".to_string(),
     };
-    let buf1 = zebin::encode(e1).unwrap();
+    let buf1 = zebin::serialize(e1).unwrap();
     let archived1 = zebin::access::<EnumTest, _>(&buf1).unwrap();
     if let Some(v) = archived1.as_variant1() {
         assert_eq!(v.id, 10);
@@ -84,7 +84,7 @@ fn test_enum_skip_rename() {
     }
 
     let e2 = EnumTest::Variant2 { value: 20 };
-    let buf2 = zebin::encode(e2).unwrap();
+    let buf2 = zebin::serialize(e2).unwrap();
     let archived2 = zebin::access::<EnumTest, _>(&buf2).unwrap();
     if let Some(v) = archived2.as_new_variant() {
         // v.val should be 20 because 'value' was renamed to 'val'

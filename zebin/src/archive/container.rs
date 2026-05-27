@@ -2,38 +2,38 @@ use crate::prelude::*;
 use alloc::{borrow::Cow, borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc};
 use core::task::Poll;
 
-/// Encoder for `Box<T>`: takes ownership of the box, dereferences it once on
-/// `input` to recover the inner `T`, and forwards into `T::Encoder`.
-pub struct BoxEncoder<'a, T>
+/// Serializer for `Box<T>`: takes ownership of the box, dereferences it once on
+/// `input` to recover the inner `T`, and forwards into `T::Serializer`.
+pub struct BoxSerializer<'a, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
-    inner: <T as Encode>::Encoder<'a>,
+    inner: <T as Serialize>::Serializer<'a>,
 }
 
-impl<'a, T> BoxEncoder<'a, T>
+impl<'a, T> BoxSerializer<'a, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub fn new() -> Self {
         Self {
-            inner: T::encoder(),
+            inner: T::serializer(),
         }
     }
 }
 
-impl<'a, T> Default for BoxEncoder<'a, T>
+impl<'a, T> Default for BoxSerializer<'a, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T> Encoder for BoxEncoder<'a, T>
+impl<'a, T> Serializer for BoxSerializer<'a, T>
 where
-    T: Encode<Input<'a> = T> + Archive + 'a,
+    T: Serialize<Input<'a> = T> + Archive + 'a,
 {
     type Input = Box<T>;
 
@@ -65,25 +65,25 @@ where
     type Archived = T::Archived;
 }
 
-impl<T> Encode for Box<T>
+impl<T> Serialize for Box<T>
 where
-    T: Encode + Archive,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    T: Serialize + Archive,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = Box<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = BoxEncoder<'a, T>
+    type Serializer<'a>
+        = BoxSerializer<'a, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        BoxEncoder::new()
+        BoxSerializer::new()
     }
 }
 
@@ -96,28 +96,28 @@ where
     }
 }
 
-/// `Box<str>`: encodes the inner `&str` (DST path).
-pub struct BoxStrEncoder<'a> {
-    inner: <str as Encode>::Encoder<'a>,
+/// `Box<str>`: serializes the inner `&str` (DST path).
+pub struct BoxStrSerializer<'a> {
+    inner: <str as Serialize>::Serializer<'a>,
     pending: Option<Box<str>>,
 }
 
-impl<'a> BoxStrEncoder<'a> {
+impl<'a> BoxStrSerializer<'a> {
     pub fn new() -> Self {
         Self {
-            inner: <str as Encode>::encoder(),
+            inner: <str as Serialize>::serializer(),
             pending: None,
         }
     }
 }
 
-impl<'a> Default for BoxStrEncoder<'a> {
+impl<'a> Default for BoxStrSerializer<'a> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> Encoder for BoxStrEncoder<'a> {
+impl<'a> Serializer for BoxStrSerializer<'a> {
     type Input = Box<str>;
 
     fn input<S: StorageMut + ?Sized>(
@@ -126,8 +126,8 @@ impl<'a> Encoder for BoxStrEncoder<'a> {
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         // SAFETY: we keep `pending` alive while `inner` borrows from it.
-        // The `'a` lifetime in `<str as Encode>::Encoder<'a>` is satisfied because
-        // we drop the box only after the encoder finishes.
+        // The `'a` lifetime in `<str as Serialize>::Serializer<'a>` is satisfied because
+        // we drop the box only after the serializer finishes.
         self.pending = Some(item);
         let s_ref: &str = self.pending.as_ref().unwrap();
         let s_ref: &'a str = unsafe { core::mem::transmute::<&str, &'a str>(s_ref) };
@@ -146,21 +146,21 @@ impl<'a> Encoder for BoxStrEncoder<'a> {
     }
 }
 
-impl Encode for Box<str> {
+impl Serialize for Box<str> {
     type Input<'a>
         = Box<str>
     where
         Self: 'a;
-    type Encoder<'a>
-        = BoxStrEncoder<'a>
+    type Serializer<'a>
+        = BoxStrSerializer<'a>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        BoxStrEncoder::new()
+        BoxStrSerializer::new()
     }
 }
 
@@ -193,43 +193,43 @@ where
     }
 }
 
-/// Encoder for shared-ownership wrappers (`Rc<T>` / `Arc<T>` / `Cow<'_, T>`).
+/// Serializer for shared-ownership wrappers (`Rc<T>` / `Arc<T>` / `Cow<'_, T>`).
 ///
-/// These wrappers are moved by value into the encoder. The inner `T` is
+/// These wrappers are moved by value into the serializer. The inner `T` is
 /// extracted (via `Clone` for `Rc`/`Arc`, `into_owned` for `Cow`) and fed into
-/// `T`'s encoder.
-pub struct SharedRefEncoder<'a, T, W>
+/// `T`'s serializer.
+pub struct SharedRefSerializer<'a, T, W>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
-    inner: <T as Encode>::Encoder<'a>,
+    inner: <T as Serialize>::Serializer<'a>,
     _phantom: core::marker::PhantomData<W>,
 }
 
-impl<'a, T, W> SharedRefEncoder<'a, T, W>
+impl<'a, T, W> SharedRefSerializer<'a, T, W>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub fn new() -> Self {
         Self {
-            inner: T::encoder(),
+            inner: T::serializer(),
             _phantom: core::marker::PhantomData,
         }
     }
 }
 
-impl<'a, T, W> Default for SharedRefEncoder<'a, T, W>
+impl<'a, T, W> Default for SharedRefSerializer<'a, T, W>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T> Encoder for SharedRefEncoder<'a, T, Rc<T>>
+impl<'a, T> Serializer for SharedRefSerializer<'a, T, Rc<T>>
 where
-    T: Encode<Input<'a> = T> + Archive + Clone + 'a,
+    T: Serialize<Input<'a> = T> + Archive + Clone + 'a,
 {
     type Input = Rc<T>;
 
@@ -254,9 +254,9 @@ where
     }
 }
 
-impl<'a, T> Encoder for SharedRefEncoder<'a, T, Arc<T>>
+impl<'a, T> Serializer for SharedRefSerializer<'a, T, Arc<T>>
 where
-    T: Encode<Input<'a> = T> + Archive + Clone + 'a,
+    T: Serialize<Input<'a> = T> + Archive + Clone + 'a,
 {
     type Input = Arc<T>;
 
@@ -281,43 +281,43 @@ where
     }
 }
 
-/// Forwards an owned `Cow<B>` into `B::Owned`'s encoder via `into_owned()`.
-pub struct CowEncoder<'r, 'cow, B: ?Sized>
+/// Forwards an owned `Cow<B>` into `B::Owned`'s serializer via `into_owned()`.
+pub struct CowSerializer<'r, 'cow, B: ?Sized>
 where
-    B: ToOwned + Encode + Archive,
-    <B as ToOwned>::Owned: Encode + Archive + 'r,
+    B: ToOwned + Serialize + Archive,
+    <B as ToOwned>::Owned: Serialize + Archive + 'r,
 {
-    inner: <<B as ToOwned>::Owned as Encode>::Encoder<'r>,
+    inner: <<B as ToOwned>::Owned as Serialize>::Serializer<'r>,
     _phantom: core::marker::PhantomData<&'cow B>,
 }
 
-impl<'r, 'cow, B: ?Sized> CowEncoder<'r, 'cow, B>
+impl<'r, 'cow, B: ?Sized> CowSerializer<'r, 'cow, B>
 where
-    B: ToOwned + Encode + Archive,
-    <B as ToOwned>::Owned: Encode + Archive + 'r,
+    B: ToOwned + Serialize + Archive,
+    <B as ToOwned>::Owned: Serialize + Archive + 'r,
 {
     pub fn new() -> Self {
         Self {
-            inner: <<B as ToOwned>::Owned as Encode>::encoder(),
+            inner: <<B as ToOwned>::Owned as Serialize>::serializer(),
             _phantom: core::marker::PhantomData,
         }
     }
 }
 
-impl<'r, 'cow, B: ?Sized> Default for CowEncoder<'r, 'cow, B>
+impl<'r, 'cow, B: ?Sized> Default for CowSerializer<'r, 'cow, B>
 where
-    B: ToOwned + Encode + Archive,
-    <B as ToOwned>::Owned: Encode + Archive + 'r,
+    B: ToOwned + Serialize + Archive,
+    <B as ToOwned>::Owned: Serialize + Archive + 'r,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'r, 'cow, B: ?Sized> Encoder for CowEncoder<'r, 'cow, B>
+impl<'r, 'cow, B: ?Sized> Serializer for CowSerializer<'r, 'cow, B>
 where
-    B: ToOwned + Encode + Archive,
-    <B as ToOwned>::Owned: Encode<Input<'r> = <B as ToOwned>::Owned> + Archive + 'r,
+    B: ToOwned + Serialize + Archive,
+    <B as ToOwned>::Owned: Serialize<Input<'r> = <B as ToOwned>::Owned> + Archive + 'r,
 {
     type Input = Cow<'cow, B>;
 
@@ -349,25 +349,25 @@ where
     type Archived = T::Archived;
 }
 
-impl<T> Encode for Rc<T>
+impl<T> Serialize for Rc<T>
 where
-    T: Encode + Archive + Clone,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    T: Serialize + Archive + Clone,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = Rc<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = SharedRefEncoder<'a, T, Rc<T>>
+    type Serializer<'a>
+        = SharedRefSerializer<'a, T, Rc<T>>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        SharedRefEncoder::new()
+        SharedRefSerializer::new()
     }
 }
 
@@ -416,25 +416,25 @@ where
     type Archived = T::Archived;
 }
 
-impl<T> Encode for Arc<T>
+impl<T> Serialize for Arc<T>
 where
-    T: Encode + Archive + Clone,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    T: Serialize + Archive + Clone,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = Arc<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = SharedRefEncoder<'a, T, Arc<T>>
+    type Serializer<'a>
+        = SharedRefSerializer<'a, T, Arc<T>>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        SharedRefEncoder::new()
+        SharedRefSerializer::new()
     }
 }
 
@@ -483,26 +483,26 @@ where
     type Archived = B::Archived;
 }
 
-impl<'cow, B> Encode for Cow<'cow, B>
+impl<'cow, B> Serialize for Cow<'cow, B>
 where
-    B: ?Sized + ToOwned + Encode + Archive + 'cow,
-    <B as ToOwned>::Owned: Encode + Archive,
-    for<'r> <B as ToOwned>::Owned: Encode<Input<'r> = <B as ToOwned>::Owned> + 'r,
+    B: ?Sized + ToOwned + Serialize + Archive + 'cow,
+    <B as ToOwned>::Owned: Serialize + Archive,
+    for<'r> <B as ToOwned>::Owned: Serialize<Input<'r> = <B as ToOwned>::Owned> + 'r,
 {
     type Input<'r>
         = Cow<'cow, B>
     where
         Self: 'r;
-    type Encoder<'r>
-        = CowEncoder<'r, 'cow, B>
+    type Serializer<'r>
+        = CowSerializer<'r, 'cow, B>
     where
         Self: 'r;
 
-    fn encoder<'r>() -> Self::Encoder<'r>
+    fn serializer<'r>() -> Self::Serializer<'r>
     where
         Self: 'r,
     {
-        CowEncoder::new()
+        CowSerializer::new()
     }
 }
 

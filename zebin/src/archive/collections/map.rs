@@ -4,37 +4,37 @@ use crate::prelude::*;
 
 use super::vec::ArchivedVec;
 
-use super::super::iter::OwnedIterEncoder;
+use super::super::iter::OwnedIterSerializer;
 
-pub type BTreeMapEncoder<'a, K, V> = OwnedIterEncoder<'a, BTreeMap<K, V>, (K, V)>;
+pub type BTreeMapSerializer<'a, K, V> = OwnedIterSerializer<'a, BTreeMap<K, V>, (K, V)>;
 
 impl<K: Archive, V: Archive> Archive for BTreeMap<K, V> {
     type Archived = ArchivedVec<'static, (K::Archived, V::Archived)>;
 }
 
-impl<K, V> Encode for BTreeMap<K, V>
+impl<K, V> Serialize for BTreeMap<K, V>
 where
-    K: Encode + Archive,
-    V: Encode + Archive,
+    K: Serialize + Archive,
+    V: Serialize + Archive,
     K::Archived: ArchivedLayout,
     V::Archived: ArchivedLayout,
-    for<'a> K: Encode<Input<'a> = K> + 'a,
-    for<'a> V: Encode<Input<'a> = V> + 'a,
+    for<'a> K: Serialize<Input<'a> = K> + 'a,
+    for<'a> V: Serialize<Input<'a> = V> + 'a,
 {
     type Input<'a>
         = BTreeMap<K, V>
     where
         Self: 'a;
-    type Encoder<'a>
-        = BTreeMapEncoder<'a, K, V>
+    type Serializer<'a>
+        = BTreeMapSerializer<'a, K, V>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        BTreeMapEncoder::new()
+        BTreeMapSerializer::new()
     }
 }
 
@@ -46,10 +46,10 @@ where
     V::Archived: ArchivedLayout,
 {
     fn measure_body(&self) -> Result<usize, ZebinError> {
-        // Each map entry is encoded as a `(K, V)` tuple — same shape as a sequence
+        // Each map entry is serialized as a `(K, V)` tuple — same shape as a sequence
         // of tuples. We approximate that with a sequence whose archived element
         // alignment is the max of K::ALIGNMENT and V::ALIGNMENT (matching how
-        // Tuple2Encoder writes K then V back-to-back).
+        // Tuple2Serializer writes K then V back-to-back).
         let mut pos = 0usize;
         let alignment = core::cmp::max(
             <K::Archived as ArchivedLayout>::ALIGNMENT.get(),
@@ -118,7 +118,8 @@ where
 }
 
 #[cfg(feature = "std")]
-pub type HashMapEncoder<'a, K, V> = OwnedIterEncoder<'a, std::collections::HashMap<K, V>, (K, V)>;
+pub type HashMapSerializer<'a, K, V> =
+    OwnedIterSerializer<'a, std::collections::HashMap<K, V>, (K, V)>;
 
 #[cfg(feature = "std")]
 impl<K: Archive, V: Archive> Archive for std::collections::HashMap<K, V> {
@@ -126,29 +127,29 @@ impl<K: Archive, V: Archive> Archive for std::collections::HashMap<K, V> {
 }
 
 #[cfg(feature = "std")]
-impl<K, V> Encode for std::collections::HashMap<K, V>
+impl<K, V> Serialize for std::collections::HashMap<K, V>
 where
-    K: Encode + Archive,
-    V: Encode + Archive,
+    K: Serialize + Archive,
+    V: Serialize + Archive,
     K::Archived: ArchivedLayout,
     V::Archived: ArchivedLayout,
-    for<'a> K: Encode<Input<'a> = K> + 'a,
-    for<'a> V: Encode<Input<'a> = V> + 'a,
+    for<'a> K: Serialize<Input<'a> = K> + 'a,
+    for<'a> V: Serialize<Input<'a> = V> + 'a,
 {
     type Input<'a>
         = std::collections::HashMap<K, V>
     where
         Self: 'a;
-    type Encoder<'a>
-        = HashMapEncoder<'a, K, V>
+    type Serializer<'a>
+        = HashMapSerializer<'a, K, V>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        HashMapEncoder::new()
+        HashMapSerializer::new()
     }
 }
 

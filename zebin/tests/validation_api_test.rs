@@ -1,4 +1,4 @@
-use zebin::{ZebinArchive, ZebinEncode};
+use zebin::{ZebinArchive, ZebinSerialize};
 
 #[cfg(feature = "alloc")]
 use zebin::prelude::{
@@ -6,25 +6,25 @@ use zebin::prelude::{
     validate_with_config,
 };
 
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 struct Child {
     flag: bool,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 struct Parent {
     children: Vec<Child>,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 struct Node {
     children: Vec<Node>,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 #[zebin(schema_key = 0x5151)]
 struct SchemaRecord {
     #[zebin(id = 1)]
@@ -40,7 +40,7 @@ fn test_validate_detailed_reports_logical_path() {
         children: vec![Child { flag: true }],
     };
 
-    let mut buf = zebin::encode(value).unwrap();
+    let mut buf = zebin::serialize(value).unwrap();
     // Corrupt bool value (neither 0 nor 1)
     buf[5] = 2;
 
@@ -69,7 +69,7 @@ fn test_validate_with_config_uses_custom_depth_limit() {
         };
     }
 
-    let buf = zebin::encode(current).unwrap();
+    let buf = zebin::serialize(current).unwrap();
     // Pass None as we don't need path tracking here
     let err = validate_with_config::<Node, _>(
         &buf,
@@ -95,7 +95,7 @@ fn test_validate_detailed_reports_schema_field_encoding_path() {
         name: "Ada".to_string(),
     };
 
-    let mut buf = zebin::encode(value).unwrap();
+    let mut buf = zebin::serialize(value).unwrap();
     let object_pos = 4;
     let first_entry_encoding_pos = object_pos + 12 + 8 + 2;
     buf[first_entry_encoding_pos] = zebin::schema::FieldEncoding::LengthPrefixed as u8;
@@ -118,7 +118,7 @@ fn test_validate_detailed_reports_schema_field_length_path() {
         name: "Ada".to_string(),
     };
 
-    let mut buf = zebin::encode(value).unwrap();
+    let mut buf = zebin::serialize(value).unwrap();
     let object_pos = 4;
     let first_entry_payload_len_pos = object_pos + 12 + 8 + 4;
     buf[first_entry_payload_len_pos..first_entry_payload_len_pos + 4]
@@ -142,7 +142,7 @@ fn test_validate_detailed_reports_duplicate_schema_field_path() {
         name: "Ada".to_string(),
     };
 
-    let mut buf = zebin::encode(value).unwrap();
+    let mut buf = zebin::serialize(value).unwrap();
     let object_pos = 4;
     // Account for 8-byte payload of the fields (flag: bool = 1, name: String = 7)
     let second_entry_id_pos = object_pos + 12 + 8 + zebin::schema::FieldEntry::SIZE;
@@ -170,7 +170,7 @@ fn test_validate_detailed_reports_trailing_bytes_at_root() {
         children: vec![Child { flag: true }],
     };
 
-    let mut buf = zebin::encode(value).unwrap();
+    let mut buf = zebin::serialize(value).unwrap();
     buf.push(0);
 
     let mut stack = ValidationPathStack::new();
@@ -193,7 +193,7 @@ fn test_reader_rejects_invalid_sequence_marker_before_building_view() {
         children: vec![Child { flag: true }],
     };
 
-    let mut buf = zebin::encode(value).unwrap();
+    let mut buf = zebin::serialize(value).unwrap();
     buf[4] = 2;
 
     let mut reader_obj = zebin::reader::<Parent, _>(&buf).unwrap();

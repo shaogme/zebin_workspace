@@ -32,9 +32,9 @@ pub mod prelude {
     #[cfg(feature = "alloc")]
     pub use crate::archive::{PackedBoolVec, PackedU8Vec, PackedVarIntSlice, PackedVec, VarIntVec};
     #[cfg(feature = "alloc")]
-    pub use crate::io::VecEncoder;
+    pub use crate::io::VecSerializer;
     #[cfg(feature = "mmap")]
-    pub use crate::io::{Mmap, MmapEncoder, MmapMut};
+    pub use crate::io::{Mmap, MmapMut, MmapSerializer};
     pub use crate::{
         archive::{
             ArchivedPackedBoolSlice, ArchivedPackedU8Slice, IterArchive, PackedBoolSlice,
@@ -43,8 +43,8 @@ pub mod prelude {
         error::{AccessError, ArchiveError, ZebinError},
         io::{
             Access, Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-            ArchivedLayout, Cursor, Deserialize, Encode, Encoder, FixedLayout, MeasureBody,
-            NoSharder, SchemaAware, Sharder, SinkProgress, SliceEncoder, StaticMode, Storage,
+            ArchivedLayout, Cursor, Deserialize, FixedLayout, MeasureBody, NoSharder, SchemaAware,
+            Serialize, Serializer, Sharder, SinkProgress, SliceSerializer, StaticMode, Storage,
             StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter, deserialize, reader,
             writer,
         },
@@ -57,7 +57,7 @@ pub mod prelude {
             validate_detailed, validate_with_config,
         },
     };
-    pub use zebin_macros::{ZebinArchive, ZebinEncode};
+    pub use zebin_macros::{ZebinArchive, ZebinSerialize};
 }
 // --- 子模块结构 (方案 2) ---
 
@@ -65,13 +65,13 @@ pub mod prelude {
 pub mod archive {
     pub use crate::archive_impl::{
         ArchivedIter, ArchivedOption, ArchivedPackedBoolSlice, ArchivedPackedBoolSliceView,
-        ArchivedPackedU8Slice, ArchivedPackedU8SliceView, IterArchive, IterEncoder,
+        ArchivedPackedU8Slice, ArchivedPackedU8SliceView, IterArchive, IterSerializer,
         PackedBoolSlice, PackedSlice, PackedU8Slice, VarInt, VarIntView,
     };
     #[cfg(feature = "alloc")]
     pub use crate::archive_impl::{
-        PackedBoolVec, PackedBoolVecEncoder, PackedSequenceEncoder, PackedU8Vec,
-        PackedU8VecEncoder, PackedVarIntSlice, PackedVec, VarIntVec,
+        PackedBoolVec, PackedBoolVecSerializer, PackedSequenceSerializer, PackedU8Vec,
+        PackedU8VecSerializer, PackedVarIntSlice, PackedVec, VarIntVec,
     };
 }
 
@@ -97,11 +97,11 @@ pub mod schema {
 /// 底层 I/O、流、编码器与自定义头部
 pub mod io {
     pub use crate::format_impl::{ARCHIVE_MAGIC, ARCHIVE_VERSION, ArchiveHeader};
-    pub use crate::io_impl::storage::SliceEncoder;
+    pub use crate::io_impl::storage::SliceSerializer;
     #[cfg(feature = "alloc")]
-    pub use crate::io_impl::storage::VecEncoder;
+    pub use crate::io_impl::storage::VecSerializer;
     #[cfg(feature = "mmap")]
-    pub use crate::io_impl::storage::mmap::MmapEncoder;
+    pub use crate::io_impl::storage::mmap::MmapSerializer;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
     pub use crate::io_impl::storage::{
@@ -109,11 +109,11 @@ pub mod io {
     };
     pub use crate::pub_fn::{deserialize, reader, writer};
     #[cfg(feature = "alloc")]
-    pub use crate::pub_fn::{encode, encode_into};
+    pub use crate::pub_fn::{serialize, serialize_into};
     pub use crate::read_impl::ZebinReader;
     pub use crate::traits_impl::{
         Access, Archive, ArchiveHeader as ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-        ArchivedLayout, Deserialize, Encode, Encoder, FixedLayout, MeasureBody, SchemaAware,
+        ArchivedLayout, Deserialize, FixedLayout, MeasureBody, SchemaAware, Serialize, Serializer,
         SinkProgress,
     };
     #[cfg(feature = "alloc")]
@@ -133,7 +133,7 @@ pub mod error {
 pub use crate::archive_impl::ArchivedOption;
 pub use crate::error::ZebinError;
 pub use crate::read_impl::ZebinReader;
-pub use crate::traits_impl::{Access, Archive, Encode, MeasureBody};
+pub use crate::traits_impl::{Access, Archive, MeasureBody, Serialize};
 pub use crate::write::ZebinWriter;
 
 pub use memoffset;
@@ -214,7 +214,7 @@ mod pub_fn {
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.
     pub fn writer<'a, T, S>(sink: S) -> Result<ZebinWriter<'a, T, S>, ZebinError>
     where
-        T: Encode + Archive + 'a,
+        T: Serialize + Archive + 'a,
         S: StorageMut,
         T::Archived: ArchivedLayout,
     {
@@ -226,23 +226,23 @@ mod pub_fn {
 
     /// Archive a value into a newly allocated byte vector using the default header.
     #[cfg(feature = "alloc")]
-    pub fn encode<'a, T>(value: T) -> Result<Vec<u8>, ZebinError>
+    pub fn serialize<'a, T>(value: T) -> Result<Vec<u8>, ZebinError>
     where
-        T: Encode + Archive + 'a,
+        T: Serialize + Archive + 'a,
         T::Archived: ArchivedLayout,
-        T: Encode<Input<'a> = T>,
+        T: Serialize<Input<'a> = T>,
     {
-        ZebinWriter::<'a, T, VecEncoder>::encode(value)
+        ZebinWriter::<'a, T, VecSerializer>::serialize(value)
     }
 
     /// Archive a value into an existing vector using the default header.
     #[cfg(feature = "alloc")]
-    pub fn encode_into<'a, T>(value: T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
+    pub fn serialize_into<'a, T>(value: T, buf: &mut Vec<u8>) -> Result<(), ZebinError>
     where
-        T: Encode + Archive + 'a,
+        T: Serialize + Archive + 'a,
         T::Archived: ArchivedLayout,
-        T: Encode<Input<'a> = T>,
+        T: Serialize<Input<'a> = T>,
     {
-        ZebinWriter::<'a, T, VecEncoder>::encode_into(value, buf)
+        ZebinWriter::<'a, T, VecSerializer>::serialize_into(value, buf)
     }
 }

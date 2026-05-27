@@ -119,16 +119,16 @@ impl<'a> ToBytesRef<'a> for &'a str {
 
 /// Resumable serialization state for an owned `String`.
 ///
-/// On `input(String)`, the string is moved into the encoder via `into_bytes`,
-/// so the original allocation is owned by the encoder while it streams.
-pub struct StringEncoder {
+/// On `input(String)`, the string is moved into the serializer via `into_bytes`,
+/// so the original allocation is owned by the serializer while it streams.
+pub struct StringSerializer {
     bytes: Vec<u8>,
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     cursor: usize,
 }
 
-impl StringEncoder {
+impl StringSerializer {
     pub(crate) fn new_empty() -> Self {
         Self {
             bytes: Vec::new(),
@@ -139,13 +139,13 @@ impl StringEncoder {
     }
 }
 
-impl Default for StringEncoder {
+impl Default for StringSerializer {
     fn default() -> Self {
         Self::new_empty()
     }
 }
 
-impl Encoder for StringEncoder {
+impl Serializer for StringSerializer {
     type Input = String;
 
     fn input<S: StorageMut + ?Sized>(
@@ -189,7 +189,7 @@ impl Encoder for StringEncoder {
 }
 
 /// Resumable serialization state for borrowed string-like inputs (`&str`).
-pub struct StrEncoder<'a, T: ?Sized = str> {
+pub struct StrSerializer<'a, T: ?Sized = str> {
     bytes: &'a [u8],
     len_prefix: [u8; 4],
     prefix_cursor: usize,
@@ -197,7 +197,7 @@ pub struct StrEncoder<'a, T: ?Sized = str> {
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T> StrEncoder<'a, T>
+impl<'a, T> StrSerializer<'a, T>
 where
     T: ?Sized,
 {
@@ -212,7 +212,7 @@ where
     }
 }
 
-impl<'a, T> Encoder for StrEncoder<'a, T>
+impl<'a, T> Serializer for StrSerializer<'a, T>
 where
     T: ?Sized,
     &'a T: ToBytesRef<'a>,
@@ -263,21 +263,21 @@ impl Archive for String {
     type Archived = ArchivedString;
 }
 
-impl Encode for String {
+impl Serialize for String {
     type Input<'a>
         = String
     where
         Self: 'a;
-    type Encoder<'a>
-        = StringEncoder
+    type Serializer<'a>
+        = StringSerializer
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        StringEncoder::new_empty()
+        StringSerializer::new_empty()
     }
 }
 
@@ -285,21 +285,21 @@ impl Archive for str {
     type Archived = ArchivedString;
 }
 
-impl Encode for str {
+impl Serialize for str {
     type Input<'a>
         = &'a str
     where
         Self: 'a;
-    type Encoder<'a>
-        = StrEncoder<'a, str>
+    type Serializer<'a>
+        = StrSerializer<'a, str>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        StrEncoder::new_empty()
+        StrSerializer::new_empty()
     }
 }
 

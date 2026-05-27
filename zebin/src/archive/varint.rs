@@ -144,7 +144,7 @@ impl<T> Archive for ArchivedVarInt<T> {
     type Archived = Self;
 }
 
-pub(crate) fn encoded_len_u64(value: u64) -> usize {
+pub(crate) fn serialized_len_u64(value: u64) -> usize {
     let mut value = value;
     let mut len = 1usize;
     while value >= 0x80 {
@@ -154,7 +154,7 @@ pub(crate) fn encoded_len_u64(value: u64) -> usize {
     len
 }
 
-pub(crate) fn encode_u64(mut value: u64, out: &mut [u8]) {
+pub(crate) fn serialize_u64(mut value: u64, out: &mut [u8]) {
     let mut cursor = 0usize;
     loop {
         let mut byte = (value & 0x7F) as u8;
@@ -254,14 +254,14 @@ impl<T: VarIntNumber> ToVarIntNumber<T> for VarIntView<T> {
     }
 }
 
-pub struct VarIntEncoder<T: VarIntNumber, I = ()> {
+pub struct VarIntSerializer<T: VarIntNumber, I = ()> {
     bytes: [u8; 10],
     len: u8,
     cursor: u8,
     _phantom: PhantomData<(T, I)>,
 }
 
-impl<T: VarIntNumber, I> VarIntEncoder<T, I> {
+impl<T: VarIntNumber, I> VarIntSerializer<T, I> {
     pub(crate) fn new_empty() -> Self {
         Self {
             bytes: [0u8; 10],
@@ -272,7 +272,7 @@ impl<T: VarIntNumber, I> VarIntEncoder<T, I> {
     }
 }
 
-impl<T: VarIntNumber, I> Encoder for VarIntEncoder<T, I>
+impl<T: VarIntNumber, I> Serializer for VarIntSerializer<T, I>
 where
     I: ToVarIntNumber<T>,
 {
@@ -284,9 +284,9 @@ where
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         let val = item.to_varint_number().to_u64();
-        let len = encoded_len_u64(val);
+        let len = serialized_len_u64(val);
         self.bytes.fill(0);
-        encode_u64(val, &mut self.bytes[..len]);
+        serialize_u64(val, &mut self.bytes[..len]);
         self.len = len as u8;
         self.cursor = 0;
         self.poll_pending(sink)
@@ -311,7 +311,7 @@ where
     }
 }
 
-impl<T> Encode for VarInt<T>
+impl<T> Serialize for VarInt<T>
 where
     T: VarIntNumber,
 {
@@ -319,20 +319,20 @@ where
         = VarInt<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = VarIntEncoder<T, VarInt<T>>
+    type Serializer<'a>
+        = VarIntSerializer<T, VarInt<T>>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        VarIntEncoder::new_empty()
+        VarIntSerializer::new_empty()
     }
 }
 
-impl<T> Encode for VarIntView<T>
+impl<T> Serialize for VarIntView<T>
 where
     T: VarIntNumber,
 {
@@ -340,28 +340,28 @@ where
         = VarIntView<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = VarIntEncoder<T, VarIntView<T>>
+    type Serializer<'a>
+        = VarIntSerializer<T, VarIntView<T>>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        VarIntEncoder::new_empty()
+        VarIntSerializer::new_empty()
     }
 }
 
 impl<T: VarIntNumber> MeasureBody for VarInt<T> {
     fn measure_body(&self) -> Result<usize, ZebinError> {
-        Ok(encoded_len_u64(self.get().to_u64()))
+        Ok(serialized_len_u64(self.get().to_u64()))
     }
 }
 
 impl<T: VarIntNumber> MeasureBody for VarIntView<T> {
     fn measure_body(&self) -> Result<usize, ZebinError> {
-        Ok(encoded_len_u64(self.get().to_u64()))
+        Ok(serialized_len_u64(self.get().to_u64()))
     }
 }
 

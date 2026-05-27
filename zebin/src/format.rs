@@ -82,7 +82,7 @@ impl ArchiveHeaderTrait for ArchiveHeader {
         self.flags
     }
 
-    fn encode(&self) -> Self::Bytes {
+    fn serialize(&self) -> Self::Bytes {
         Self::to_bytes(self.flags)
     }
 

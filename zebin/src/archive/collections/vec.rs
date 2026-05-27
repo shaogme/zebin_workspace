@@ -5,7 +5,7 @@ use crate::{
     prelude::*,
 };
 
-use super::super::iter::OwnedIterEncoder;
+use super::super::iter::OwnedIterSerializer;
 
 impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
     fn pos(&self) -> usize {
@@ -126,33 +126,33 @@ where
     }
 }
 
-pub type VecEncoder<'a, T> = OwnedIterEncoder<'a, Vec<T>, T>;
-pub type VecDequeEncoder<'a, T> = OwnedIterEncoder<'a, VecDeque<T>, T>;
+pub type VecSerializer<'a, T> = OwnedIterSerializer<'a, Vec<T>, T>;
+pub type VecDequeSerializer<'a, T> = OwnedIterSerializer<'a, VecDeque<T>, T>;
 
 impl<T: Archive> Archive for Vec<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-impl<T> Encode for Vec<T>
+impl<T> Serialize for Vec<T>
 where
-    T: Encode + Archive,
+    T: Serialize + Archive,
     T::Archived: ArchivedLayout,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = Vec<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = VecEncoder<'a, T>
+    type Serializer<'a>
+        = VecSerializer<'a, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        VecEncoder::new()
+        VecSerializer::new()
     }
 }
 
@@ -203,26 +203,26 @@ where
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-impl<T> Encode for VecDeque<T>
+impl<T> Serialize for VecDeque<T>
 where
-    T: Encode + Archive,
+    T: Serialize + Archive,
     T::Archived: ArchivedLayout,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = VecDeque<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = VecDequeEncoder<'a, T>
+    type Serializer<'a>
+        = VecDequeSerializer<'a, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        VecDequeEncoder::new()
+        VecDequeSerializer::new()
     }
 }
 

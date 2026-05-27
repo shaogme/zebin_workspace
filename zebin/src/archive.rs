@@ -18,8 +18,8 @@ pub use packed::{
 mod packed_vec;
 #[cfg(feature = "alloc")]
 pub use packed_vec::{
-    PackedBoolVec, PackedBoolVecEncoder, PackedSequenceEncoder, PackedU8Vec, PackedU8VecEncoder,
-    PackedVec,
+    PackedBoolVec, PackedBoolVecSerializer, PackedSequenceSerializer, PackedU8Vec,
+    PackedU8VecSerializer, PackedVec,
 };
 
 #[path = "archive/primitive.rs"]
@@ -53,4 +53,4 @@ mod collections;
 mod iter;
 #[cfg(feature = "alloc")]
 pub(crate) use iter::skip_block_index;
-pub use iter::{ArchivedIter, IterArchive, IterEncoder};
+pub use iter::{ArchivedIter, IterArchive, IterSerializer};

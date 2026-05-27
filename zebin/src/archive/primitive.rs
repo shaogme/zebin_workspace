@@ -27,17 +27,17 @@ macro_rules! impl_to_bytes {
 
 impl_to_bytes!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
 
-/// Byte-oriented encoder used by fixed-width primitive encoders.
+/// Byte-oriented serializer used by fixed-width primitive serializers.
 ///
 /// Owns a small fixed-size buffer; `input(value)` immediately serializes the
 /// value into the buffer and drops the original ownership.
-pub struct ByteEncoder<const N: usize, T = ()> {
+pub struct ByteSerializer<const N: usize, T = ()> {
     bytes: [u8; N],
     cursor: usize,
     _phantom: core::marker::PhantomData<T>,
 }
 
-impl<const N: usize, T> ByteEncoder<N, T> {
+impl<const N: usize, T> ByteSerializer<N, T> {
     pub fn new() -> Self {
         Self {
             bytes: [0; N],
@@ -47,13 +47,13 @@ impl<const N: usize, T> ByteEncoder<N, T> {
     }
 }
 
-impl<const N: usize, T> Default for ByteEncoder<N, T> {
+impl<const N: usize, T> Default for ByteSerializer<N, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const N: usize, T> Encoder for ByteEncoder<N, T>
+impl<const N: usize, T> Serializer for ByteSerializer<N, T>
 where
     T: ToBytes<N>,
 {
@@ -141,15 +141,15 @@ macro_rules! impl_archive_for_primitive {
                 type Archived = $t;
             }
 
-            impl Encode for $t {
+            impl Serialize for $t {
                 type Input<'a> = $t where Self: 'a;
-                type Encoder<'a> = ByteEncoder<{ core::mem::size_of::<$t>() }, $t> where Self: 'a;
+                type Serializer<'a> = ByteSerializer<{ core::mem::size_of::<$t>() }, $t> where Self: 'a;
 
-                fn encoder<'a>() -> Self::Encoder<'a>
+                fn serializer<'a>() -> Self::Serializer<'a>
                 where
                     Self: 'a,
                 {
-                    ByteEncoder::new()
+                    ByteSerializer::new()
                 }
             }
 
@@ -242,21 +242,21 @@ impl Archive for bool {
     type Archived = bool;
 }
 
-impl Encode for bool {
+impl Serialize for bool {
     type Input<'a>
         = bool
     where
         Self: 'a;
-    type Encoder<'a>
-        = ByteEncoder<1, bool>
+    type Serializer<'a>
+        = ByteSerializer<1, bool>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        ByteEncoder::new()
+        ByteSerializer::new()
     }
 }
 
@@ -292,11 +292,11 @@ impl SchemaAware for bool {
     }
 }
 
-pub struct UnitEncoder<T = ()> {
+pub struct UnitSerializer<T = ()> {
     _phantom: core::marker::PhantomData<T>,
 }
 
-impl<T> UnitEncoder<T> {
+impl<T> UnitSerializer<T> {
     pub fn new() -> Self {
         Self {
             _phantom: core::marker::PhantomData,
@@ -304,13 +304,13 @@ impl<T> UnitEncoder<T> {
     }
 }
 
-impl<T> Default for UnitEncoder<T> {
+impl<T> Default for UnitSerializer<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T> Encoder for UnitEncoder<T> {
+impl<T> Serializer for UnitSerializer<T> {
     type Input = T;
 
     fn input<S: StorageMut + ?Sized>(
@@ -376,18 +376,18 @@ impl Archive for () {
     type Archived = ();
 }
 
-impl Encode for () {
+impl Serialize for () {
     type Input<'a>
         = ()
     where
         Self: 'a;
-    type Encoder<'a> = UnitEncoder<()>;
+    type Serializer<'a> = UnitSerializer<()>;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        UnitEncoder::new()
+        UnitSerializer::new()
     }
 }
 
@@ -425,24 +425,24 @@ impl SchemaAware for () {
 
 /// Resumable serialization state for `(K, V)`.
 ///
-/// On `input((k, v))` the key `k` is moved into `key_encoder`; the value `v`
+/// On `input((k, v))` the key `k` is moved into `key_serializer`; the value `v`
 /// is parked in `pending_value` until stage 1 begins, at which point it is
-/// taken and moved into `value_encoder`.
-pub struct Tuple2Encoder<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> {
+/// taken and moved into `value_serializer`.
+pub struct Tuple2Serializer<'a, K: Serialize + Archive + 'a, V: Serialize + Archive + 'a> {
     pending_value: Option<V>,
-    key_encoder: <K as Encode>::Encoder<'a>,
-    value_encoder: <V as Encode>::Encoder<'a>,
+    key_serializer: <K as Serialize>::Serializer<'a>,
+    value_serializer: <V as Serialize>::Serializer<'a>,
     key_started: bool,
     value_started: bool,
     stage: u8,
 }
 
-impl<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> Tuple2Encoder<'a, K, V> {
+impl<'a, K: Serialize + Archive + 'a, V: Serialize + Archive + 'a> Tuple2Serializer<'a, K, V> {
     pub fn new() -> Self {
         Self {
             pending_value: None,
-            key_encoder: K::encoder(),
-            value_encoder: V::encoder(),
+            key_serializer: K::serializer(),
+            value_serializer: V::serializer(),
             key_started: false,
             value_started: false,
             stage: 0,
@@ -450,16 +450,18 @@ impl<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> Tuple2Encoder<'a, K
     }
 }
 
-impl<'a, K: Encode + Archive + 'a, V: Encode + Archive + 'a> Default for Tuple2Encoder<'a, K, V> {
+impl<'a, K: Serialize + Archive + 'a, V: Serialize + Archive + 'a> Default
+    for Tuple2Serializer<'a, K, V>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, K, V> Encoder for Tuple2Encoder<'a, K, V>
+impl<'a, K, V> Serializer for Tuple2Serializer<'a, K, V>
 where
-    K: Encode<Input<'a> = K> + Archive + 'a,
-    V: Encode<Input<'a> = V> + Archive + 'a,
+    K: Serialize<Input<'a> = K> + Archive + 'a,
+    V: Serialize<Input<'a> = V> + Archive + 'a,
 {
     type Input = (K, V);
 
@@ -470,7 +472,7 @@ where
     ) -> Result<Poll<()>, ZebinError> {
         let (key, value) = item;
         self.pending_value = Some(value);
-        match self.key_encoder.input(key, sink)? {
+        match self.key_serializer.input(key, sink)? {
             Poll::Pending => {
                 self.key_started = true;
                 Ok(Poll::Pending)
@@ -490,10 +492,10 @@ where
             if !self.key_started {
                 return Err(ZebinError::SerializationError {
                     pos: sink.pos(),
-                    message: "Tuple2Encoder polled before input",
+                    message: "Tuple2Serializer polled before input",
                 });
             }
-            match self.key_encoder.poll_pending(sink)? {
+            match self.key_serializer.poll_pending(sink)? {
                 Poll::Pending => return Ok(Poll::Pending),
                 Poll::Ready(()) => {}
             }
@@ -506,15 +508,15 @@ where
                     .take()
                     .ok_or(ZebinError::SerializationError {
                         pos: sink.pos(),
-                        message: "Tuple2Encoder lost pending value",
+                        message: "Tuple2Serializer lost pending value",
                     })?;
                 self.value_started = true;
-                match self.value_encoder.input(v, sink)? {
+                match self.value_serializer.input(v, sink)? {
                     Poll::Pending => return Ok(Poll::Pending),
                     Poll::Ready(()) => {}
                 }
             } else {
-                match self.value_encoder.poll_pending(sink)? {
+                match self.value_serializer.poll_pending(sink)? {
                     Poll::Pending => return Ok(Poll::Pending),
                     Poll::Ready(()) => {}
                 }
@@ -529,10 +531,10 @@ where
     }
 }
 
-impl<'a, K, V> Tuple2Encoder<'a, K, V>
+impl<'a, K, V> Tuple2Serializer<'a, K, V>
 where
-    K: Encode<Input<'a> = K> + Archive + 'a,
-    V: Encode<Input<'a> = V> + Archive + 'a,
+    K: Serialize<Input<'a> = K> + Archive + 'a,
+    V: Serialize<Input<'a> = V> + Archive + 'a,
 {
     fn advance_after_key<S: StorageMut + ?Sized>(
         &mut self,
@@ -544,10 +546,10 @@ where
             .take()
             .ok_or(ZebinError::SerializationError {
                 pos: sink.pos(),
-                message: "Tuple2Encoder lost pending value",
+                message: "Tuple2Serializer lost pending value",
             })?;
         self.value_started = true;
-        match self.value_encoder.input(v, sink)? {
+        match self.value_serializer.input(v, sink)? {
             Poll::Pending => Ok(Poll::Pending),
             Poll::Ready(()) => {
                 self.stage = 2;
@@ -561,27 +563,27 @@ impl<K: Archive, V: Archive> Archive for (K, V) {
     type Archived = (K::Archived, V::Archived);
 }
 
-impl<K, V> Encode for (K, V)
+impl<K, V> Serialize for (K, V)
 where
-    K: Encode + Archive,
-    V: Encode + Archive,
-    for<'a> K: Encode<Input<'a> = K> + 'a,
-    for<'a> V: Encode<Input<'a> = V> + 'a,
+    K: Serialize + Archive,
+    V: Serialize + Archive,
+    for<'a> K: Serialize<Input<'a> = K> + 'a,
+    for<'a> V: Serialize<Input<'a> = V> + 'a,
 {
     type Input<'a>
         = (K, V)
     where
         Self: 'a;
-    type Encoder<'a>
-        = Tuple2Encoder<'a, K, V>
+    type Serializer<'a>
+        = Tuple2Serializer<'a, K, V>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        Tuple2Encoder::new()
+        Tuple2Serializer::new()
     }
 }
 

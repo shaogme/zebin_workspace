@@ -32,7 +32,7 @@ pub trait ArchiveHeader: Clone + Copy {
 
     fn flags(&self) -> u8;
 
-    fn encode(&self) -> Self::Bytes;
+    fn serialize(&self) -> Self::Bytes;
 
     fn create(flags: u8) -> Self;
 }
@@ -388,22 +388,22 @@ impl SinkProgress {
     }
 }
 
-/// Unified encoder protocol, supporting one-off or incremental step-by-step input.
+/// Unified serializer protocol, supporting one-off or incremental step-by-step input.
 ///
-/// The trait carries no lifetime. Encoders that work over borrowed inputs (DST
+/// The trait carries no lifetime. Serializers that work over borrowed inputs (DST
 /// adapters such as `[T]` / `str` / shared-pointer wrappers) embed any required
-/// lifetime in their concrete type and feed it through `Encode::Input<'a>`.
-pub trait Encoder {
-    /// The type of input items received by the encoder.
+/// lifetime in their concrete type and feed it through `Serialize::Input<'a>`.
+pub trait Serializer {
+    /// The type of input items received by the serializer.
     ///
-    /// For owned encoders this is the value type itself. For DST adapters this
+    /// For owned serializers this is the value type itself. For DST adapters this
     /// is a borrowed reference (e.g. `&'a [T]`).
     type Input;
 
-    /// Attempts to input a data item into the encoder and encode it into the underlying `StorageMut`.
+    /// Attempts to input a data item into the serializer and serialize it into the underlying `StorageMut`.
     ///
     /// # Return Value
-    /// - `Ok(Poll::Ready(()))`: The current input item has been fully encoded and written.
+    /// - `Ok(Poll::Ready(()))`: The current input item has been fully serialized and written.
     /// - `Ok(Poll::Pending)`: The `StorageMut` is full. The current input item is pending, and the caller should flush/provide a new StorageMut and call `poll_pending`.
     fn input<S: StorageMut + ?Sized>(
         &mut self,
@@ -411,7 +411,7 @@ pub trait Encoder {
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError>;
 
-    /// Advances and flushes any state/data previously accumulated inside the encoder due to insufficient `StorageMut` space.
+    /// Advances and flushes any state/data previously accumulated inside the serializer due to insufficient `StorageMut` space.
     ///
     /// Regardless of whether it is a one-off or step-by-step input, this method can be called to advance the remaining encoding progress until it returns `Poll::Ready(())`.
     fn poll_pending<S: StorageMut + ?Sized>(
@@ -429,56 +429,56 @@ pub trait Encoder {
 /// overridden to `&'a Self` for DST adapters (`[T]`, `str`) and shared-pointer
 /// wrappers (`Rc<T>`, `Arc<T>`, `Cow<'_, T>`) where moving by value is impossible
 /// or would defeat the purpose of the wrapper.
-pub trait Encode: Archive {
+pub trait Serialize: Archive {
     type Input<'a>
     where
         Self: 'a;
 
-    type Encoder<'a>: Encoder<Input = Self::Input<'a>>
+    type Serializer<'a>: Serializer<Input = Self::Input<'a>>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a;
 }
 
-/// Encoder for `&T` references.
+/// Serializer for `&T` references.
 ///
-/// RefEncoder takes a borrow of a reference `&'b T`, clones the inner `T` (which is `Clone`),
-/// and feeds the cloned owned value into `T::Encoder`.
-pub struct RefEncoder<'a, 'b, T>
+/// RefSerializer takes a borrow of a reference `&'b T`, clones the inner `T` (which is `Clone`),
+/// and feeds the cloned owned value into `T::Serializer`.
+pub struct RefSerializer<'a, 'b, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
-    inner: <T as Encode>::Encoder<'a>,
+    inner: <T as Serialize>::Serializer<'a>,
     _phantom: core::marker::PhantomData<&'b T>,
 }
 
-impl<'a, 'b, T> RefEncoder<'a, 'b, T>
+impl<'a, 'b, T> RefSerializer<'a, 'b, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub fn new() -> Self {
         Self {
-            inner: T::encoder(),
+            inner: T::serializer(),
             _phantom: core::marker::PhantomData,
         }
     }
 }
 
-impl<'a, 'b, T> Default for RefEncoder<'a, 'b, T>
+impl<'a, 'b, T> Default for RefSerializer<'a, 'b, T>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, 'b, T> Encoder for RefEncoder<'a, 'b, T>
+impl<'a, 'b, T> Serializer for RefSerializer<'a, 'b, T>
 where
-    T: Encode<Input<'a> = T> + Archive + Clone + 'a,
+    T: Serialize<Input<'a> = T> + Archive + Clone + 'a,
 {
     type Input = &'b T;
 
@@ -507,36 +507,36 @@ impl<T: Archive + ?Sized> Archive for &T {
     type Archived = T::Archived;
 }
 
-impl<'b, T> Encode for &'b T
+impl<'b, T> Serialize for &'b T
 where
-    T: Encode + Archive + Clone,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    T: Serialize + Archive + Clone,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = &'b T
     where
         Self: 'a;
-    type Encoder<'a>
-        = RefEncoder<'a, 'b, T>
+    type Serializer<'a>
+        = RefSerializer<'a, 'b, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        RefEncoder::new()
+        RefSerializer::new()
     }
 }
 
 /// Pre-pass measurement contract.
 ///
 /// Used by:
-/// - schema-aware records that must know each field's encoded length before
+/// - schema-aware records that must know each field's serialized length before
 ///   writing the field table;
 ///
 /// Implementations walk the value by reference and never consume it. They must
-/// produce a length that exactly matches what the corresponding encoder will
+/// produce a length that exactly matches what the corresponding serializer will
 /// write to a `StorageMut`.
 pub trait MeasureBody {
     fn measure_body(&self) -> Result<usize, ZebinError>;

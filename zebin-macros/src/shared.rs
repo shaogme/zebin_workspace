@@ -145,15 +145,15 @@ pub fn field_state_type(field: &FieldSpec<'_>) -> TokenStream {
     if let Some((kind, bits)) = packed::packed_info(field) {
         match kind {
             packed::PackedElementKind::Bool => {
-                quote! { zebin::archive::PackedBoolVecEncoder }
+                quote! { zebin::archive::PackedBoolVecSerializer }
             }
             packed::PackedElementKind::U8 => {
-                quote! { zebin::archive::PackedU8VecEncoder<#bits> }
+                quote! { zebin::archive::PackedU8VecSerializer<#bits> }
             }
         }
     } else {
         let ty = field.ty;
-        quote! { <#ty as zebin::Encode>::Encoder<'a> }
+        quote! { <#ty as zebin::Serialize>::Serializer<'a> }
     }
 }
 
@@ -223,7 +223,7 @@ pub fn parse_item(input: &DeriveInput) -> Result<ItemSpec<'_>> {
         }
         _ => Err(syn::Error::new(
             input.span(),
-            "ZebinArchive 和 ZebinEncode 只支持 struct 与 enum",
+            "ZebinArchive 和 ZebinSerialize 只支持 struct 与 enum",
         )),
     }
 }

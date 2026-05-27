@@ -169,14 +169,14 @@ impl Storage for Vec<u8> {
     }
 }
 
-/// Chunked encoder that writes into a caller-provided buffer slice.
-pub struct SliceEncoder<'a> {
+/// Chunked serializer that writes into a caller-provided buffer slice.
+pub struct SliceSerializer<'a> {
     buf: &'a mut [u8],
     written: usize,
     archive_pos: usize,
 }
 
-impl<'a> SliceEncoder<'a> {
+impl<'a> SliceSerializer<'a> {
     pub fn new(buf: &'a mut [u8], archive_pos: usize) -> Self {
         Self {
             buf,
@@ -213,7 +213,7 @@ impl<'a> SliceEncoder<'a> {
     }
 }
 
-impl StorageMut for SliceEncoder<'_> {
+impl StorageMut for SliceSerializer<'_> {
     type Sharder<'b>
         = NoSharder
     where
@@ -258,14 +258,14 @@ impl StorageMut for SliceEncoder<'_> {
 }
 
 #[cfg(feature = "alloc")]
-/// Encoder that writes into a dynamically growing vector.
-pub struct VecEncoder {
+/// Serializer that writes into a dynamically growing vector.
+pub struct VecSerializer {
     buf: Vec<u8>,
     archive_pos: usize,
 }
 
 #[cfg(feature = "alloc")]
-impl VecEncoder {
+impl VecSerializer {
     pub fn new(archive_pos: usize) -> Self {
         Self {
             buf: Vec::new(),
@@ -279,7 +279,7 @@ impl VecEncoder {
 }
 
 #[cfg(feature = "alloc")]
-impl StorageMut for VecEncoder {
+impl StorageMut for VecSerializer {
     type Sharder<'b>
         = NoSharder
     where

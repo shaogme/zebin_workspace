@@ -9,17 +9,17 @@ use crate::{
 // Declare submodules
 #[path = "iter/deserialize.rs"]
 mod deserialize;
-#[path = "iter/encode.rs"]
-mod encode;
 #[path = "iter/restore.rs"]
 mod restore;
+#[path = "iter/serialize.rs"]
+mod serialize;
 
 // Re-export public API
 pub use deserialize::ArchivedIter;
 #[cfg(feature = "alloc")]
 pub(crate) use deserialize::skip_block_index;
-pub(crate) use encode::OwnedIterEncoder;
-pub use encode::{IterEncoder, SeqEncoder, measure_block_index_overhead};
+pub(crate) use serialize::OwnedIterSerializer;
+pub use serialize::{IterSerializer, SeqSerializer, measure_block_index_overhead};
 
 pub(crate) struct DummyContext;
 
@@ -99,34 +99,34 @@ where
     type Archived = ArchivedIter<'static, T::Archived>;
 }
 
-impl<I, T> Encode for IterArchive<I, T>
+impl<I, T> Serialize for IterArchive<I, T>
 where
     I: IntoIterator<Item = T>,
     for<'a> &'a I: IntoIterator<Item = &'a T>,
-    T: Encode + Archive,
+    T: Serialize + Archive,
     T::Archived: ArchivedLayout,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = IterArchive<I, T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = OwnedIterEncoder<'a, IterArchive<I, T>, T>
+    type Serializer<'a>
+        = OwnedIterSerializer<'a, IterArchive<I, T>, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
         #[cfg(feature = "alloc")]
         {
-            OwnedIterEncoder::new_indexed()
+            OwnedIterSerializer::new_indexed()
         }
         #[cfg(not(feature = "alloc"))]
         {
-            OwnedIterEncoder::new()
+            OwnedIterSerializer::new()
         }
     }
 }

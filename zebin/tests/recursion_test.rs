@@ -1,8 +1,8 @@
 #![cfg(feature = "alloc")]
 
-use zebin::{ZebinArchive, ZebinEncode, ZebinError};
+use zebin::{ZebinArchive, ZebinError, ZebinSerialize};
 
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 pub struct Node {
     pub children: Vec<Node>,
 }
@@ -21,7 +21,7 @@ fn test_recursion_limit() {
         };
     }
 
-    let buf = zebin::encode(current.clone()).unwrap();
+    let buf = zebin::serialize(current.clone()).unwrap();
 
     // Validation should fail due to recursion limit (default 256)
     let result = zebin::validate::<Node, _>(&buf);
@@ -34,7 +34,7 @@ fn test_recursion_limit() {
 
 use zebin::archive::IterArchive;
 
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 pub struct IterNode {
     pub children: IterArchive<Vec<IterNode>, IterNode>,
 }
@@ -50,7 +50,7 @@ fn test_recursion_limit_iter() {
         };
     }
 
-    let buf = zebin::encode(current.clone()).unwrap();
+    let buf = zebin::serialize(current.clone()).unwrap();
 
     let result = zebin::validate::<IterNode, _>(&buf);
     match result {

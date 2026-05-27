@@ -5,44 +5,44 @@ use crate::{error::ZebinError, prelude::*};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use super::SeqItemEncoder;
+use super::SeqItemSerializer;
 #[cfg(feature = "alloc")]
 use crate::archive_impl::iter::{BLOCK_INDEX_MAGIC, DEFAULT_CHUNK_SIZE};
 
-/// Per-element resumable encoder for an owned-element sequence.
+/// Per-element resumable serializer for an owned-element sequence.
 ///
-/// The element is moved into the encoder via `input(item)` and dropped after
-/// the inner encoder finishes. This is the building block that makes streaming
+/// The element is moved into the serializer via `input(item)` and dropped after
+/// the inner serializer finishes. This is the building block that makes streaming
 /// owned-collection encoding (e.g. `Vec::into_iter`) actually release memory.
 ///
-/// The element encoder is boxed when the `alloc` feature is enabled, which
+/// The element serializer is boxed when the `alloc` feature is enabled, which
 /// breaks recursive type cycles for self-referential structs (`Node` ->
-/// `Vec<Node>` -> `SeqEncoder<Node>` -> `Node::Encoder` -> ...).
+/// `Vec<Node>` -> `SeqSerializer<Node>` -> `Node::Serializer` -> ...).
 #[cfg(feature = "alloc")]
-pub struct SeqEncoderAllocState {
+pub struct SeqSerializerAllocState {
     pub(crate) block_offsets: Vec<usize>,
     pub(crate) index_buf: Vec<u8>,
     pub(crate) index_buf_cursor: usize,
 }
 
-pub struct SeqEncoder<'a, T: Encode + Archive + 'a> {
+pub struct SeqSerializer<'a, T: Serialize + Archive + 'a> {
     pub(crate) next_item: Option<T>,
     pub(crate) marker: [u8; 1],
     pub(crate) marker_cursor: usize,
     pub(crate) aligned: bool,
-    pub(crate) item_encoder: SeqItemEncoder<'a, T>,
-    pub(crate) has_active_encoder: bool,
-    pub(crate) encoder_started: bool,
+    pub(crate) item_serializer: SeqItemSerializer<'a, T>,
+    pub(crate) has_active_serializer: bool,
+    pub(crate) serializer_started: bool,
     pub(crate) finished: bool,
     // ── Block index tracking ────────────────────────────────────────────
     pub(crate) enable_block_index: bool,
     pub(crate) element_count: usize,
     pub(crate) start_pos: Option<usize>,
     #[cfg(feature = "alloc")]
-    pub(crate) alloc_state: SeqEncoderAllocState,
+    pub(crate) alloc_state: SeqSerializerAllocState,
 }
 
-impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T> {
+impl<'a, T: Serialize + Archive + 'a> SeqSerializer<'a, T> {
     pub fn new() -> Self {
         Self::with_index(false)
     }
@@ -57,15 +57,15 @@ impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T> {
             marker: [0],
             marker_cursor: 1,
             aligned: false,
-            item_encoder: SeqItemEncoder::new(),
-            has_active_encoder: false,
-            encoder_started: false,
+            item_serializer: SeqItemSerializer::new(),
+            has_active_serializer: false,
+            serializer_started: false,
             finished: false,
             enable_block_index: enable,
             element_count: 0,
             start_pos: None,
             #[cfg(feature = "alloc")]
-            alloc_state: SeqEncoderAllocState {
+            alloc_state: SeqSerializerAllocState {
                 block_offsets: Vec::new(),
                 index_buf: Vec::new(),
                 index_buf_cursor: 0,
@@ -74,7 +74,7 @@ impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T> {
     }
 }
 
-impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T>
+impl<'a, T: Serialize + Archive + 'a> SeqSerializer<'a, T>
 where
     T::Archived: ArchivedLayout,
 {
@@ -95,16 +95,16 @@ where
     }
 }
 
-impl<'a, T: Encode + Archive + 'a> Default for SeqEncoder<'a, T> {
+impl<'a, T: Serialize + Archive + 'a> Default for SeqSerializer<'a, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T: Encode + Archive + 'a> SeqEncoder<'a, T>
+impl<'a, T: Serialize + Archive + 'a> SeqSerializer<'a, T>
 where
     T::Archived: ArchivedLayout,
-    T: Encode<Input<'a> = T>,
+    T: Serialize<Input<'a> = T>,
 {
     pub fn is_finished(&self) -> bool {
         self.finished && self.marker_cursor == 1 && self.index_write_done()
@@ -128,10 +128,10 @@ where
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         if !self.finished {
-            if self.next_item.is_some() || self.has_active_encoder || self.marker_cursor < 1 {
+            if self.next_item.is_some() || self.has_active_serializer || self.marker_cursor < 1 {
                 return Err(ZebinError::SerializationError {
                     pos: sink.pos(),
-                    message: "Encoder is busy",
+                    message: "Serializer is busy",
                 });
             }
             self.marker = [0];
@@ -153,7 +153,7 @@ where
     /// Serialize the block index section into `self.index_buf`.
     #[cfg(feature = "alloc")]
     fn build_index_buf(&mut self) {
-        use crate::archive_impl::varint::{encode_u64, encoded_len_u64};
+        use crate::archive_impl::varint::{serialize_u64, serialized_len_u64};
 
         let chunk_size = DEFAULT_CHUNK_SIZE;
         let num_blocks = self.alloc_state.block_offsets.len();
@@ -170,29 +170,29 @@ where
 
         // chunk_size (varint)
         {
-            let len = encoded_len_u64(chunk_size as u64);
+            let len = serialized_len_u64(chunk_size as u64);
             let start = buf.len();
             buf.resize(start + len, 0);
-            encode_u64(chunk_size as u64, &mut buf[start..]);
+            serialize_u64(chunk_size as u64, &mut buf[start..]);
         }
 
         // num_blocks (varint)
         {
-            let len = encoded_len_u64(num_blocks as u64);
+            let len = serialized_len_u64(num_blocks as u64);
             let start = buf.len();
             buf.resize(start + len, 0);
-            encode_u64(num_blocks as u64, &mut buf[start..]);
+            serialize_u64(num_blocks as u64, &mut buf[start..]);
         }
 
-        // Delta-encoded offsets
+        // Delta-serialized offsets
         let mut prev = 0usize;
         for &offset in &self.alloc_state.block_offsets {
             let delta = offset - prev;
             prev = offset;
-            let len = encoded_len_u64(delta as u64);
+            let len = serialized_len_u64(delta as u64);
             let start = buf.len();
             buf.resize(start + len, 0);
-            encode_u64(delta as u64, &mut buf[start..]);
+            serialize_u64(delta as u64, &mut buf[start..]);
         }
 
         self.alloc_state.index_buf = buf;
@@ -200,10 +200,10 @@ where
     }
 }
 
-impl<'a, T: Encode + Archive + 'a> Encoder for SeqEncoder<'a, T>
+impl<'a, T: Serialize + Archive + 'a> Serializer for SeqSerializer<'a, T>
 where
     T::Archived: ArchivedLayout,
-    T: Encode<Input<'a> = T>,
+    T: Serialize<Input<'a> = T>,
 {
     type Input = T;
 
@@ -215,13 +215,13 @@ where
         if self.finished {
             return Err(ZebinError::SerializationError {
                 pos: sink.pos(),
-                message: "Encoder already finished",
+                message: "Serializer already finished",
             });
         }
-        if self.next_item.is_some() || self.has_active_encoder || self.marker_cursor < 1 {
+        if self.next_item.is_some() || self.has_active_serializer || self.marker_cursor < 1 {
             return Err(ZebinError::SerializationError {
                 pos: sink.pos(),
-                message: "Encoder is busy",
+                message: "Serializer is busy",
             });
         }
 
@@ -289,30 +289,33 @@ where
                 return Ok(Poll::Ready(()));
             }
 
-            // ── Phase 3: resume / complete an in-progress element encoder ──
-            if self.has_active_encoder {
-                // Shared alignment gate used by both the active-encoder and
+            // ── Phase 3: resume / complete an in-progress element serializer ──
+            if self.has_active_serializer {
+                // Shared alignment gate used by both the active-serializer and
                 // the new-item branches.  Extracted here so the logic lives
                 // in exactly one place.
                 if !self.try_align(sink)? {
                     return Ok(Poll::Pending);
                 }
 
-                if self.encoder_started {
-                    let encoder = self.item_encoder.as_mut().expect("active encoder missing");
-                    match encoder.poll_pending(sink)? {
+                if self.serializer_started {
+                    let serializer = self
+                        .item_serializer
+                        .as_mut()
+                        .expect("active serializer missing");
+                    match serializer.poll_pending(sink)? {
                         Poll::Pending => return Ok(Poll::Pending),
                         Poll::Ready(()) => {}
                     }
                 }
 
-                // Element fully encoded. Replace the inner encoder with None
+                // Element fully serialized. Replace the inner serializer with None
                 // so state from this element doesn't leak into the
                 // next, and run its `finish` to flush any trailing padding.
-                let completed = self.item_encoder.take();
+                let completed = self.item_serializer.take();
                 let _ = completed.finish(sink)?;
-                self.has_active_encoder = false;
-                self.encoder_started = false;
+                self.has_active_serializer = false;
+                self.serializer_started = false;
                 self.aligned = false;
             }
 
@@ -324,16 +327,16 @@ where
                     return Ok(Poll::Pending);
                 }
 
-                let encoder = self.item_encoder.get_or_insert_with(T::encoder);
-                match encoder.input(item, sink)? {
+                let serializer = self.item_serializer.get_or_insert_with(T::serializer);
+                match serializer.input(item, sink)? {
                     Poll::Pending => {
-                        self.has_active_encoder = true;
-                        self.encoder_started = true;
+                        self.has_active_serializer = true;
+                        self.serializer_started = true;
                         return Ok(Poll::Pending);
                     }
                     Poll::Ready(()) => {
-                        self.has_active_encoder = true;
-                        self.encoder_started = false;
+                        self.has_active_serializer = true;
+                        self.serializer_started = false;
                     }
                 }
                 continue;
@@ -347,38 +350,38 @@ where
 
     fn finish<S: StorageMut + ?Sized>(mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         let _ = self.finish_ref(sink)?;
-        self.item_encoder.finish(sink)
+        self.item_serializer.finish(sink)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::SliceEncoder;
+    use crate::io::SliceSerializer;
 
     #[test]
-    fn test_seq_encoder_busy_errors() {
+    fn test_seq_serializer_busy_errors() {
         let mut buf = [0u8; 1];
-        let mut sink = SliceEncoder::new(&mut buf, 0);
-        let mut encoder: SeqEncoder<'_, u32> = SeqEncoder::new();
+        let mut sink = SliceSerializer::new(&mut buf, 0);
+        let mut serializer: SeqSerializer<'_, u32> = SeqSerializer::new();
 
         // Feed first item
-        let poll_res = encoder.input(42, &mut sink);
+        let poll_res = serializer.input(42, &mut sink);
         assert!(poll_res.is_ok());
 
         // Try feeding again while busy
-        let poll_err = encoder.input(43, &mut sink);
+        let poll_err = serializer.input(43, &mut sink);
         assert!(poll_err.is_err());
     }
 
     #[test]
-    fn test_seq_encoder_finished_error() {
+    fn test_seq_serializer_finished_error() {
         let mut buf = [0u8; 100];
-        let mut sink = SliceEncoder::new(&mut buf, 0);
-        let mut encoder: SeqEncoder<'_, u32> = SeqEncoder::new();
+        let mut sink = SliceSerializer::new(&mut buf, 0);
+        let mut serializer: SeqSerializer<'_, u32> = SeqSerializer::new();
 
-        let _ = encoder.finish_ref(&mut sink);
-        let res = encoder.input(42, &mut sink);
+        let _ = serializer.finish_ref(&mut sink);
+        let res = serializer.input(42, &mut sink);
         assert!(res.is_err());
     }
 }

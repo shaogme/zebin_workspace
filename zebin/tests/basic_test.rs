@@ -4,13 +4,13 @@ use core::num::NonZeroUsize;
 use std::cell::Cell;
 #[cfg(feature = "alloc")]
 use zebin::ZebinError;
-use zebin::io::SliceEncoder;
+use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
 use zebin::prelude::{SinkProgress, StorageMut, ZebinWriter};
-use zebin::{ZebinArchive, ZebinEncode, reader, writer};
+use zebin::{ZebinArchive, ZebinSerialize, reader, writer};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 pub struct UserProfile {
     pub id: u64,
     pub username: String,
@@ -23,7 +23,7 @@ fn test_basic_archive() {
         id: 42,
         username: "Alice".to_string(),
     };
-    let buf = zebin::encode(user).unwrap();
+    let buf = zebin::serialize(user).unwrap();
     let archived = zebin::access::<UserProfile, _>(&buf).unwrap();
     assert_eq!(archived.id, 42);
     assert_eq!(unsafe { archived.username.as_str() }, "Alice");
@@ -31,15 +31,15 @@ fn test_basic_archive() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_encode_into_existing_buffer() {
+fn test_serialize_into_existing_buffer() {
     let user = UserProfile {
         id: 7,
         username: "Bob".to_string(),
     };
 
-    let expected = zebin::encode(&user).unwrap();
+    let expected = zebin::serialize(&user).unwrap();
     let mut buf = vec![0xAA, 0xBB, 0xCC];
-    zebin::encode_into(user, &mut buf).unwrap();
+    zebin::serialize_into(user, &mut buf).unwrap();
 
     let _ = &expected;
     assert_eq!(buf, expected);
@@ -53,7 +53,7 @@ fn test_chunked_writer_resume() {
         username: "Chunky".to_string(),
     };
 
-    let expected = zebin::encode(&user).unwrap();
+    let expected = zebin::serialize(&user).unwrap();
     let limit = Cell::new(0usize);
 
     struct LimitedSink<'a> {
@@ -122,7 +122,7 @@ fn test_chunked_writer_resume() {
     assert_eq!(sink.buf, expected);
 }
 
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 pub struct SimpleUser {
     pub id: u64,
 }
@@ -131,10 +131,10 @@ pub struct SimpleUser {
 fn test_basic_no_alloc() {
     let user = SimpleUser { id: 42 };
     let mut buf = [0u8; 64];
-    let mut encoder = SliceEncoder::new(&mut buf, 0);
-    let mut writer_obj = writer::<SimpleUser, _>(&mut encoder).unwrap();
+    let mut serializer = SliceSerializer::new(&mut buf, 0);
+    let mut writer_obj = writer::<SimpleUser, _>(&mut serializer).unwrap();
     writer_obj.write_all(user).unwrap();
-    let written = encoder.written();
+    let written = serializer.written();
     let slice = &buf[..written];
     let archived = zebin::access::<SimpleUser, _>(&slice).unwrap();
     assert_eq!(archived.id, 42);
@@ -146,10 +146,10 @@ fn test_iter_archive_no_alloc() {
     let arr = [10u64, 20u64, 30u64];
     let wrapped = IterArchive::new(arr);
     let mut buf = [0u8; 128];
-    let mut encoder = SliceEncoder::new(&mut buf, 0);
-    let mut writer_obj = writer::<IterArchive<[u64; 3], u64>, _>(&mut encoder).unwrap();
+    let mut serializer = SliceSerializer::new(&mut buf, 0);
+    let mut writer_obj = writer::<IterArchive<[u64; 3], u64>, _>(&mut serializer).unwrap();
     writer_obj.write_all(wrapped).unwrap();
-    let written = encoder.written();
+    let written = serializer.written();
     let slice = &buf[..written];
     let archived_iter = zebin::access::<IterArchive<[u64; 3], u64>, _>(&slice).unwrap();
     assert_eq!(archived_iter.len(), 3);
@@ -180,8 +180,8 @@ fn test_consecutive_values() {
 
     let mut buf = Vec::new();
     for user in &users {
-        let encoded = zebin::encode(user).unwrap();
-        buf.extend_from_slice(&encoded);
+        let serialized = zebin::serialize(user).unwrap();
+        buf.extend_from_slice(&serialized);
     }
 
     let mut reader = zebin::prelude::reader::<UserProfile, _>(&buf).unwrap();
@@ -219,15 +219,15 @@ fn test_consecutive_writer_and_reader() {
         },
     ];
 
-    use zebin::io::VecEncoder;
-    let mut encoder = VecEncoder::new(0);
+    use zebin::io::VecSerializer;
+    let mut serializer = VecSerializer::new(0);
 
     for user in &users {
-        let mut writer_obj = writer::<&UserProfile, _>(&mut encoder).unwrap();
+        let mut writer_obj = writer::<&UserProfile, _>(&mut serializer).unwrap();
         writer_obj.write_all(user).unwrap();
     }
 
-    let buf = encoder.into_inner();
+    let buf = serializer.into_inner();
     let mut reader = zebin::prelude::reader::<UserProfile, _>(&buf).unwrap();
 
     let u1 = reader.read().unwrap();
@@ -307,8 +307,8 @@ fn test_sharded_storage_stream() {
         username: "Bob".to_string(),
     };
 
-    let shard1 = zebin::encode(&u1).unwrap();
-    let shard2 = zebin::encode(&u2).unwrap();
+    let shard1 = zebin::serialize(&u1).unwrap();
+    let shard2 = zebin::serialize(&u2).unwrap();
 
     let storage = ShardedStorage {
         shards: vec![shard1, shard2],

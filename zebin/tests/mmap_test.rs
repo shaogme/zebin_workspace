@@ -8,12 +8,12 @@ use std::{
 };
 
 use zebin::prelude::{
-    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, Encode, Encoder, Mmap, MmapEncoder, MmapMut,
-    StorageMut, ZebinArchive, ZebinEncode, ZebinError,
+    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, Mmap, MmapMut, MmapSerializer, Serialize,
+    Serializer, StorageMut, ZebinArchive, ZebinError, ZebinSerialize,
 };
-use zebin::{access, encode};
+use zebin::{access, serialize};
 
-#[derive(ZebinArchive, ZebinEncode, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Clone)]
 pub struct MmapUser {
     pub id: u64,
     pub name: String,
@@ -35,20 +35,20 @@ fn open_writable_mmap(path: &Path, len: usize) -> MmapMut {
     MmapMut::create(path, len as u64).expect("create writable mmap")
 }
 
-fn drive_to_mmap<T>(value: T, encoder: &mut MmapEncoder) -> Result<(), ZebinError>
+fn drive_to_mmap<T>(value: T, serializer: &mut MmapSerializer) -> Result<(), ZebinError>
 where
-    T: Encode + 'static,
+    T: Serialize + 'static,
     T::Archived: ArchivedLayout,
-    T: for<'a> Encode<Input<'a> = T>,
+    T: for<'a> Serialize<Input<'a> = T>,
 {
     let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
-    encoder.write(header.encode().as_ref())?;
+    serializer.write(header.serialize().as_ref())?;
 
-    let mut body_encoder = T::encoder();
-    if body_encoder.input(value, encoder)?.is_pending() {
-        while body_encoder.poll_pending(encoder)?.is_pending() {}
+    let mut body_serializer = T::serializer();
+    if body_serializer.input(value, serializer)?.is_pending() {
+        while body_serializer.poll_pending(serializer)?.is_pending() {}
     }
-    let _ = body_encoder.finish(encoder)?;
+    let _ = body_serializer.finish(serializer)?;
     Ok(())
 }
 
@@ -58,7 +58,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
         id: 7,
         name: "Mika".to_string(),
     };
-    let buf = encode(user)?;
+    let buf = serialize(user)?;
 
     let path = temp_archive_path();
     fs::write(&path, &buf)?;
@@ -80,7 +80,7 @@ fn test_mmap_reads_archive_bytes() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_mmap_is_read_only_for_extend() -> Result<(), Box<dyn std::error::Error>> {
-    let buf = encode(MmapUser {
+    let buf = serialize(MmapUser {
         id: 1,
         name: "read-only".to_string(),
     })?;
@@ -97,22 +97,22 @@ fn test_mmap_is_read_only_for_extend() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[test]
-fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::error::Error>> {
+fn test_mmap_serializer_roundtrip_via_state_machine() -> Result<(), Box<dyn std::error::Error>> {
     let user = MmapUser {
         id: 42,
         name: "Aurora".to_string(),
     };
-    let expected = encode(&user)?;
+    let expected = serialize(&user)?;
 
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, expected.len());
 
-    let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    drive_to_mmap(user, &mut encoder)?;
-    assert_eq!(encoder.written(), expected.len());
-    assert_eq!(encoder.pos(), expected.len());
-    encoder.flush()?;
-    drop(encoder);
+    let mut serializer = MmapSerializer::new(mmap_mut, 0);
+    drive_to_mmap(user, &mut serializer)?;
+    assert_eq!(serializer.written(), expected.len());
+    assert_eq!(serializer.pos(), expected.len());
+    serializer.flush()?;
+    drop(serializer);
 
     let mmap = Mmap::open(&path)?;
     assert_eq!(mmap.as_slice(), expected.as_slice());
@@ -128,20 +128,20 @@ fn test_mmap_encoder_roundtrip_via_state_machine() -> Result<(), Box<dyn std::er
 }
 
 #[test]
-fn test_mmap_encoder_matches_vec_encode() -> Result<(), Box<dyn std::error::Error>> {
+fn test_mmap_serializer_matches_vec_serialize() -> Result<(), Box<dyn std::error::Error>> {
     let user = MmapUser {
         id: u64::MAX,
         name: "byte-exact-parity".to_string(),
     };
-    let expected = encode(&user)?;
+    let expected = serialize(&user)?;
 
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, expected.len());
 
-    let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    drive_to_mmap(user, &mut encoder)?;
-    encoder.flush()?;
-    drop(encoder);
+    let mut serializer = MmapSerializer::new(mmap_mut, 0);
+    drive_to_mmap(user, &mut serializer)?;
+    serializer.flush()?;
+    drop(serializer);
 
     let on_disk = fs::read(&path)?;
     assert_eq!(on_disk, expected);
@@ -151,52 +151,53 @@ fn test_mmap_encoder_matches_vec_encode() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[test]
-fn test_mmap_encoder_overflow_returns_buffer_too_small() -> Result<(), Box<dyn std::error::Error>> {
+fn test_mmap_serializer_overflow_returns_buffer_too_small() -> Result<(), Box<dyn std::error::Error>>
+{
     let user = MmapUser {
         id: 9,
         name: "overflow".to_string(),
     };
-    let expected = encode(&user)?;
+    let expected = serialize(&user)?;
     assert!(expected.len() > 1, "archive must be larger than 1 byte");
 
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, expected.len() - 1);
 
-    let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    let result = drive_to_mmap(user, &mut encoder);
+    let mut serializer = MmapSerializer::new(mmap_mut, 0);
+    let result = drive_to_mmap(user, &mut serializer);
     match result {
         Err(ZebinError::BufferTooSmall { .. }) => {}
         other => panic!("expected BufferTooSmall, got {other:?}"),
     }
-    drop(encoder);
+    drop(serializer);
 
     fs::remove_file(&path)?;
     Ok(())
 }
 
 #[test]
-fn test_mmap_encoder_skip_and_align() -> Result<(), Box<dyn std::error::Error>> {
+fn test_mmap_serializer_skip_and_align() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, 64);
 
-    let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    assert_eq!(encoder.pos(), 0);
-    assert_eq!(encoder.capacity(), 64);
+    let mut serializer = MmapSerializer::new(mmap_mut, 0);
+    assert_eq!(serializer.pos(), 0);
+    assert_eq!(serializer.capacity(), 64);
 
-    encoder.skip(5)?;
-    assert_eq!(encoder.pos(), 5);
-    assert_eq!(encoder.written(), 5);
+    serializer.skip(5)?;
+    assert_eq!(serializer.pos(), 5);
+    assert_eq!(serializer.written(), 5);
 
-    encoder.align(NonZeroUsize::new(8).unwrap())?;
-    assert_eq!(encoder.pos(), 8);
-    assert_eq!(encoder.written(), 8);
+    serializer.align(NonZeroUsize::new(8).unwrap())?;
+    assert_eq!(serializer.pos(), 8);
+    assert_eq!(serializer.written(), 8);
 
-    encoder.write(b"hello")?;
-    assert_eq!(encoder.pos(), 13);
-    assert_eq!(encoder.written(), 13);
+    serializer.write(b"hello")?;
+    assert_eq!(serializer.pos(), 13);
+    assert_eq!(serializer.written(), 13);
 
-    encoder.flush()?;
-    let mmap = encoder.into_inner();
+    serializer.flush()?;
+    let mmap = serializer.into_inner();
     assert_eq!(&mmap[0..8], &[0u8; 8], "skip/align region must be zeros");
     assert_eq!(&mmap[8..13], b"hello");
     drop(mmap);
@@ -206,40 +207,40 @@ fn test_mmap_encoder_skip_and_align() -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[test]
-fn test_mmap_encoder_write_past_end_errors() -> Result<(), Box<dyn std::error::Error>> {
+fn test_mmap_serializer_write_past_end_errors() -> Result<(), Box<dyn std::error::Error>> {
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, 4);
 
-    let mut encoder = MmapEncoder::new(mmap_mut, 0);
-    encoder.write(b"abc")?;
-    let err = encoder.write(b"too long").unwrap_err();
+    let mut serializer = MmapSerializer::new(mmap_mut, 0);
+    serializer.write(b"abc")?;
+    let err = serializer.write(b"too long").unwrap_err();
     assert!(matches!(err, ZebinError::BufferTooSmall { .. }));
 
-    drop(encoder);
+    drop(serializer);
     fs::remove_file(&path)?;
     Ok(())
 }
 
 #[test]
-fn test_mmap_encoder_with_writer() -> Result<(), Box<dyn std::error::Error>> {
+fn test_mmap_serializer_with_writer() -> Result<(), Box<dyn std::error::Error>> {
     use zebin::writer;
 
     let user = MmapUser {
         id: 99,
         name: "MmapMutWriter".to_string(),
     };
-    let expected = encode(&user)?;
+    let expected = serialize(&user)?;
 
     let path = temp_archive_path();
     let mmap_mut = open_writable_mmap(&path, expected.len());
 
-    let mut encoder = MmapEncoder::new(mmap_mut, 0);
+    let mut serializer = MmapSerializer::new(mmap_mut, 0);
     {
-        let mut writer_obj = writer::<MmapUser, _>(&mut encoder)?;
+        let mut writer_obj = writer::<MmapUser, _>(&mut serializer)?;
         writer_obj.write_all(user)?;
     }
-    encoder.flush()?;
-    drop(encoder);
+    serializer.flush()?;
+    drop(serializer);
 
     let mmap = Mmap::open(&path)?;
     assert_eq!(mmap.as_slice(), expected.as_slice());

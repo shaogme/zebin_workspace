@@ -1,8 +1,8 @@
-use zebin::io::SliceEncoder;
-use zebin::{ZebinArchive, ZebinEncode, deserialize, writer};
+use zebin::io::SliceSerializer;
+use zebin::{ZebinArchive, ZebinSerialize, deserialize, writer};
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
 #[zebin(schema_key = 1)]
 pub struct UserProfile {
     #[zebin(id = 0)]
@@ -14,7 +14,7 @@ pub struct UserProfile {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
 pub enum Packet {
     Ping,
     #[zebin(schema_key = 2)]
@@ -34,7 +34,7 @@ fn test_struct_deserialize() {
         username: "Alice".to_string(),
         tags: vec!["rust".to_string(), "zebin".to_string()],
     };
-    let buf = zebin::encode(&user).unwrap();
+    let buf = zebin::serialize(&user).unwrap();
     let restored: UserProfile = zebin::deserialize::<UserProfile, _>(&buf).unwrap();
 
     assert_eq!(restored, user);
@@ -44,7 +44,7 @@ fn test_struct_deserialize() {
 #[test]
 fn test_enum_deserialize() {
     let ping = Packet::Ping;
-    let buf_ping = zebin::encode(&ping).unwrap();
+    let buf_ping = zebin::serialize(&ping).unwrap();
     let restored_ping: Packet = zebin::deserialize::<Packet, _>(&buf_ping).unwrap();
     assert_eq!(restored_ping, ping);
 
@@ -52,7 +52,7 @@ fn test_enum_deserialize() {
         code: 123,
         label: "test".to_string(),
     };
-    let buf_data = zebin::encode(&data).unwrap();
+    let buf_data = zebin::serialize(&data).unwrap();
     let restored_data: Packet = zebin::deserialize::<Packet, _>(&buf_data).unwrap();
     assert_eq!(restored_data, data);
 }
@@ -60,7 +60,7 @@ fn test_enum_deserialize() {
 #[cfg(feature = "alloc")]
 #[test]
 fn test_nested_deserialize() {
-    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
+    #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 3)]
     struct Container {
         #[zebin(id = 0)]
@@ -74,7 +74,7 @@ fn test_nested_deserialize() {
             tags: vec![],
         },
     };
-    let buf = zebin::encode(&container).unwrap();
+    let buf = zebin::serialize(&container).unwrap();
     let restored: Container = zebin::deserialize::<Container, _>(&buf).unwrap();
     assert_eq!(restored, container);
 }
@@ -82,7 +82,7 @@ fn test_nested_deserialize() {
 #[cfg(feature = "alloc")]
 #[test]
 fn test_optional_option_deserialize() {
-    #[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
+    #[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
     #[zebin(schema_key = 4)]
     struct OptionalStruct {
         #[zebin(id = 0)]
@@ -96,7 +96,7 @@ fn test_optional_option_deserialize() {
         maybe_string: Some("hello".to_string()),
         maybe_u32: Some(100),
     };
-    let buf = zebin::encode(&obj).unwrap();
+    let buf = zebin::serialize(&obj).unwrap();
     let restored: OptionalStruct = zebin::deserialize::<OptionalStruct, _>(&buf).unwrap();
     assert_eq!(restored, obj);
 
@@ -105,12 +105,12 @@ fn test_optional_option_deserialize() {
         maybe_string: None,
         maybe_u32: None,
     };
-    let buf_none = zebin::encode(&obj_none).unwrap();
+    let buf_none = zebin::serialize(&obj_none).unwrap();
     let restored_none: OptionalStruct = zebin::deserialize::<OptionalStruct, _>(&buf_none).unwrap();
     assert_eq!(restored_none, obj_none);
 }
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
 pub struct SimpleProfile {
     pub id: u64,
     pub val: u32,
@@ -120,15 +120,15 @@ pub struct SimpleProfile {
 fn test_struct_restore_no_alloc() {
     let profile = SimpleProfile { id: 42, val: 99 };
     let mut buf = [0u8; 128];
-    let mut encoder = SliceEncoder::new(&mut buf, 0);
-    let mut writer_obj = writer::<&SimpleProfile, _>(&mut encoder).unwrap();
+    let mut serializer = SliceSerializer::new(&mut buf, 0);
+    let mut writer_obj = writer::<&SimpleProfile, _>(&mut serializer).unwrap();
     writer_obj.write_all(&profile).unwrap();
-    let written = encoder.written();
+    let written = serializer.written();
     let restored: SimpleProfile = deserialize::<SimpleProfile, _>(&buf[..written]).unwrap();
     assert_eq!(restored, profile);
 }
 
-#[derive(ZebinArchive, ZebinEncode, Debug, PartialEq, Clone)]
+#[derive(ZebinArchive, ZebinSerialize, Debug, PartialEq, Clone)]
 pub enum SimplePacket {
     Ping,
     Data(u32),
@@ -138,32 +138,32 @@ pub enum SimplePacket {
 fn test_enum_restore_no_alloc() {
     let ping = SimplePacket::Ping;
     let mut buf = [0u8; 64];
-    let mut encoder = SliceEncoder::new(&mut buf, 0);
-    let mut writer_obj = writer::<&SimplePacket, _>(&mut encoder).unwrap();
+    let mut serializer = SliceSerializer::new(&mut buf, 0);
+    let mut writer_obj = writer::<&SimplePacket, _>(&mut serializer).unwrap();
     writer_obj.write_all(&ping).unwrap();
-    let written = encoder.written();
+    let written = serializer.written();
     let restored: SimplePacket = deserialize::<SimplePacket, _>(&buf[..written]).unwrap();
     assert_eq!(restored, ping);
 
     let data = SimplePacket::Data(123);
     let mut buf = [0u8; 64];
-    let mut encoder = SliceEncoder::new(&mut buf, 0);
-    let mut writer_obj = writer::<&SimplePacket, _>(&mut encoder).unwrap();
+    let mut serializer = SliceSerializer::new(&mut buf, 0);
+    let mut writer_obj = writer::<&SimplePacket, _>(&mut serializer).unwrap();
     writer_obj.write_all(&data).unwrap();
-    let written = encoder.written();
+    let written = serializer.written();
     let restored: SimplePacket = deserialize::<SimplePacket, _>(&buf[..written]).unwrap();
     assert_eq!(restored, data);
 }
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_ref_encode_deserialize() {
+fn test_ref_serialize_deserialize() {
     let user = UserProfile {
         id: 42,
         username: "Alice".to_string(),
         tags: vec!["rust".to_string(), "zebin".to_string()],
     };
-    let buf = zebin::encode(&user).unwrap();
+    let buf = zebin::serialize(&user).unwrap();
     let restored: UserProfile = deserialize::<UserProfile, _>(&buf).unwrap();
 
     assert_eq!(restored, user);

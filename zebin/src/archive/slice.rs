@@ -1,4 +1,4 @@
-use super::iter::{SeqEncoder, measure_block_index_overhead};
+use super::iter::{SeqSerializer, measure_block_index_overhead};
 #[cfg(feature = "alloc")]
 use crate::io::ForwardSequenceStrategy;
 use crate::prelude::*;
@@ -124,33 +124,33 @@ where
     }
 }
 
-pub struct ArrayEncoder<'a, T, const N: usize>
+pub struct ArraySerializer<'a, T, const N: usize>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     items: Option<core::array::IntoIter<T, N>>,
-    item_encoder: <T as Encode>::Encoder<'a>,
+    item_serializer: <T as Serialize>::Serializer<'a>,
     started: bool,
     awaiting_next: bool,
 }
 
-impl<'a, T, const N: usize> ArrayEncoder<'a, T, N>
+impl<'a, T, const N: usize> ArraySerializer<'a, T, N>
 where
-    T: Encode + Archive + 'a,
+    T: Serialize + Archive + 'a,
 {
     pub(crate) fn new() -> Self {
         Self {
             items: None,
-            item_encoder: T::encoder(),
+            item_serializer: T::serializer(),
             started: false,
             awaiting_next: true,
         }
     }
 }
 
-impl<'a, T, const N: usize> Encoder for ArrayEncoder<'a, T, N>
+impl<'a, T, const N: usize> Serializer for ArraySerializer<'a, T, N>
 where
-    T: Encode<Input<'a> = T> + Archive + 'a,
+    T: Serialize<Input<'a> = T> + Archive + 'a,
 {
     type Input = [T; N];
 
@@ -172,17 +172,17 @@ where
         if !self.started {
             return Err(ZebinError::SerializationError {
                 pos: sink.pos(),
-                message: "ArrayEncoder polled before input",
+                message: "ArraySerializer polled before input",
             });
         }
         let iter = self.items.as_mut().ok_or(ZebinError::SerializationError {
             pos: sink.pos(),
-            message: "ArrayEncoder iterator missing",
+            message: "ArraySerializer iterator missing",
         })?;
         loop {
             if self.awaiting_next {
                 match iter.next() {
-                    Some(item) => match self.item_encoder.input(item, sink)? {
+                    Some(item) => match self.item_serializer.input(item, sink)? {
                         core::task::Poll::Pending => {
                             self.awaiting_next = false;
                             return Ok(core::task::Poll::Pending);
@@ -194,7 +194,7 @@ where
                     None => return Ok(core::task::Poll::Ready(())),
                 }
             } else {
-                match self.item_encoder.poll_pending(sink)? {
+                match self.item_serializer.poll_pending(sink)? {
                     core::task::Poll::Pending => return Ok(core::task::Poll::Pending),
                     core::task::Poll::Ready(()) => {
                         self.awaiting_next = true;
@@ -208,29 +208,29 @@ where
         self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
-        self.item_encoder.finish(sink)
+        self.item_serializer.finish(sink)
     }
 }
 
-impl<T, const N: usize> Encode for [T; N]
+impl<T, const N: usize> Serialize for [T; N]
 where
-    T: Encode + Archive,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    T: Serialize + Archive,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = [T; N]
     where
         Self: 'a;
-    type Encoder<'a>
-        = ArrayEncoder<'a, T, N>
+    type Serializer<'a>
+        = ArraySerializer<'a, T, N>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        ArrayEncoder::new()
+        ArraySerializer::new()
     }
 }
 
@@ -256,47 +256,47 @@ where
     type Archived = crate::archive::ArchivedIter<'static, T::Archived>;
 }
 
-/// Borrowed-iterator sequence encoder for DST inputs (`[T]`).
+/// Borrowed-iterator sequence serializer for DST inputs (`[T]`).
 ///
 /// Each element is cloned out of the borrowed slice and fed to the owned
-/// `SeqEncoder<T>`. This intentionally requires `T: Clone`; the memory benefit
+/// `SeqSerializer<T>`. This intentionally requires `T: Clone`; the memory benefit
 /// only applies to the owned-collection path.
-pub struct RefIterEncoder<'a, S: ?Sized, T>
+pub struct RefIterSerializer<'a, S: ?Sized, T>
 where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + Clone + 'a,
+    T: Serialize + Archive + Clone + 'a,
 {
     iter: Option<<&'a S as IntoIterator>::IntoIter>,
-    seq_encoder: SeqEncoder<'a, T>,
+    seq_serializer: SeqSerializer<'a, T>,
 }
 
-impl<'a, S: ?Sized, T> RefIterEncoder<'a, S, T>
+impl<'a, S: ?Sized, T> RefIterSerializer<'a, S, T>
 where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + Clone + 'a,
+    T: Serialize + Archive + Clone + 'a,
 {
     pub fn new() -> Self {
         Self {
             iter: None,
-            seq_encoder: SeqEncoder::new_indexed(),
+            seq_serializer: SeqSerializer::new_indexed(),
         }
     }
 }
 
-impl<'a, S: ?Sized, T> Default for RefIterEncoder<'a, S, T>
+impl<'a, S: ?Sized, T> Default for RefIterSerializer<'a, S, T>
 where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode + Archive + Clone + 'a,
+    T: Serialize + Archive + Clone + 'a,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, S: ?Sized, T> Encoder for RefIterEncoder<'a, S, T>
+impl<'a, S: ?Sized, T> Serializer for RefIterSerializer<'a, S, T>
 where
     for<'b> &'b S: IntoIterator<Item = &'b T>,
-    T: Encode<Input<'a> = T> + Archive + Clone + 'a,
+    T: Serialize<Input<'a> = T> + Archive + Clone + 'a,
     T::Archived: ArchivedLayout,
 {
     type Input = &'a S;
@@ -316,24 +316,24 @@ where
     ) -> Result<Poll<()>, ZebinError> {
         let iter = self.iter.as_mut().ok_or(ZebinError::SerializationError {
             pos: sink.pos(),
-            message: "RefIterEncoder polled before input",
+            message: "RefIterSerializer polled before input",
         })?;
         loop {
-            if self.seq_encoder.poll_pending(sink)?.is_pending() {
+            if self.seq_serializer.poll_pending(sink)?.is_pending() {
                 return Ok(Poll::Pending);
             }
 
-            if self.seq_encoder.is_finished() {
+            if self.seq_serializer.is_finished() {
                 return Ok(Poll::Ready(()));
             }
 
-            if !self.seq_encoder.is_finished() {
+            if !self.seq_serializer.is_finished() {
                 if let Some(item) = iter.next() {
-                    if self.seq_encoder.input(item.clone(), sink)?.is_pending() {
+                    if self.seq_serializer.input(item.clone(), sink)?.is_pending() {
                         return Ok(Poll::Pending);
                     }
                 } else {
-                    if self.seq_encoder.finish_ref(sink)?.is_pending() {
+                    if self.seq_serializer.finish_ref(sink)?.is_pending() {
                         return Ok(Poll::Pending);
                     }
                 }
@@ -342,30 +342,30 @@ where
     }
 
     fn finish<Sink: StorageMut + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
-        self.seq_encoder.finish(sink)
+        self.seq_serializer.finish(sink)
     }
 }
 
-impl<T> Encode for [T]
+impl<T> Serialize for [T]
 where
-    T: Encode + Archive + Clone,
+    T: Serialize + Archive + Clone,
     T::Archived: ArchivedLayout,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = &'a [T]
     where
         Self: 'a;
-    type Encoder<'a>
-        = RefIterEncoder<'a, [T], T>
+    type Serializer<'a>
+        = RefIterSerializer<'a, [T], T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        RefIterEncoder::new()
+        RefIterSerializer::new()
     }
 }
 

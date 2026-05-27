@@ -2,39 +2,39 @@ use alloc::collections::{BTreeSet, BinaryHeap};
 
 use crate::prelude::*;
 
-use super::super::iter::OwnedIterEncoder;
+use super::super::iter::OwnedIterSerializer;
 use super::vec::{ArchivedVec, measure_seq_body};
 
-pub type BTreeSetEncoder<'a, T> = OwnedIterEncoder<'a, BTreeSet<T>, T>;
-pub type BinaryHeapEncoder<'a, T> = OwnedIterEncoder<'a, BinaryHeap<T>, T>;
+pub type BTreeSetSerializer<'a, T> = OwnedIterSerializer<'a, BTreeSet<T>, T>;
+pub type BinaryHeapSerializer<'a, T> = OwnedIterSerializer<'a, BinaryHeap<T>, T>;
 
 #[cfg(feature = "std")]
-pub type HashSetEncoder<'a, T> = OwnedIterEncoder<'a, std::collections::HashSet<T>, T>;
+pub type HashSetSerializer<'a, T> = OwnedIterSerializer<'a, std::collections::HashSet<T>, T>;
 
 impl<T: Archive> Archive for BTreeSet<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-impl<T> Encode for BTreeSet<T>
+impl<T> Serialize for BTreeSet<T>
 where
-    T: Encode + Archive,
+    T: Serialize + Archive,
     T::Archived: ArchivedLayout,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = BTreeSet<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = BTreeSetEncoder<'a, T>
+    type Serializer<'a>
+        = BTreeSetSerializer<'a, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        BTreeSetEncoder::new()
+        BTreeSetSerializer::new()
     }
 }
 
@@ -80,26 +80,26 @@ impl<T: Archive> Archive for BinaryHeap<T> {
     type Archived = ArchivedVec<'static, T::Archived>;
 }
 
-impl<T> Encode for BinaryHeap<T>
+impl<T> Serialize for BinaryHeap<T>
 where
-    T: Encode + Archive,
+    T: Serialize + Archive,
     T::Archived: ArchivedLayout,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = BinaryHeap<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = BinaryHeapEncoder<'a, T>
+    type Serializer<'a>
+        = BinaryHeapSerializer<'a, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        BinaryHeapEncoder::new()
+        BinaryHeapSerializer::new()
     }
 }
 
@@ -147,26 +147,26 @@ impl<T: Archive> Archive for std::collections::HashSet<T> {
 }
 
 #[cfg(feature = "std")]
-impl<T> Encode for std::collections::HashSet<T>
+impl<T> Serialize for std::collections::HashSet<T>
 where
-    T: Encode + Archive,
+    T: Serialize + Archive,
     T::Archived: ArchivedLayout,
-    for<'a> T: Encode<Input<'a> = T> + 'a,
+    for<'a> T: Serialize<Input<'a> = T> + 'a,
 {
     type Input<'a>
         = std::collections::HashSet<T>
     where
         Self: 'a;
-    type Encoder<'a>
-        = HashSetEncoder<'a, T>
+    type Serializer<'a>
+        = HashSetSerializer<'a, T>
     where
         Self: 'a;
 
-    fn encoder<'a>() -> Self::Encoder<'a>
+    fn serializer<'a>() -> Self::Serializer<'a>
     where
         Self: 'a,
     {
-        HashSetEncoder::new()
+        HashSetSerializer::new()
     }
 }
 

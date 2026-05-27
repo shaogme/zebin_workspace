@@ -10,7 +10,7 @@ fn test_iter_archive_btreeset() {
     set.insert(30u64);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(wrapped).expect("failed to encode");
+    let bytes = zebin::serialize(wrapped).expect("failed to serialize");
 
     let deserialized: Vec<u64> =
         zebin::deserialize::<Vec<u64>, _>(&bytes).expect("failed to deserialize");
@@ -24,7 +24,7 @@ fn test_iter_archive_hashset() {
     set.insert(100u32);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(wrapped).expect("failed to encode");
+    let bytes = zebin::serialize(wrapped).expect("failed to serialize");
 
     let mut deserialized: Vec<u32> =
         zebin::deserialize::<Vec<u32>, _>(&bytes).expect("failed to deserialize");
@@ -39,7 +39,7 @@ fn test_iter_archive_lazy() {
     set.insert(200u64);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(wrapped).expect("failed to encode");
+    let bytes = zebin::serialize(wrapped).expect("failed to serialize");
 
     // 不做 Deserialize，直接获取零拷贝延迟反序列化视图
     let mut reader = zebin::reader::<IterArchive<BTreeSet<u64>, u64>, _>(&bytes)
@@ -61,7 +61,7 @@ fn test_iter_archive_restore_explicit() {
     set.insert(200u64);
 
     let wrapped = IterArchive::new(set);
-    let bytes = zebin::encode(wrapped).expect("failed to encode");
+    let bytes = zebin::serialize(wrapped).expect("failed to serialize");
 
     let mut reader = zebin::reader::<IterArchive<BTreeSet<u64>, u64>, _>(&bytes)
         .expect("failed to create reader");
@@ -84,12 +84,12 @@ fn test_iter_archive_restore_explicit() {
 
 // ─── Chunked block index tests ─────────────────────────────────────────────
 
-/// Encode 200 u64 elements, verify get(i) returns correct value for all i.
+/// Serialize 200 u64 elements, verify get(i) returns correct value for all i.
 #[test]
 fn test_chunked_index_random_access() {
     let data: Vec<u64> = (0..200).collect();
     let wrapped = IterArchive::new(data.clone());
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
@@ -111,7 +111,7 @@ fn test_chunked_index_random_access() {
 fn test_chunked_index_iter_from() {
     let data: Vec<u64> = (0..200).collect();
     let wrapped = IterArchive::new(data);
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
@@ -137,7 +137,7 @@ fn test_chunked_index_iter_from() {
 fn test_small_sequence_no_index() {
     let data: Vec<u64> = (0..30).collect();
     let wrapped = IterArchive::new(data.clone());
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     // Access as Vec (via ForwardSequenceStrategy) – should work.
     let deserialized: Vec<u64> =
@@ -160,7 +160,7 @@ fn test_small_sequence_no_index() {
 fn test_chunked_index_boundary_64() {
     let data: Vec<u64> = (0..64).collect();
     let wrapped = IterArchive::new(data.clone());
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
@@ -175,7 +175,7 @@ fn test_chunked_index_boundary_64() {
 fn test_chunked_index_boundary_65() {
     let data: Vec<u64> = (0..65).collect();
     let wrapped = IterArchive::new(data.clone());
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
@@ -190,7 +190,7 @@ fn test_chunked_index_boundary_65() {
 fn test_chunked_index_boundary_128() {
     let data: Vec<u64> = (0..128).collect();
     let wrapped = IterArchive::new(data.clone());
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
@@ -200,25 +200,25 @@ fn test_chunked_index_boundary_128() {
     }
 }
 
-/// Verify that data encoded as IterArchive (which writes block index)
+/// Verify that data serialized as IterArchive (which writes block index)
 /// can still be deserialized as Vec<T> (which uses ForwardSequenceStrategy).
 #[test]
 fn test_backward_compat_iter_to_vec() {
     let data: Vec<u64> = (0..200).collect();
     let wrapped = IterArchive::new(data.clone());
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     // Access as Vec<u64> – ForwardSequenceStrategy must skip block index.
     let deserialized: Vec<u64> = zebin::deserialize::<Vec<u64>, _>(&bytes).expect("deserialize");
     assert_eq!(deserialized, data);
 }
 
-/// Verify that data encoded as Vec<T> (no block index) can be deserialized
+/// Verify that data serialized as Vec<T> (no block index) can be deserialized
 /// as IterArchive.
 #[test]
 fn test_backward_compat_vec_to_iter() {
     let data: Vec<u64> = (0..200).collect();
-    let bytes = zebin::encode(data.clone()).expect("encode");
+    let bytes = zebin::serialize(data.clone()).expect("serialize");
 
     // Access as IterArchive – should still work (no block index, linear fallback).
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
@@ -235,7 +235,7 @@ fn test_backward_compat_vec_to_iter() {
 fn test_chunked_index_variable_length_elements() {
     let data: Vec<String> = (0..200).map(|i| format!("item_{:05}", i)).collect();
     let wrapped = IterArchive::new(data.clone());
-    let bytes = zebin::encode(wrapped).expect("encode");
+    let bytes = zebin::serialize(wrapped).expect("serialize");
 
     let mut reader = zebin::reader::<IterArchive<Vec<String>, String>, _>(&bytes).expect("reader");
     let archived = reader.read().unwrap();
