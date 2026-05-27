@@ -1,4 +1,4 @@
-use crate::{archive_impl::varint::decode_u64, prelude::*, validation::ValidationContext};
+use crate::{archive_impl::varint::deserialize_u64, prelude::*, validation::ValidationContext};
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -47,7 +47,7 @@ impl BlockIndex {
         let mut ctx = DummyContext;
         let mut abs = 0usize;
         for i in 0..=block_idx {
-            match decode_u64::<usize, _>(&mut cursor, &mut ctx) {
+            match deserialize_u64::<usize, _>(&mut cursor, &mut ctx) {
                 Ok(delta) => {
                     abs += delta;
                 }
@@ -61,11 +61,11 @@ impl BlockIndex {
     }
 }
 
-/// Attempt to decode a block index section after the sequence sentinel.
+/// Attempt to deserialize a block index section after the sequence sentinel.
 ///
 /// Returns `None` when no index is present (fewer than `chunk_size + 1`
 /// elements, or the magic byte is absent).
-pub(crate) fn decode_block_index<C>(
+pub(crate) fn deserialize_block_index<C>(
     cursor: &mut Cursor<'_>,
     context: &mut C,
     len: usize,
@@ -87,7 +87,7 @@ where
     cursor.advance(1, context)?;
 
     // chunk_size (varint)
-    let chunk_size: usize = decode_u64(cursor, context)?;
+    let chunk_size: usize = deserialize_u64(cursor, context)?;
     if chunk_size == 0 {
         return Err(AccessError::ValidationError {
             message: "Block index chunk_size must be > 0",
@@ -96,7 +96,7 @@ where
     }
 
     // num_blocks (varint)
-    let num_blocks: usize = decode_u64(cursor, context)?;
+    let num_blocks: usize = deserialize_u64(cursor, context)?;
     let expected_blocks = len.div_ceil(chunk_size);
     if num_blocks != expected_blocks {
         return Err(AccessError::ValidationError {
@@ -110,7 +110,7 @@ where
         let mut offsets = Vec::with_capacity(num_blocks);
         let mut abs: usize = 0;
         for _ in 0..num_blocks {
-            let delta: usize = decode_u64(cursor, context)?;
+            let delta: usize = deserialize_u64(cursor, context)?;
             abs += delta;
             offsets.push(abs);
         }
@@ -125,7 +125,7 @@ where
         let raw_delta_start = cursor.pos();
         // Walk through all delta varints to advance the cursor past them.
         for _ in 0..num_blocks {
-            let _delta: usize = decode_u64(cursor, context)?;
+            let _delta: usize = deserialize_u64(cursor, context)?;
         }
         Ok(Some(BlockIndex {
             chunk_size,
@@ -138,7 +138,7 @@ where
 }
 
 /// Skip a block index section without storing it (used by
-/// `SequenceDecodeStrategy` impls that eagerly decode everything).
+/// `SequenceAccessStrategy` impls that eagerly deserialize everything).
 #[cfg(feature = "alloc")]
 pub(crate) fn skip_block_index<C>(
     cursor: &mut Cursor<'_>,
@@ -156,10 +156,10 @@ where
     }
     cursor.advance(1, context)?;
 
-    let _chunk_size: usize = decode_u64(cursor, context)?;
-    let num_blocks: usize = decode_u64(cursor, context)?;
+    let _chunk_size: usize = deserialize_u64(cursor, context)?;
+    let num_blocks: usize = deserialize_u64(cursor, context)?;
     for _ in 0..num_blocks {
-        let _delta: usize = decode_u64(cursor, context)?;
+        let _delta: usize = deserialize_u64(cursor, context)?;
     }
     Ok(())
 }
@@ -212,17 +212,17 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_block_index_missing_magic() {
+    fn test_deserialize_block_index_missing_magic() {
         let data = [0x00, 0x01, 0x02];
         let mut cursor = Cursor::new(&data, 0);
         let mut ctx = DummyContext;
-        let res = decode_block_index(&mut cursor, &mut ctx, 10);
+        let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_ok());
         assert!(res.unwrap().is_none());
     }
 
     #[test]
-    fn test_decode_block_index_invalid_chunk_size() {
+    fn test_deserialize_block_index_invalid_chunk_size() {
         let mut data = Vec::new();
         data.push(BLOCK_INDEX_MAGIC);
         append_varint(0, &mut data); // chunk_size = 0
@@ -230,12 +230,12 @@ mod tests {
 
         let mut cursor = Cursor::new(&data, 0);
         let mut ctx = DummyContext;
-        let res = decode_block_index(&mut cursor, &mut ctx, 10);
+        let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_err());
     }
 
     #[test]
-    fn test_decode_block_index_mismatch_blocks() {
+    fn test_deserialize_block_index_mismatch_blocks() {
         let mut data = Vec::new();
         data.push(BLOCK_INDEX_MAGIC);
         append_varint(64, &mut data); // chunk_size = 64
@@ -243,7 +243,7 @@ mod tests {
 
         let mut cursor = Cursor::new(&data, 0);
         let mut ctx = DummyContext;
-        let res = decode_block_index(&mut cursor, &mut ctx, 10);
+        let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_err());
     }
 }

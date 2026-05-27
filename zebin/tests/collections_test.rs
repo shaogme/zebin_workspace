@@ -24,11 +24,10 @@ fn test_btreeset_direct() {
 
     let bytes = zebin::encode(&set).expect("failed to encode BTreeSet");
     let restored: BTreeSet<u32> =
-        zebin::decode::<BTreeSet<u32>, _>(&bytes).expect("failed to decode BTreeSet");
+        zebin::deserialize::<BTreeSet<u32>, _>(&bytes).expect("failed to deserialize BTreeSet");
     assert_eq!(restored, set);
 
-    let mut reader = zebin::reader::<BTreeSet<u32>, _>(&bytes).expect("failed to create reader");
-    let archived = reader.read().unwrap();
+    let archived = zebin::access::<BTreeSet<u32>, _>(&bytes).expect("failed to access BTreeSet");
     assert_eq!(archived.len(), 3);
 }
 
@@ -40,7 +39,7 @@ fn test_hashset_direct() {
 
     let bytes = zebin::encode(&set).expect("failed to encode HashSet");
     let restored: HashSet<String> =
-        zebin::decode::<HashSet<String>, _>(&bytes).expect("failed to decode HashSet");
+        zebin::deserialize::<HashSet<String>, _>(&bytes).expect("failed to deserialize HashSet");
     assert_eq!(restored, set);
 }
 
@@ -53,7 +52,7 @@ fn test_binary_heap_direct() {
 
     let bytes = zebin::encode(&heap).expect("failed to encode BinaryHeap");
     let restored: BinaryHeap<i32> =
-        zebin::decode::<BinaryHeap<i32>, _>(&bytes).expect("failed to decode BinaryHeap");
+        zebin::deserialize::<BinaryHeap<i32>, _>(&bytes).expect("failed to deserialize BinaryHeap");
 
     let restored_sorted: Vec<i32> = restored.into_sorted_vec();
     let expected_sorted: Vec<i32> = heap.into_sorted_vec();
@@ -67,8 +66,8 @@ fn test_btreemap_direct() {
     map.insert("second".to_string(), 20u32);
 
     let bytes = zebin::encode(&map).expect("failed to encode BTreeMap");
-    let restored: BTreeMap<String, u32> =
-        zebin::decode::<BTreeMap<String, u32>, _>(&bytes).expect("failed to decode BTreeMap");
+    let restored: BTreeMap<String, u32> = zebin::deserialize::<BTreeMap<String, u32>, _>(&bytes)
+        .expect("failed to deserialize BTreeMap");
     assert_eq!(restored, map);
 }
 
@@ -79,8 +78,8 @@ fn test_hashmap_direct() {
     map.insert(2u32, "two".to_string());
 
     let bytes = zebin::encode(&map).expect("failed to encode HashMap");
-    let restored: HashMap<u32, String> =
-        zebin::decode::<HashMap<u32, String>, _>(&bytes).expect("failed to decode HashMap");
+    let restored: HashMap<u32, String> = zebin::deserialize::<HashMap<u32, String>, _>(&bytes)
+        .expect("failed to deserialize HashMap");
     assert_eq!(restored, map);
 }
 
@@ -107,7 +106,7 @@ fn test_collections_container() {
     };
 
     let bytes = zebin::encode(&container).expect("failed to encode container");
-    let restored: CollectionContainer =
-        zebin::decode::<CollectionContainer, _>(&bytes).expect("failed to decode container");
+    let restored: CollectionContainer = zebin::deserialize::<CollectionContainer, _>(&bytes)
+        .expect("failed to deserialize container");
     assert_eq!(restored, container);
 }

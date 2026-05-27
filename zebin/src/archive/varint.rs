@@ -27,7 +27,7 @@ impl<T> VarInt<T> {
     }
 }
 
-/// Borrowed view over a decoded varint.
+/// Borrowed view over a deserialized varint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarIntView<T> {
     value: T,
@@ -129,7 +129,7 @@ macro_rules! impl_varint_number {
 
 impl_varint_number!(u8 => 2, u16 => 3, u32 => 5, u64 => 10, usize => 10);
 
-/// Zero-sized decode marker for a varint.
+/// Zero-sized deserialize marker for a varint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ArchivedVarInt<T> {
     _marker: PhantomData<T>,
@@ -170,7 +170,10 @@ pub(crate) fn encode_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-pub(crate) fn decode_u64<T, C>(cursor: &mut Cursor<'_>, context: &mut C) -> Result<T, AccessError>
+pub(crate) fn deserialize_u64<T, C>(
+    cursor: &mut Cursor<'_>,
+    context: &mut C,
+) -> Result<T, AccessError>
 where
     T: VarIntNumber,
     C: ValidationContext + ?Sized,
@@ -206,7 +209,7 @@ where
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,
@@ -216,7 +219,7 @@ where
         C: ValidationContext + ?Sized,
         Self: 'a,
     {
-        let value = decode_u64::<T, C>(cursor, context)?;
+        let value = deserialize_u64::<T, C>(cursor, context)?;
         Ok(VarIntView { value })
     }
 
@@ -224,7 +227,7 @@ where
     where
         C: ValidationContext + ?Sized,
     {
-        decode_u64::<T, C>(cursor, context).map(|_| ())
+        deserialize_u64::<T, C>(cursor, context).map(|_| ())
     }
 }
 

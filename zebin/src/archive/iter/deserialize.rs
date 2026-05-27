@@ -4,9 +4,9 @@ use crate::{prelude::*, validation::ValidationContext};
 
 use super::{DummyContext, MAX_SEQUENCE_LEN};
 
-#[path = "decode/block_index.rs"]
+#[path = "deserialize/block_index.rs"]
 mod block_index;
-pub(crate) use block_index::{BlockIndex, decode_block_index};
+pub(crate) use block_index::{BlockIndex, deserialize_block_index};
 
 #[cfg(feature = "alloc")]
 pub(crate) use block_index::skip_block_index;
@@ -71,7 +71,7 @@ impl<'a, A> ArchivedIter<'a, A> {
                 let abs_pos = self.start_pos + offset;
                 let mut cursor = Cursor::new(self.bytes, abs_pos);
                 let mut ctx = DummyContext;
-                // Skip `intra` elements, then decode the target.
+                // Skip `intra` elements, then deserialize the target.
                 for _ in 0..intra {
                     let marker = cursor.read_u8(&mut ctx)?;
                     if marker != 1 {
@@ -213,7 +213,7 @@ where
         Self: 'a;
 
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = crate::io::ForwardSequenceStrategy;
+    type AccessStrategy = crate::io::ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,
@@ -227,7 +227,7 @@ where
         let len = Self::access_sequence_body(cursor, context)?;
 
         // Try to parse trailing block index.
-        let block_index = decode_block_index(cursor, context, len)?;
+        let block_index = deserialize_block_index(cursor, context, len)?;
 
         Ok(ArchivedIter {
             bytes: cursor.bytes(),
@@ -244,7 +244,7 @@ where
     {
         let len = Self::access_sequence_body(cursor, context)?;
         // Also consume block index bytes during validation.
-        let _ = decode_block_index::<C>(cursor, context, len)?;
+        let _ = deserialize_block_index::<C>(cursor, context, len)?;
         Ok(())
     }
 }

@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::task::Poll;
 
 use crate::{
-    archive_impl::varint::{VarIntNumber, decode_u64, encode_u64, encoded_len_u64},
+    archive_impl::varint::{VarIntNumber, deserialize_u64, encode_u64, encoded_len_u64},
     io::ForwardSequenceStrategy,
     prelude::*,
 };
@@ -52,7 +52,7 @@ impl<'a, T> PackedVarIntSlice<'a, T> {
     }
 }
 
-/// Decoded VarIntVec view. Also used as the zero-sized archive marker.
+/// Accessd VarIntVec view. Also used as the zero-sized archive marker.
 pub struct ArchivedVarIntVec<T> {
     values: Vec<T>,
 }
@@ -106,7 +106,7 @@ impl<T: VarIntNumber> Access for ArchivedVarIntVec<T> {
         = ArchivedVarIntVec<T>
     where
         Self: 'a;
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,
@@ -120,7 +120,7 @@ impl<T: VarIntNumber> Access for ArchivedVarIntVec<T> {
         let mut values = Vec::with_capacity(len);
         for index in 0..len {
             let mut guard = context.push_index(index);
-            values.push(decode_u64::<T, _>(cursor, &mut *guard)?);
+            values.push(deserialize_u64::<T, _>(cursor, &mut *guard)?);
         }
         Ok(ArchivedVarIntVec { values })
     }
@@ -132,7 +132,7 @@ impl<T: VarIntNumber> Access for ArchivedVarIntVec<T> {
         let len = cursor.read_u32(context)? as usize;
         for index in 0..len {
             let mut guard = context.push_index(index);
-            let _ = decode_u64::<T, _>(cursor, &mut *guard)?;
+            let _ = deserialize_u64::<T, _>(cursor, &mut *guard)?;
         }
         Ok(())
     }

@@ -28,8 +28,7 @@ fn test_rename_and_skip() {
     };
 
     let buf = zebin::encode(user).unwrap();
-    let mut reader_obj = zebin::reader::<AttributeTest, _>(&buf).unwrap();
-    let archived = reader_obj.read().unwrap();
+    let archived = zebin::access::<AttributeTest, _>(&buf).unwrap();
 
     assert_eq!(archived.id, 42);
     // 检查重命名后的字段
@@ -46,8 +45,7 @@ pub struct TupleTest(u32, #[zebin(skip)] String, u64);
 fn test_tuple_skip() {
     let t = TupleTest(1, "ignored".to_string(), 2);
     let buf = zebin::encode(t).unwrap();
-    let mut reader_obj = zebin::reader::<TupleTest, _>(&buf).unwrap();
-    let archived = reader_obj.read().unwrap();
+    let archived = zebin::access::<TupleTest, _>(&buf).unwrap();
 
     assert_eq!(archived.0, 1);
     // 原本 index 为 2 的字段现在应该是 index 为 1 的字段
@@ -78,8 +76,7 @@ fn test_enum_skip_rename() {
         secret: "hidden".to_string(),
     };
     let buf1 = zebin::encode(e1).unwrap();
-    let mut reader_obj1 = zebin::reader::<EnumTest, _>(&buf1).unwrap();
-    let archived1 = reader_obj1.read().unwrap();
+    let archived1 = zebin::access::<EnumTest, _>(&buf1).unwrap();
     if let Some(v) = archived1.as_variant1() {
         assert_eq!(v.id, 10);
     } else {
@@ -88,8 +85,7 @@ fn test_enum_skip_rename() {
 
     let e2 = EnumTest::Variant2 { value: 20 };
     let buf2 = zebin::encode(e2).unwrap();
-    let mut reader_obj2 = zebin::reader::<EnumTest, _>(&buf2).unwrap();
-    let archived2 = reader_obj2.read().unwrap();
+    let archived2 = zebin::access::<EnumTest, _>(&buf2).unwrap();
     if let Some(v) = archived2.as_new_variant() {
         // v.val should be 20 because 'value' was renamed to 'val'
         assert_eq!(v.val, 20);

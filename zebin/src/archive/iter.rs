@@ -7,17 +7,17 @@ use crate::{
 };
 
 // Declare submodules
-#[path = "iter/decode.rs"]
-mod decode;
+#[path = "iter/deserialize.rs"]
+mod deserialize;
 #[path = "iter/encode.rs"]
 mod encode;
 #[path = "iter/restore.rs"]
 mod restore;
 
 // Re-export public API
-pub use decode::ArchivedIter;
+pub use deserialize::ArchivedIter;
 #[cfg(feature = "alloc")]
-pub(crate) use decode::skip_block_index;
+pub(crate) use deserialize::skip_block_index;
 pub(crate) use encode::OwnedIterEncoder;
 pub use encode::{IterEncoder, SeqEncoder, measure_block_index_overhead};
 

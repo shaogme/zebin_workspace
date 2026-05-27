@@ -208,7 +208,7 @@ impl SchemaObjectHeader {
     }
 }
 
-/// A decoded field: the field entry itself, its starting position
+/// A deserialized field: the field entry itself, its starting position
 /// in the field table, and its payload bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NextField<'a> {

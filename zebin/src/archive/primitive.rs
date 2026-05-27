@@ -110,7 +110,7 @@ macro_rules! impl_archive_for_primitive {
                 where
                     Self: 'a;
                 #[cfg(feature = "alloc")]
-                type DecodeStrategy = crate::io::FixedSequenceStrategy;
+                type AccessStrategy = crate::io::FixedSequenceStrategy;
 
                 fn access<'a, C>(
                     cursor: &mut Cursor<'a>,
@@ -211,7 +211,7 @@ impl Access for bool {
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = FixedSequenceStrategy;
+    type AccessStrategy = FixedSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,
@@ -351,7 +351,7 @@ impl Access for () {
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = FixedSequenceStrategy;
+    type AccessStrategy = FixedSequenceStrategy;
 
     fn access<'a, C>(
         _cursor: &mut Cursor<'a>,
@@ -608,7 +608,7 @@ impl<A: Access, B: Access> Access for (A, B) {
     where
         Self: 'a2;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = crate::io::ForwardSequenceStrategy;
+    type AccessStrategy = crate::io::ForwardSequenceStrategy;
 
     fn access<'a2, C>(
         cursor: &mut Cursor<'a2>,

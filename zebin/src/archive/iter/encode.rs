@@ -109,7 +109,7 @@ where
     }
 
     /// Create an encoder that writes a trailing block index for O(1)
-    /// random access during decode.
+    /// random access during deserialize.
     pub fn new_indexed() -> Self {
         Self {
             iter: None,

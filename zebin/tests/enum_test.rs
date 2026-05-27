@@ -1,5 +1,5 @@
 use zebin::io::SliceEncoder;
-use zebin::{ZebinArchive, ZebinEncode, ZebinError, reader, writer};
+use zebin::{ZebinArchive, ZebinEncode, ZebinError, access, writer};
 
 #[derive(ZebinArchive, ZebinEncode, Clone)]
 enum UnitMode {
@@ -47,8 +47,8 @@ fn test_unit_enum_round_trip() {
     writer_obj.write_all(value).unwrap();
     let written = encoder.written();
 
-    let mut reader_obj = reader::<UnitMode, _>(&buf[..written]).unwrap();
-    let archived = reader_obj.read().unwrap();
+    let slice = &buf[..written];
+    let archived = access::<UnitMode, _>(&slice).unwrap();
     assert!(archived.is_busy());
     assert!(!archived.is_idle());
     assert_eq!(archived.tag(), 1);
@@ -61,8 +61,8 @@ fn test_tuple_enum_round_trip() {
     assert!(matches!(empty, TuplePacket::Empty));
     let value = TuplePacket::Data(7, "packet".to_string());
     let buf = zebin::encode(value).unwrap();
-    let mut reader = zebin::reader::<TuplePacket, _>(&buf).unwrap();
-    let archived = reader.read().unwrap();
+    let slice = &buf;
+    let archived = access::<TuplePacket, _>(&slice).unwrap();
     assert!(!archived.is_empty());
     assert_eq!(archived.tag(), 1);
 
@@ -83,8 +83,8 @@ fn test_struct_enum_round_trip() {
         label: "hello".to_string(),
     };
     let buf = zebin::encode(value).unwrap();
-    let mut reader = zebin::reader::<StructPacket, _>(&buf).unwrap();
-    let archived = reader.read().unwrap();
+    let slice = &buf;
+    let archived = access::<StructPacket, _>(&slice).unwrap();
     assert_eq!(archived.tag(), 1);
 
     // StructPacket::Data variant has a schema_key

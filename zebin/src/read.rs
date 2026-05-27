@@ -35,6 +35,25 @@ where
         self.offset >= self.storage.as_slice().len()
     }
 
+    pub fn access(
+        storage: &'a S,
+        config: ValidationConfig,
+    ) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
+    where
+        T: Archive,
+        T::Archived: Access,
+        S: Storage<Mode = StaticMode>,
+    {
+        let bytes = storage.as_slice();
+        let header = H::parse(bytes)?;
+        validate_root_object_encoding::<T, H>(&header)?;
+
+        let mut validator = Validator::with_config(bytes, config, None);
+        let mut cursor = Cursor::new(bytes, H::SIZE);
+        let view = T::Archived::access(&mut cursor, &mut validator)?;
+        Ok(view)
+    }
+
     pub fn read(&mut self) -> Result<<T::Archived as Access>::View<'_>, ZebinError>
     where
         T: Archive,
@@ -57,7 +76,7 @@ where
         Ok(view)
     }
 
-    pub fn decode(storage: S) -> Result<T, ZebinError>
+    pub fn deserialize(storage: S) -> Result<T, ZebinError>
     where
         T: Archive,
         T::Archived: Access,

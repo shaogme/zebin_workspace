@@ -17,7 +17,7 @@ impl<T, E> SchemaAware for ArchivedResult<T, E> {
     }
 }
 
-/// Decoded representation for `Result<T, E>`.
+/// Accessd representation for `Result<T, E>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArchivedResult<T, E> {
     Ok(T),
@@ -66,7 +66,7 @@ where
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,

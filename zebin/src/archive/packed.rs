@@ -67,7 +67,7 @@ pub(crate) fn read_packed_bits(bytes: &[u8], bit_offset: usize, bits_per_value: 
     value
 }
 
-/// Zero-sized decode marker for archived packed boolean slices.
+/// Zero-sized deserialize marker for archived packed boolean slices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArchivedPackedBoolSlice;
 
@@ -113,7 +113,7 @@ impl Access for ArchivedPackedBoolSlice {
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,
@@ -148,7 +148,7 @@ impl ArchivedDefault for ArchivedPackedBoolSliceView<'_> {
     }
 }
 
-/// Zero-sized decode marker for archived packed u8 slices.
+/// Zero-sized deserialize marker for archived packed u8 slices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArchivedPackedU8Slice<const BITS: u8 = 8>;
 
@@ -192,7 +192,7 @@ impl<const BITS: u8> Access for ArchivedPackedU8Slice<BITS> {
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,

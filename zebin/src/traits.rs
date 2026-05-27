@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 /// Fixed-width archived overlay contract.
 ///
 /// Only plain fixed-size overlays implement this trait. Variable-width archive
-/// forms are decoded through [`Access`] instead of pretending to have a stable
+/// forms are deserialized through [`Access`] instead of pretending to have a stable
 /// in-place layout.
 pub trait FixedLayout: Sized {
     const ALIGNMENT: NonZeroUsize;
@@ -45,13 +45,13 @@ pub trait ArchivedLayout {
     const FIELD_ENCODING: FieldEncoding = FieldEncoding::Fixed;
 }
 
-/// Read-side decode contract for consuming a value from a sequential cursor.
+/// Read-side deserialize contract for consuming a value from a sequential cursor.
 pub trait Access: ArchivedLayout + Sized {
     type View<'a>
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy: SequenceDecodeStrategy<Self>;
+    type AccessStrategy: SequenceAccessStrategy<Self>;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,
@@ -68,7 +68,7 @@ pub trait Access: ArchivedLayout + Sized {
 
 /// Strategy for decoding and validating a sequence of elements.
 #[cfg(feature = "alloc")]
-pub trait SequenceDecodeStrategy<T: Access> {
+pub trait SequenceAccessStrategy<T: Access> {
     fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
@@ -89,7 +89,7 @@ pub trait SequenceDecodeStrategy<T: Access> {
 pub struct FixedSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<T: Access> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
+impl<T: Access> SequenceAccessStrategy<T> for FixedSequenceStrategy {
     fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
@@ -144,7 +144,7 @@ impl<T: Access> SequenceDecodeStrategy<T> for FixedSequenceStrategy {
 pub struct ForwardSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<T: Access> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
+impl<T: Access> SequenceAccessStrategy<T> for ForwardSequenceStrategy {
     fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
@@ -197,7 +197,7 @@ impl<T: Access> SequenceDecodeStrategy<T> for ForwardSequenceStrategy {
 pub struct BackwardSequenceStrategy;
 
 #[cfg(feature = "alloc")]
-impl<T: Access> SequenceDecodeStrategy<T> for BackwardSequenceStrategy {
+impl<T: Access> SequenceAccessStrategy<T> for BackwardSequenceStrategy {
     fn access_sequence<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
@@ -304,7 +304,7 @@ impl<T: Access> SequenceDecodeStrategy<T> for BackwardSequenceStrategy {
     }
 }
 
-/// Object model layer: type-level archive and decode contracts.
+/// Object model layer: type-level archive and deserialize contracts.
 pub trait Archive {
     type Archived;
     const ALLOW_MISSING: bool = false;
@@ -315,7 +315,7 @@ pub trait ArchivedDefault {
     fn archived_default() -> &'static Self;
 }
 
-/// Contract for schema-aware decoded views.
+/// Contract for schema-aware deserialized views.
 pub trait SchemaAware {
     fn pos(&self) -> usize;
     fn stable_schema_key(&self) -> u32;
@@ -336,7 +336,7 @@ impl<T: SchemaAware + ?Sized> SchemaAware for &T {
     }
 }
 
-/// Contract for decoded views that can restore the source type.
+/// Contract for deserialized views that can restore the source type.
 pub trait Deserialize<T> {
     fn deserialize(&self) -> Result<T, ZebinError>;
 

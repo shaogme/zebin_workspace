@@ -18,7 +18,7 @@ impl<T> SchemaAware for ArchivedOption<T> {
     }
 }
 
-/// Decoded representation for `Option<T>`.
+/// Accessd representation for `Option<T>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArchivedOption<T> {
     None,
@@ -58,7 +58,7 @@ where
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,

@@ -184,7 +184,7 @@ fn record_layout_impl(marker: &Ident, record: &RecordSpec<'_>) -> proc_macro2::T
     }
 }
 
-fn record_decode_impl(
+fn record_deserialize_impl(
     marker: &Ident,
     view: &Ident,
     record: &RecordSpec<'_>,
@@ -269,7 +269,7 @@ fn record_decode_impl(
                 where
                     Self: 'a;
                 #[cfg(feature = "alloc")]
-                type DecodeStrategy = zebin::io::BackwardSequenceStrategy;
+                type AccessStrategy = zebin::io::BackwardSequenceStrategy;
 
                 fn access<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
                 where
@@ -329,7 +329,7 @@ fn record_decode_impl(
             }
         }
     } else {
-        let decodes = record.active_fields().map(|(index, field)| {
+        let deserializes = record.active_fields().map(|(index, field)| {
             let archived_ty = field_archived_type(field);
             let local = format_ident!("__field_{index}");
             let name = field_user_ident(record, index);
@@ -378,14 +378,14 @@ fn record_decode_impl(
                 where
                     Self: 'a;
                 #[cfg(feature = "alloc")]
-                type DecodeStrategy = zebin::io::ForwardSequenceStrategy;
+                type AccessStrategy = zebin::io::ForwardSequenceStrategy;
                 fn access<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
                     Self: 'a
                 {
                     let mut __guard = context.guard()?;
-                    #(#decodes)*
+                    #(#deserializes)*
                     Ok(#construct)
                 }
 
@@ -408,12 +408,12 @@ fn helper_record(
     record: &RecordSpec<'_>,
 ) -> proc_macro2::TokenStream {
     let view_def = record_view_definition(view, record);
-    let decode = record_decode_impl(marker, view, record);
+    let deserialize = record_deserialize_impl(marker, view, record);
     let accessors = schema_accessors(view, record);
     quote! {
         pub struct #marker;
         #view_def
-        #decode
+        #deserialize
         #accessors
         impl<'a> zebin::io::ArchivedField<'a> for #view<'a> {}
     }
@@ -531,7 +531,7 @@ fn enum_impl(
         })
         .collect();
 
-    let decode_arms: Vec<_> = variants
+    let deserialize_arms: Vec<_> = variants
         .iter()
         .enumerate()
         .map(|(index, variant)| {
@@ -678,7 +678,7 @@ fn enum_impl(
             where
                 Self: 'a;
             #[cfg(feature = "alloc")]
-            type DecodeStrategy = zebin::io::ForwardSequenceStrategy;
+            type AccessStrategy = zebin::io::ForwardSequenceStrategy;
             fn access<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
             where
                 C: zebin::validation::ValidationContext + ?Sized,
@@ -688,7 +688,7 @@ fn enum_impl(
                 let __tag_pos = cursor.pos();
                 let tag = <u32 as zebin::Access>::access(cursor, &mut *__guard)?;
                 match tag {
-                    #(#decode_arms,)*
+                    #(#deserialize_arms,)*
                     _ => Err(__guard.validation_error("Invalid enum discriminant", __tag_pos)),
                 }
             }

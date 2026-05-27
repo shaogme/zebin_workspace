@@ -42,21 +42,20 @@ fn test_evolution_optional_and_default() {
     };
     let buf = zebin::encode(v1).unwrap();
 
-    let mut reader_obj = zebin::reader::<Version2, _>(&buf).unwrap();
-    let reader = reader_obj.read().unwrap();
+    let view = zebin::access::<Version2, _>(&buf).unwrap();
 
     // Directly access fields on the reader (it derefs to the root view)
-    assert_eq!(reader.id().unwrap(), &42);
-    assert_eq!(unsafe { reader.name().unwrap().as_str() }, "Alice");
+    assert_eq!(view.id().unwrap(), &42);
+    assert_eq!(unsafe { view.name().unwrap().as_str() }, "Alice");
 
     // Missing field with optional
-    assert!(reader.email().unwrap().is_none());
+    assert!(view.email().unwrap().is_none());
 
     // Missing field with default
-    assert_eq!(reader.age().unwrap(), &0);
+    assert_eq!(view.age().unwrap(), &0);
 
     // Missing field with custom default
-    assert_eq!(reader.score().unwrap(), &100);
+    assert_eq!(view.score().unwrap(), &100);
 }
 
 #[cfg(feature = "alloc")]
@@ -70,17 +69,16 @@ fn test_version2_with_all_fields() {
         score: 95,
     };
     let buf = zebin::encode(v2).unwrap();
-    let mut reader_obj = zebin::reader::<Version2, _>(&buf).unwrap();
-    let reader = reader_obj.read().unwrap();
+    let view = zebin::access::<Version2, _>(&buf).unwrap();
 
-    assert_eq!(reader.id().unwrap(), &1);
-    assert_eq!(unsafe { reader.name().unwrap().as_str() }, "Bob");
+    assert_eq!(view.id().unwrap(), &1);
+    assert_eq!(unsafe { view.name().unwrap().as_str() }, "Bob");
     assert_eq!(
-        unsafe { reader.email().unwrap().as_ref().unwrap().as_str() },
+        unsafe { view.email().unwrap().as_ref().unwrap().as_str() },
         "bob@example.com"
     );
-    assert_eq!(reader.age().unwrap(), &30);
-    assert_eq!(reader.score().unwrap(), &95);
+    assert_eq!(view.age().unwrap(), &30);
+    assert_eq!(view.score().unwrap(), &95);
 }
 
 #[cfg(feature = "alloc")]
@@ -113,12 +111,11 @@ fn test_enum_evolution() {
     };
     let buf = zebin::encode(m1).unwrap();
 
-    let mut reader_obj = zebin::reader::<MessageV2, _>(&buf).unwrap();
-    let reader = reader_obj.read().unwrap();
+    let view = zebin::access::<MessageV2, _>(&buf).unwrap();
 
     // Directly access variants on the reader.
     // The variant accessor on View (for enums) returns a nested View for the variant record.
-    let login = reader.as_login().expect("Should be Login variant");
+    let login = view.as_login().expect("Should be Login variant");
 
     assert_eq!(unsafe { login.user().unwrap().as_str() }, "Alice");
     assert!(login.device().unwrap().is_none());

@@ -21,7 +21,7 @@ impl SchemaAware for ArchivedStringView<'_> {
     }
 }
 
-/// Zero-sized decode marker for archived strings.
+/// Zero-sized deserialize marker for archived strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ArchivedString;
 
@@ -55,7 +55,7 @@ impl Access for ArchivedString {
         = ArchivedStringView<'a>
     where
         Self: 'a;
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,

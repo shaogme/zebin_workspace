@@ -12,8 +12,9 @@ fn test_iter_archive_btreeset() {
     let wrapped = IterArchive::new(set);
     let bytes = zebin::encode(wrapped).expect("failed to encode");
 
-    let decoded: Vec<u64> = zebin::decode::<Vec<u64>, _>(&bytes).expect("failed to decode");
-    assert_eq!(decoded, vec![10, 20, 30]);
+    let deserialized: Vec<u64> =
+        zebin::deserialize::<Vec<u64>, _>(&bytes).expect("failed to deserialize");
+    assert_eq!(deserialized, vec![10, 20, 30]);
 }
 
 #[test]
@@ -25,9 +26,10 @@ fn test_iter_archive_hashset() {
     let wrapped = IterArchive::new(set);
     let bytes = zebin::encode(wrapped).expect("failed to encode");
 
-    let mut decoded: Vec<u32> = zebin::decode::<Vec<u32>, _>(&bytes).expect("failed to decode");
-    decoded.sort();
-    assert_eq!(decoded, vec![42, 100]);
+    let mut deserialized: Vec<u32> =
+        zebin::deserialize::<Vec<u32>, _>(&bytes).expect("failed to deserialize");
+    deserialized.sort();
+    assert_eq!(deserialized, vec![42, 100]);
 }
 
 #[test]
@@ -138,8 +140,9 @@ fn test_small_sequence_no_index() {
     let bytes = zebin::encode(wrapped).expect("encode");
 
     // Access as Vec (via ForwardSequenceStrategy) – should work.
-    let decoded: Vec<u64> = zebin::decode::<Vec<u64>, _>(&bytes).expect("decode Vec");
-    assert_eq!(decoded, data);
+    let deserialized: Vec<u64> =
+        zebin::deserialize::<Vec<u64>, _>(&bytes).expect("deserialize Vec");
+    assert_eq!(deserialized, data);
 
     // Access as IterArchive – should also work and still support get().
     let mut reader = zebin::reader::<IterArchive<Vec<u64>, u64>, _>(&bytes).expect("reader");
@@ -198,7 +201,7 @@ fn test_chunked_index_boundary_128() {
 }
 
 /// Verify that data encoded as IterArchive (which writes block index)
-/// can still be decoded as Vec<T> (which uses ForwardSequenceStrategy).
+/// can still be deserialized as Vec<T> (which uses ForwardSequenceStrategy).
 #[test]
 fn test_backward_compat_iter_to_vec() {
     let data: Vec<u64> = (0..200).collect();
@@ -206,11 +209,11 @@ fn test_backward_compat_iter_to_vec() {
     let bytes = zebin::encode(wrapped).expect("encode");
 
     // Access as Vec<u64> – ForwardSequenceStrategy must skip block index.
-    let decoded: Vec<u64> = zebin::decode::<Vec<u64>, _>(&bytes).expect("decode");
-    assert_eq!(decoded, data);
+    let deserialized: Vec<u64> = zebin::deserialize::<Vec<u64>, _>(&bytes).expect("deserialize");
+    assert_eq!(deserialized, data);
 }
 
-/// Verify that data encoded as Vec<T> (no block index) can be decoded
+/// Verify that data encoded as Vec<T> (no block index) can be deserialized
 /// as IterArchive.
 #[test]
 fn test_backward_compat_vec_to_iter() {

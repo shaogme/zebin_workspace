@@ -11,7 +11,7 @@ use alloc::{
 use std::collections::{HashMap, HashSet};
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-use super::{DummyContext, IterArchive, decode::ArchivedIter};
+use super::{DummyContext, IterArchive, deserialize::ArchivedIter};
 
 #[cfg(feature = "alloc")]
 pub(crate) fn access_next_element<'a, T: Access>(

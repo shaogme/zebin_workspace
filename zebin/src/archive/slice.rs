@@ -76,7 +76,7 @@ where
     where
         Self: 'a;
     #[cfg(feature = "alloc")]
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,

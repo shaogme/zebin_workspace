@@ -1,7 +1,7 @@
 use alloc::{collections::VecDeque, vec::Vec};
 
 use crate::{
-    io::{ForwardSequenceStrategy, SequenceDecodeStrategy},
+    io::{ForwardSequenceStrategy, SequenceAccessStrategy},
     prelude::*,
 };
 
@@ -20,7 +20,7 @@ impl<'a, T> SchemaAware for ArchivedVec<'a, T> {
     }
 }
 
-/// Decoded archived vector view.
+/// Accessd archived vector view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchivedVec<'a, T> {
     items: Vec<T>,
@@ -77,7 +77,7 @@ where
         = ArchivedVec<'a, A::View<'a>>
     where
         Self: 'a;
-    type DecodeStrategy = ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
     fn access<'a, C>(
         cursor: &mut Cursor<'a>,
@@ -88,7 +88,7 @@ where
         Self: 'a,
     {
         let items =
-            <A::DecodeStrategy as SequenceDecodeStrategy<A>>::access_sequence(cursor, context)?;
+            <A::AccessStrategy as SequenceAccessStrategy<A>>::access_sequence(cursor, context)?;
         Ok(ArchivedVec::new(items))
     }
 
@@ -96,7 +96,7 @@ where
     where
         C: ValidationContext + ?Sized,
     {
-        <A::DecodeStrategy as SequenceDecodeStrategy<A>>::validate_sequence(cursor, context)
+        <A::AccessStrategy as SequenceAccessStrategy<A>>::validate_sequence(cursor, context)
     }
 }
 

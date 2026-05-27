@@ -45,7 +45,8 @@ pub mod prelude {
             Access, Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
             ArchivedLayout, Cursor, Deserialize, Encode, Encoder, FixedLayout, MeasureBody,
             NoSharder, SchemaAware, Sharder, SinkProgress, SliceEncoder, StaticMode, Storage,
-            StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter, decode, reader, writer,
+            StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter, deserialize, reader,
+            writer,
         },
         schema::{
             FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
@@ -106,7 +107,7 @@ pub mod io {
     pub use crate::io_impl::storage::{
         NoSharder, Sharder, StaticMode, Storage, StorageMode, StorageMut, StreamMode,
     };
-    pub use crate::pub_fn::{decode, reader, writer};
+    pub use crate::pub_fn::{deserialize, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{encode, encode_into};
     pub use crate::read_impl::ZebinReader;
@@ -118,7 +119,7 @@ pub mod io {
     #[cfg(feature = "alloc")]
     pub use crate::traits_impl::{
         BackwardSequenceStrategy, FixedSequenceStrategy, ForwardSequenceStrategy,
-        SequenceDecodeStrategy,
+        SequenceAccessStrategy,
     };
     pub use crate::utils::cursor::Cursor;
     pub use crate::write::{ArchiveWriter, ZebinWriter};
@@ -152,15 +153,25 @@ mod pub_fn {
         ZebinReader::new(storage, ValidationConfig::default())
     }
 
+    /// Access the archived root object using the default header.
+    pub fn access<'a, T, S>(storage: &'a S) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
+    where
+        T: Archive + 'a,
+        S: Storage<Mode = StaticMode> + 'a,
+        T::Archived: Access,
+    {
+        ZebinReader::<T, S>::access(storage, ValidationConfig::default())
+    }
+
     /// Decode and validate the archived root object using the default header directly into T.
-    pub fn decode<'a, T, S>(storage: S) -> Result<T, ZebinError>
+    pub fn deserialize<'a, T, S>(storage: S) -> Result<T, ZebinError>
     where
         T: Archive + 'a,
         S: Storage + 'a,
         T::Archived: Access + 'a,
         for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
     {
-        ZebinReader::<T, S>::decode(storage)
+        ZebinReader::<T, S>::deserialize(storage)
     }
 
     /// Validate an archive without exposing the archived view using the default header.
