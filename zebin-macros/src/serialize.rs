@@ -4,7 +4,7 @@ use syn::{DeriveInput, Ident};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, active_fields_by_id, field_encoding, field_state_type,
-    has_schema, parse_item, state_name, variant_state_name,
+    field_user_ident, has_schema, parse_item, state_name, variant_state_name,
 };
 
 fn state_field_decls(record: &RecordSpec<'_>) -> Vec<proc_macro2::TokenStream> {
@@ -86,7 +86,7 @@ fn destructure_pattern(
         .iter()
         .enumerate()
         .map(|(index, field)| {
-            let user_id = field_user_ident_for(record, index, field);
+            let user_id = field_user_ident(record, index);
             match record.style {
                 RecordStyle::Named => {
                     let field_ident = field.ident.expect("named field has ident");
@@ -114,21 +114,6 @@ fn destructure_pattern(
         RecordStyle::Named => quote! { #type_path { #(#binders),* } },
         RecordStyle::Unnamed => quote! { #type_path(#(#binders),*) },
         RecordStyle::Unit => quote! { #type_path },
-    }
-}
-
-fn field_user_ident_for(
-    record: &RecordSpec<'_>,
-    index: usize,
-    field: &crate::shared::FieldSpec<'_>,
-) -> Ident {
-    if let Some(rename) = &field.rename {
-        return rename.clone();
-    }
-    match record.style {
-        RecordStyle::Named => field.ident.expect("named field has ident").clone(),
-        RecordStyle::Unnamed => format_ident!("field{}", index),
-        RecordStyle::Unit => unreachable!("unit has no fields"),
     }
 }
 
@@ -223,7 +208,7 @@ fn record_state_input_impl(
     // Build measure-and-store steps.
     let mut measure_and_store: Vec<proc_macro2::TokenStream> = Vec::new();
     for (index, field) in record.active_fields() {
-        let user_id = field_user_ident_for(record, index, field);
+        let user_id = field_user_ident(record, index);
         let state_ident = &field.state_ident;
 
         // Build the value expression we hand to state.input(...). For packed
@@ -554,7 +539,7 @@ fn enum_measure_body_impl(
             .iter()
             .enumerate()
             .map(|(index, field)| {
-                let user_id = field_user_ident_for(record, index, field);
+                let user_id = field_user_ident(record, index);
                 match record.style {
                     RecordStyle::Named => {
                         let field_ident = field.ident.expect("named field has ident");
@@ -579,7 +564,7 @@ fn enum_measure_body_impl(
             .collect::<Vec<_>>();
 
         for (index, field) in record.active_fields() {
-            let user_id = field_user_ident_for(record, index, field);
+            let user_id = field_user_ident(record, index);
             let measure = field_measure_expr(field, quote! { #user_id });
             sums.push(quote! {
                 zebin::utils::macro_helpers::add_measured_len(&mut __total, #measure)?;

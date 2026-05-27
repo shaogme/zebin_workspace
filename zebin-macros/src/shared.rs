@@ -66,6 +66,14 @@ pub enum ItemSpec<'a> {
 
 // --- Naming Utilities ---
 
+pub fn view_name(name: &Ident) -> Ident {
+    format_ident!("{}View", name)
+}
+
+pub fn variant_view_name(enum_name: &Ident, variant: &Ident) -> Ident {
+    format_ident!("{}{}View", enum_name, variant)
+}
+
 pub fn archived_name(name: &Ident) -> Ident {
     format_ident!("Archived{}", name)
 }

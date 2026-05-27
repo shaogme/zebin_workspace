@@ -1,15 +1,11 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::{DeriveInput, Ident, Member};
 
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, field_user_ident, field_view_type, has_schema, input_member,
-    parse_item, variant_field_name,
+    parse_item, variant_field_name, view_name,
 };
-
-fn view_name(name: &Ident) -> Ident {
-    format_ident!("{}View", name)
-}
 
 fn view_member(record: &RecordSpec<'_>, index: usize) -> Member {
     match record.style {

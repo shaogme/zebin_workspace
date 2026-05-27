@@ -5,16 +5,8 @@ use syn::{DeriveInput, Ident};
 use crate::shared::{
     ItemSpec, RecordSpec, RecordStyle, archived_name, field_archived_type, field_encoding,
     field_user_ident, field_view_type, has_schema, parse_item, variant_archived_name,
-    variant_method_name,
+    variant_method_name, variant_view_name, view_name,
 };
-
-fn view_name(name: &Ident) -> Ident {
-    format_ident!("{}View", name)
-}
-
-fn variant_view_name(enum_name: &Ident, variant: &Ident) -> Ident {
-    format_ident!("{}{}View", enum_name, variant)
-}
 
 fn record_view_definition(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
     match record.style {
@@ -113,27 +105,58 @@ fn schema_accessors(view: &Ident, record: &RecordSpec<'_>) -> proc_macro2::Token
     }
 }
 
-fn access_known_field(
+fn field_handling_arm(
     record: &RecordSpec<'_>,
     index: usize,
-    field_var: &Ident,
+    state_expr: proc_macro2::TokenStream,
+    is_validate: bool,
 ) -> proc_macro2::TokenStream {
     let field = &record.fields[index];
     let field_id = field.field_id.expect("field ids validated");
     let field_name = field_user_ident(record, index);
     let archived_ty = field_archived_type(field);
     let expected_encoding = field_encoding(field);
+
+    let action = if is_validate {
+        quote! { <#archived_ty as zebin::Access>::validate(&mut __field_cursor, &mut *__field_guard)?; }
+    } else {
+        quote! {
+            let __value = <#archived_ty as zebin::Access>::access(&mut __field_cursor, &mut *__field_guard)?;
+            #state_expr = ::core::option::Option::Some(__value);
+        }
+    };
+
+    let state_check = if is_validate {
+        quote! { #state_expr }
+    } else {
+        quote! { #state_expr.is_some() }
+    };
+
+    let state_update = if is_validate {
+        quote! { #state_expr = true; }
+    } else {
+        quote! {}
+    };
+
     quote! {
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
-            __entry.check_decodable(__entry_pos, #expected_encoding, #field_var.is_some(), &mut *__field_guard)?;
+            __entry.check_decodable(__entry_pos, #expected_encoding, #state_check, &mut *__field_guard)?;
             let __field_start = __field_cursor.pos();
-            let __value = <#archived_ty as zebin::Access>::access(&mut __field_cursor, &mut *__field_guard)?;
+            #action
             __entry.check_payload_len(__entry_pos, __field_cursor.pos() - __field_start, &mut *__field_guard)?;
-            #field_var = ::core::option::Option::Some(__value);
+            #state_update
             Ok(())
         }
     }
+}
+
+fn access_known_field(
+    record: &RecordSpec<'_>,
+    index: usize,
+    field_var: &Ident,
+) -> proc_macro2::TokenStream {
+    field_handling_arm(record, index, quote! { #field_var }, false)
 }
 
 fn validate_known_field(
@@ -141,21 +164,30 @@ fn validate_known_field(
     index: usize,
     seen_expr: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-    let field = &record.fields[index];
-    let field_id = field.field_id.expect("field ids validated");
-    let field_name = field_user_ident(record, index);
-    let archived_ty = field_archived_type(field);
-    let expected_encoding = field_encoding(field);
-    quote! {
-        #field_id => {
-            let mut __field_guard = __guard.push_field(stringify!(#field_name));
-            __entry.check_decodable(__entry_pos, #expected_encoding, #seen_expr, &mut *__field_guard)?;
-            let __field_start = __field_cursor.pos();
-            <#archived_ty as zebin::Access>::validate(&mut __field_cursor, &mut *__field_guard)?;
-            __entry.check_payload_len(__entry_pos, __field_cursor.pos() - __field_start, &mut *__field_guard)?;
-            #seen_expr = true;
-            Ok(())
-        }
+    field_handling_arm(record, index, seen_expr, true)
+}
+
+fn missing_field_check(
+    record: &RecordSpec<'_>,
+    index: usize,
+    field: &crate::shared::FieldSpec<'_>,
+    check_condition: proc_macro2::TokenStream,
+) -> Option<proc_macro2::TokenStream> {
+    if field.default || field.default_value.is_some() {
+        None
+    } else {
+        let field_id = field.field_id.expect("field ids validated");
+        let field_name = field_user_ident(record, index);
+        let field_ty = field.ty;
+        Some(quote! {
+            if !<#field_ty as zebin::Archive>::ALLOW_MISSING && #check_condition {
+                let mut __field_guard = __guard.push_field(stringify!(#field_name));
+                return Err(__field_guard.error(zebin::error::AccessError::MissingField {
+                    field_id: #field_id,
+                    pos: __object_start,
+                }));
+            }
+        })
     }
 }
 
@@ -199,47 +231,20 @@ fn record_access_impl(
             let seen_expr = quote! { __seen[#i] };
             validate_known_field(record, index, seen_expr)
         });
-        let missing_checks = record.active_fields().zip(vars.iter()).filter_map(
-            |((index, field), var)| {
-                if field.default || field.default_value.is_some() {
-                    None
-                } else {
-                    let field_id = field.field_id.expect("field ids validated");
-                    let field_name = field_user_ident(record, index);
-                    let field_ty = field.ty;
-                    Some(quote! {
-                        if !<#field_ty as zebin::Archive>::ALLOW_MISSING && #var.is_none() {
-                            let mut __field_guard = __guard.push_field(stringify!(#field_name));
-                            return Err(__field_guard.error(zebin::error::AccessError::MissingField {
-                                field_id: #field_id,
-                                pos: __object_start,
-                            }));
-                        }
-                    })
-                }
-            },
-        );
-        let validate_missing_checks = record.active_fields().enumerate().filter_map(
-            |(i, (index, field))| {
-                if field.default || field.default_value.is_some() {
-                    None
-                } else {
-                    let field_id = field.field_id.expect("field ids validated");
-                    let field_name = field_user_ident(record, index);
-                    let field_ty = field.ty;
-                    let seen_expr = quote! { __seen[#i] };
-                    Some(quote! {
-                        if !<#field_ty as zebin::Archive>::ALLOW_MISSING && !#seen_expr {
-                            let mut __field_guard = __guard.push_field(stringify!(#field_name));
-                            return Err(__field_guard.error(zebin::error::AccessError::MissingField {
-                                field_id: #field_id,
-                                pos: __object_start,
-                            }));
-                        }
-                    })
-                }
-            },
-        );
+        let missing_checks =
+            record
+                .active_fields()
+                .zip(vars.iter())
+                .filter_map(|((index, field), var)| {
+                    missing_field_check(record, index, field, quote! { #var.is_none() })
+                });
+        let validate_missing_checks =
+            record
+                .active_fields()
+                .enumerate()
+                .filter_map(|(i, (index, field))| {
+                    missing_field_check(record, index, field, quote! { !__seen[#i] })
+                });
         let construct_fields = record
             .active_fields()
             .zip(vars.iter())
