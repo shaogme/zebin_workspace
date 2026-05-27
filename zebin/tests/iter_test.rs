@@ -55,7 +55,7 @@ fn test_iter_archive_lazy() {
 }
 
 #[test]
-fn test_iter_archive_restore_explicit() {
+fn test_iter_archive_deserialize_explicit() {
     let mut set = BTreeSet::new();
     set.insert(100u64);
     set.insert(200u64);
@@ -70,16 +70,18 @@ fn test_iter_archive_restore_explicit() {
     use zebin::prelude::Deserialize;
 
     // 显式恢复为 Vec
-    let restored_vec: Vec<u64> = archived_iter.deserialize().expect("failed to restore Vec");
-    assert_eq!(restored_vec, vec![100, 200]);
+    let deserialized_vec: Vec<u64> = archived_iter
+        .deserialize()
+        .expect("failed to deserialize Vec");
+    assert_eq!(deserialized_vec, vec![100, 200]);
 
     // 显式恢复为 VecDeque
     use std::collections::VecDeque;
-    let restored_deque: VecDeque<u64> = archived_iter
+    let deserialized_deque: VecDeque<u64> = archived_iter
         .deserialize()
-        .expect("failed to restore VecDeque");
+        .expect("failed to deserialize VecDeque");
     let expected_deque: VecDeque<u64> = vec![100, 200].into();
-    assert_eq!(restored_deque, expected_deque);
+    assert_eq!(deserialized_deque, expected_deque);
 }
 
 // ─── Chunked block index tests ─────────────────────────────────────────────

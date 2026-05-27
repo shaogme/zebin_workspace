@@ -184,7 +184,7 @@ fn record_layout_impl(marker: &Ident, record: &RecordSpec<'_>) -> proc_macro2::T
     }
 }
 
-fn record_deserialize_impl(
+fn record_access_impl(
     marker: &Ident,
     view: &Ident,
     record: &RecordSpec<'_>,
@@ -408,7 +408,7 @@ fn helper_record(
     record: &RecordSpec<'_>,
 ) -> proc_macro2::TokenStream {
     let view_def = record_view_definition(view, record);
-    let deserialize = record_deserialize_impl(marker, view, record);
+    let deserialize = record_access_impl(marker, view, record);
     let accessors = schema_accessors(view, record);
     quote! {
         pub struct #marker;
@@ -419,7 +419,7 @@ fn helper_record(
     }
 }
 
-fn restore_field_expr(
+fn deserialize_field_expr(
     record: &RecordSpec<'_>,
     index: usize,
     source: proc_macro2::TokenStream,
@@ -446,7 +446,7 @@ fn restore_field_expr(
             quote! {
                 match #source.#member.as_ref() {
                     Some(value) => value.deserialize()?,
-                    None => <#ty as zebin::io::Deserialize<#field_ty>>::restore_missing()?,
+                    None => <#ty as zebin::io::Deserialize<#field_ty>>::deserialize_missing()?,
                 }
             }
         }
@@ -456,14 +456,14 @@ fn restore_field_expr(
     }
 }
 
-fn record_restore_impl(
+fn record_deserialize_impl(
     name: &Ident,
     view: &Ident,
     record: &RecordSpec<'_>,
 ) -> proc_macro2::TokenStream {
     let fields = record.fields.iter().enumerate().map(|(index, _)| {
         let source = quote! { self };
-        let expr = restore_field_expr(record, index, source);
+        let expr = deserialize_field_expr(record, index, source);
         match record.style {
             RecordStyle::Named => {
                 let member = input_member(record, index);
@@ -491,13 +491,13 @@ fn struct_impl(name: &Ident, record: &RecordSpec<'_>) -> proc_macro2::TokenStrea
     let marker = archived_name(name);
     let view = view_name(name);
     let helper = helper_record(&marker, &view, record);
-    let restore = record_restore_impl(name, &view, record);
+    let deserialize = record_deserialize_impl(name, &view, record);
     quote! {
         #helper
         impl zebin::Archive for #name {
             type Archived = #marker;
         }
-        #restore
+        #deserialize
     }
 }
 
@@ -531,7 +531,7 @@ fn enum_impl(
         })
         .collect();
 
-    let deserialize_arms: Vec<_> = variants
+    let access_arms: Vec<_> = variants
         .iter()
         .enumerate()
         .map(|(index, variant)| {
@@ -618,7 +618,7 @@ fn enum_impl(
         })
         .collect();
 
-    let restore_arms: Vec<_> = variants.iter().map(|variant| {
+    let deserialize_arms: Vec<_> = variants.iter().map(|variant| {
         let view_variant = variant.rename.as_ref().unwrap_or(variant.ident);
         let original_variant = variant.ident;
         if variant.record.style == RecordStyle::Unit {
@@ -626,7 +626,7 @@ fn enum_impl(
         } else {
             let payload_ident = variant_field_name(original_variant);
             let fields = variant.record.fields.iter().enumerate().map(|(index, _)| {
-                let expr = restore_field_expr(&variant.record, index, quote! { #payload_ident });
+                let expr = deserialize_field_expr(&variant.record, index, quote! { #payload_ident });
                 match variant.record.style {
                     RecordStyle::Named => {
                         let member = input_member(&variant.record, index);
@@ -688,7 +688,7 @@ fn enum_impl(
                 let __tag_pos = cursor.pos();
                 let tag = <u32 as zebin::Access>::access(cursor, &mut *__guard)?;
                 match tag {
-                    #(#deserialize_arms,)*
+                    #(#access_arms,)*
                     _ => Err(__guard.validation_error("Invalid enum discriminant", __tag_pos)),
                 }
             }
@@ -715,7 +715,7 @@ fn enum_impl(
             fn deserialize(&self) -> Result<#name, zebin::ZebinError> {
                 match self {
                     #view::__ZebinMarker(_) => unreachable!("marker variant is never constructed"),
-                    #(#restore_arms,)*
+                    #(#deserialize_arms,)*
                 }
             }
         }

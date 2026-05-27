@@ -336,11 +336,11 @@ impl<T: SchemaAware + ?Sized> SchemaAware for &T {
     }
 }
 
-/// Contract for deserialized views that can restore the source type.
+/// Contract for deserialized views that can deserialize the source type.
 pub trait Deserialize<T> {
     fn deserialize(&self) -> Result<T, ZebinError>;
 
-    fn restore_missing() -> Result<T, ZebinError> {
+    fn deserialize_missing() -> Result<T, ZebinError> {
         Err(ZebinError::DeserializeError {
             message: "Missing required field",
         })

@@ -45,7 +45,7 @@ pub trait ValidationContext {
     }
 }
 
-/// RAII guard that restores validation depth when dropped.
+/// RAII guard that deserializes validation depth when dropped.
 pub struct ArchivedDepthGuard<'a, C: ValidationContext + ?Sized> {
     context: &'a mut C,
 }
@@ -101,7 +101,7 @@ where
     }
 }
 
-/// RAII guard that restores validation path when dropped.
+/// RAII guard that deserializes validation path when dropped.
 pub struct PathGuard<'a, C: ValidationContext + ?Sized> {
     context: &'a mut C,
 }

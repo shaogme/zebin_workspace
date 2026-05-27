@@ -113,7 +113,7 @@ where
         }
     }
 
-    fn restore_missing() -> Result<Option<U>, ZebinError> {
+    fn deserialize_missing() -> Result<Option<U>, ZebinError> {
         Ok(None)
     }
 }
