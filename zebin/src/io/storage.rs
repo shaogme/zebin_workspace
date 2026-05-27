@@ -40,19 +40,20 @@ impl Sharder for NoSharder {
     }
 }
 
+use crate::utils::chunk::{ChunkSource, ChunkSourceMut};
+
 /// Unified storage layer: byte-backed read access contract.
-pub trait Storage {
+pub trait Storage: ChunkSource {
     type Mode: StorageMode;
     type Sharder<'a>: Sharder
     where
         Self: 'a;
 
-    fn as_slice(&self) -> &[u8];
     fn sharder(&mut self) -> Self::Sharder<'_>;
 }
 
 /// Unified storage layer: byte-backed write access contract.
-pub trait StorageMut {
+pub trait StorageMut: ChunkSourceMut {
     type Sharder<'a>: Sharder
     where
         Self: 'a;
@@ -72,11 +73,6 @@ impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
         Self: 'a;
 
     #[inline]
-    fn as_slice(&self) -> &[u8] {
-        (**self).as_slice()
-    }
-
-    #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
         NoSharder
     }
@@ -88,11 +84,6 @@ impl<S: Storage + ?Sized> Storage for &mut S {
         = S::Sharder<'a>
     where
         Self: 'a;
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        (**self).as_slice()
-    }
 
     #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
@@ -132,6 +123,18 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     }
 }
 
+impl ChunkSource for [u8] {
+    #[inline]
+    fn chunk_count(&self) -> usize {
+        1
+    }
+
+    #[inline]
+    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+        if idx == 0 { Some(self) } else { None }
+    }
+}
+
 impl Storage for [u8] {
     type Mode = StaticMode;
     type Sharder<'a>
@@ -140,13 +143,25 @@ impl Storage for [u8] {
         Self: 'a;
 
     #[inline]
-    fn as_slice(&self) -> &[u8] {
-        self
+    fn sharder(&mut self) -> Self::Sharder<'_> {
+        NoSharder
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl ChunkSource for Vec<u8> {
+    #[inline]
+    fn chunk_count(&self) -> usize {
+        1
     }
 
     #[inline]
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        NoSharder
+    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+        if idx == 0 {
+            Some(self.as_slice())
+        } else {
+            None
+        }
     }
 }
 
@@ -157,11 +172,6 @@ impl Storage for Vec<u8> {
         = NoSharder
     where
         Self: 'a;
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        self.as_slice()
-    }
 
     #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
@@ -210,6 +220,25 @@ impl<'a> SliceSerializer<'a> {
         self.archive_pos = next_archive_pos;
         self.written = end;
         Ok((start, end))
+    }
+}
+
+impl<'a> ChunkSource for SliceSerializer<'a> {
+    #[inline]
+    fn chunk_count(&self) -> usize {
+        1
+    }
+
+    #[inline]
+    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+        if idx == 0 { Some(self.buf) } else { None }
+    }
+}
+
+impl<'a> ChunkSourceMut for SliceSerializer<'a> {
+    #[inline]
+    fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
+        if idx == 0 { Some(self.buf) } else { None }
     }
 }
 
@@ -275,6 +304,35 @@ impl VecSerializer {
 
     pub fn into_inner(self) -> Vec<u8> {
         self.buf
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl ChunkSource for VecSerializer {
+    #[inline]
+    fn chunk_count(&self) -> usize {
+        1
+    }
+
+    #[inline]
+    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+        if idx == 0 {
+            Some(self.buf.as_slice())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl ChunkSourceMut for VecSerializer {
+    #[inline]
+    fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
+        if idx == 0 {
+            Some(self.buf.as_mut_slice())
+        } else {
+            None
+        }
     }
 }
 

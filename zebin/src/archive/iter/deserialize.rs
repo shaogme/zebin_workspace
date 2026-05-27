@@ -39,7 +39,7 @@ where
 {
     fn deserialize(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         for _ in 0..self.len {
             let view = access_next_element::<T>(&mut cursor)?;
             out.push(view.deserialize()?);
@@ -56,7 +56,7 @@ where
 {
     fn deserialize(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut out = VecDeque::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         for _ in 0..self.len {
             let view = access_next_element::<T>(&mut cursor)?;
             out.push_back(view.deserialize()?);
@@ -74,7 +74,7 @@ where
 {
     fn deserialize(&self) -> Result<BTreeSet<U>, ZebinError> {
         let mut out = BTreeSet::new();
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         for _ in 0..self.len {
             let view = access_next_element::<T>(&mut cursor)?;
             out.insert(view.deserialize()?);
@@ -92,7 +92,7 @@ where
 {
     fn deserialize(&self) -> Result<BinaryHeap<U>, ZebinError> {
         let mut out = BinaryHeap::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         for _ in 0..self.len {
             let view = access_next_element::<T>(&mut cursor)?;
             out.push(view.deserialize()?);
@@ -110,7 +110,7 @@ where
 {
     fn deserialize(&self) -> Result<HashSet<U>, ZebinError> {
         let mut out = HashSet::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         for _ in 0..self.len {
             let view = access_next_element::<T>(&mut cursor)?;
             out.insert(view.deserialize()?);
@@ -138,7 +138,7 @@ where
 {
     fn deserialize(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
         let mut map = BTreeMap::new();
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         for _ in 0..self.len {
             let view = access_next_element::<T>(&mut cursor)?;
             let (k, v) = view.deserialize()?;
@@ -157,7 +157,7 @@ where
 {
     fn deserialize(&self) -> Result<HashMap<UK, UV>, ZebinError> {
         let mut map = HashMap::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         for _ in 0..self.len {
             let view = access_next_element::<T>(&mut cursor)?;
             let (k, v) = view.deserialize()?;

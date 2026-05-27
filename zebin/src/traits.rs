@@ -206,14 +206,13 @@ impl<T: Access> SequenceAccessStrategy<T> for BackwardSequenceStrategy {
         C: ValidationContext + ?Sized,
     {
         let start_pos = cursor.pos();
-        let total_bytes = cursor.bytes();
         let elements_start = start_pos;
-        let elements_end = total_bytes.len();
+        let elements_end = cursor.limit();
 
         if elements_end < elements_start + 1 {
             return Err(context.validation_error("Sequence truncated", elements_end));
         }
-        if total_bytes[elements_end - 1] != 0 {
+        if cursor.view()[elements_end - 1] != 0 {
             return Err(context.validation_error("Missing sequence end sentinel", elements_end - 1));
         }
 
@@ -227,19 +226,23 @@ impl<T: Access> SequenceAccessStrategy<T> for BackwardSequenceStrategy {
             }
 
             let len_pos = current_end - 4;
-            let object_len =
-                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
+            let mut len_bytes = [0u8; 4];
+            len_bytes[0] = cursor.view()[len_pos];
+            len_bytes[1] = cursor.view()[len_pos + 1];
+            len_bytes[2] = cursor.view()[len_pos + 2];
+            len_bytes[3] = cursor.view()[len_pos + 3];
+            let object_len = u32::from_le_bytes(len_bytes) as usize;
 
             if object_len < 20 || current_end - object_len < elements_start + 1 {
                 return Err(context.validation_error("Invalid object length in sequence", len_pos));
             }
 
             let element_start = current_end - object_len;
-            if total_bytes[element_start - 1] != 1 {
+            if cursor.view()[element_start - 1] != 1 {
                 return Err(context.validation_error("Invalid sequence marker", element_start - 1));
             }
 
-            let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
+            let mut element_cursor = cursor.with_pos(element_start).with_limit(current_end);
             let mut guard = context.push_index(index);
 
             let view = T::access(&mut element_cursor, &mut *guard)?;
@@ -259,14 +262,13 @@ impl<T: Access> SequenceAccessStrategy<T> for BackwardSequenceStrategy {
         C: ValidationContext + ?Sized,
     {
         let start_pos = cursor.pos();
-        let total_bytes = cursor.bytes();
         let elements_start = start_pos;
-        let elements_end = total_bytes.len();
+        let elements_end = cursor.limit();
 
         if elements_end < elements_start + 1 {
             return Err(context.validation_error("Sequence truncated", elements_end));
         }
-        if total_bytes[elements_end - 1] != 0 {
+        if cursor.view()[elements_end - 1] != 0 {
             return Err(context.validation_error("Missing sequence end sentinel", elements_end - 1));
         }
 
@@ -279,19 +281,23 @@ impl<T: Access> SequenceAccessStrategy<T> for BackwardSequenceStrategy {
             }
 
             let len_pos = current_end - 4;
-            let object_len =
-                u32::from_le_bytes(total_bytes[len_pos..current_end].try_into().unwrap()) as usize;
+            let mut len_bytes = [0u8; 4];
+            len_bytes[0] = cursor.view()[len_pos];
+            len_bytes[1] = cursor.view()[len_pos + 1];
+            len_bytes[2] = cursor.view()[len_pos + 2];
+            len_bytes[3] = cursor.view()[len_pos + 3];
+            let object_len = u32::from_le_bytes(len_bytes) as usize;
 
             if object_len < 20 || current_end - object_len < elements_start + 1 {
                 return Err(context.validation_error("Invalid object length in sequence", len_pos));
             }
 
             let element_start = current_end - object_len;
-            if total_bytes[element_start - 1] != 1 {
+            if cursor.view()[element_start - 1] != 1 {
                 return Err(context.validation_error("Invalid sequence marker", element_start - 1));
             }
 
-            let mut element_cursor = Cursor::new(&total_bytes[..current_end], element_start);
+            let mut element_cursor = cursor.with_pos(element_start).with_limit(current_end);
             let mut guard = context.push_index(index);
 
             T::validate(&mut element_cursor, &mut *guard)?;

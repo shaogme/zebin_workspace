@@ -1,5 +1,28 @@
 use crate::io::{Sharder, Storage};
 use crate::prelude::*;
+use crate::utils::chunk::ChunkSource;
+
+fn get_contiguous_slice<S: ChunkSource + ?Sized>(
+    storage: &S,
+    offset: usize,
+    len: usize,
+) -> Result<&[u8], AccessError> {
+    let mut current_sum = 0;
+    for idx in 0..storage.chunk_count() {
+        if let Some(chunk) = storage.get_chunk(idx) {
+            let next_sum = current_sum + chunk.len();
+            if offset >= current_sum && offset + len <= next_sum {
+                let start = offset - current_sum;
+                return Ok(&chunk[start..start + len]);
+            }
+            current_sum = next_sum;
+        }
+    }
+    Err(AccessError::ValidationError {
+        message: "Requested slice spans across non-contiguous chunks or out of bounds",
+        pos: offset,
+    })
+}
 
 /// Safe access layer output that keeps the validated byte slice alive.
 pub struct ZebinReader<'a, T, S, H = ArchiveHeader>
@@ -32,7 +55,7 @@ where
     }
 
     pub fn is_finished(&self) -> bool {
-        self.offset >= self.storage.as_slice().len()
+        self.offset >= self.storage.total_len()
     }
 
     pub fn access(
@@ -44,12 +67,12 @@ where
         T::Archived: Access,
         S: Storage<Mode = StaticMode>,
     {
-        let bytes = storage.as_slice();
-        let header = H::parse(bytes)?;
+        let header_bytes = get_contiguous_slice(storage, 0, H::SIZE)?;
+        let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
-        let mut validator = Validator::with_config(bytes, config, None);
-        let mut cursor = Cursor::new(bytes, H::SIZE);
+        let mut validator = Validator::with_config(storage, config, None);
+        let mut cursor = Cursor::new(storage, H::SIZE);
         let view = T::Archived::access(&mut cursor, &mut validator)?;
         Ok(view)
     }
@@ -59,20 +82,20 @@ where
         T: Archive,
         T::Archived: Access,
     {
-        let len = self.storage.as_slice().len();
+        let len = self.storage.total_len();
         if self.offset >= len {
             self.storage.sharder().advance()?;
             self.offset = 0;
         }
-        let bytes = self.storage.as_slice();
-        let remaining = &bytes[self.offset..];
-        let header = H::parse(remaining)?;
+
+        let header_bytes = get_contiguous_slice(&self.storage, self.offset, H::SIZE)?;
+        let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
-        let mut validator = Validator::with_config(remaining, self.config, None);
-        let mut cursor = Cursor::new(remaining, H::SIZE);
+        let mut validator = Validator::with_config(&self.storage, self.config, None);
+        let mut cursor = Cursor::new(&self.storage, self.offset + H::SIZE);
         let view = T::Archived::access(&mut cursor, &mut validator)?;
-        self.offset += cursor.pos();
+        self.offset = cursor.pos();
         Ok(view)
     }
 
@@ -96,28 +119,29 @@ where
         T: Archive,
         T::Archived: Access,
     {
-        let bytes = storage.as_slice();
-        let header = H::parse(bytes)?;
+        let header_bytes = get_contiguous_slice(storage, 0, H::SIZE)?;
+        let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
-        validate_root::<T>(bytes, H::SIZE, config, stack)
+        validate_root::<T, S>(storage, H::SIZE, config, stack)
     }
 }
 
-fn validate_root<T>(
-    bytes: &[u8],
+fn validate_root<T, S>(
+    storage: &S,
     root_pos: usize,
     config: ValidationConfig,
     mut stack: Option<&mut ValidationPathStack>,
 ) -> Result<(), ZebinError>
 where
     T: Archive,
+    S: ChunkSource,
     T::Archived: Access,
 {
-    let mut cursor = Cursor::new(bytes, root_pos);
+    let mut cursor = Cursor::new(storage, root_pos);
     let (result, error_path) = {
-        let mut validator = Validator::with_config(bytes, config, stack.as_deref_mut());
+        let mut validator = Validator::with_config(storage, config, stack.as_deref_mut());
         let res = T::Archived::validate(&mut cursor, &mut validator).and_then(|()| {
-            if cursor.pos() != bytes.len() {
+            if cursor.pos() != storage.total_len() {
                 Err(validator.validation_error("Trailing bytes after root object", cursor.pos()))
             } else {
                 Ok(())

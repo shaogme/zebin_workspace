@@ -233,7 +233,7 @@ impl<'a> FieldTableReader<'a> {
         C: ValidationContext + ?Sized,
     {
         Ok(Self {
-            cursor: *cursor,
+            cursor: cursor.clone(),
             remaining: field_count,
         })
     }
@@ -269,16 +269,21 @@ pub fn process_field_table<'a, C, F>(
 ) -> Result<(), AccessError>
 where
     C: ValidationContext + ?Sized,
-    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), AccessError>,
+    F: FnMut(FieldEntry, usize, Cursor<'a>, &mut C) -> Result<(), AccessError>,
 {
     let mut reader = FieldTableReader::new(cursor, field_count, context)?;
     while let Some(NextField {
         entry,
         entry_pos,
-        payload,
+        payload: _,
     }) = reader.next(context)?
     {
-        handler(entry, entry_pos, payload, context)?;
+        let payload_len = entry.payload_len as usize;
+        let field_cursor = reader
+            .cursor
+            .with_pos(reader.cursor.pos() - payload_len)
+            .with_limit(reader.cursor.pos());
+        handler(entry, entry_pos, field_cursor, context)?;
     }
     *cursor = reader.cursor;
     Ok(())
@@ -293,10 +298,10 @@ pub fn process_trailing_field_table<'a, C, F>(
 ) -> Result<(), AccessError>
 where
     C: ValidationContext + ?Sized,
-    F: FnMut(FieldEntry, usize, &'a [u8], &mut C) -> Result<(), AccessError>,
+    F: FnMut(FieldEntry, usize, Cursor<'a>, &mut C) -> Result<(), AccessError>,
 {
     let object_start = cursor.pos() - 12;
-    let object_end = cursor.bytes().len();
+    let object_end = cursor.limit();
 
     if object_end < object_start + 20 {
         return Err(context.validation_error(
@@ -346,9 +351,12 @@ where
             );
         }
 
-        let payload = &cursor.bytes()[payload_pos..payload_pos + payload_len];
+        context.check_range(payload_pos, payload_len)?;
+        let field_cursor = cursor
+            .with_pos(payload_pos)
+            .with_limit(payload_pos + payload_len);
 
-        handler(entry, entry_pos, payload, context)?;
+        handler(entry, entry_pos, field_cursor, context)?;
 
         payload_pos += payload_len;
     }

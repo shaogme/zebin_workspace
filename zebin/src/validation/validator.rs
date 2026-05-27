@@ -1,5 +1,6 @@
 use core::num::NonZeroUsize;
 
+use crate::utils::chunk::{ChunkSource, ChunkedView};
 use crate::{prelude::*, validation::ValidationPathSegment};
 
 /// Runtime configuration for sequential archive validation.
@@ -19,28 +20,28 @@ impl Default for ValidationConfig {
 }
 
 /// Validator for byte streams to ensure safe sequential decoding.
-pub struct Validator<'a, 'p> {
-    data: &'a [u8],
+pub struct Validator<'a, 'p, S: ChunkSource + ?Sized> {
+    view: ChunkedView<&'a S>,
     depth: usize,
     config: ValidationConfig,
     path: Option<&'p mut ValidationPathStack>,
     last_error_path: Option<ValidationPathStack>,
 }
 
-impl<'a> Validator<'a, 'static> {
+impl<'a> Validator<'a, 'static, [u8]> {
     pub fn new(data: &'a [u8]) -> Self {
         Self::with_config(data, ValidationConfig::default(), None)
     }
 }
 
-impl<'a, 'p> Validator<'a, 'p> {
+impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
     pub fn with_config(
-        data: &'a [u8],
+        data: &'a S,
         config: ValidationConfig,
         path: Option<&'p mut ValidationPathStack>,
     ) -> Self {
         Self {
-            data,
+            view: ChunkedView::new_ref(data),
             depth: 0,
             config,
             path,
@@ -49,7 +50,7 @@ impl<'a, 'p> Validator<'a, 'p> {
     }
 
     pub fn with_max_depth(
-        data: &'a [u8],
+        data: &'a S,
         max_depth: usize,
         path: Option<&'p mut ValidationPathStack>,
     ) -> Self {
@@ -69,7 +70,7 @@ impl<'a, 'p> Validator<'a, 'p> {
 
     pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
         if size == 0 {
-            if pos <= self.data.len() {
+            if pos <= self.view.len() {
                 return Ok(());
             }
             return Err(self.validation_error("Pointer out of bounds", pos));
@@ -78,7 +79,7 @@ impl<'a, 'p> Validator<'a, 'p> {
         let end = pos
             .checked_add(size)
             .ok_or_else(|| self.validation_error("Pointer range overflow", pos))?;
-        if end > self.data.len() {
+        if end > self.view.len() {
             return Err(self.validation_error("Pointer out of bounds", pos));
         }
         Ok(())
@@ -149,8 +150,8 @@ impl<'a, 'p> Validator<'a, 'p> {
         self.last_error_path.as_ref()
     }
 
-    pub fn data(&self) -> &[u8] {
-        self.data
+    pub fn view(&self) -> &ChunkedView<&'a S> {
+        &self.view
     }
 
     fn validation_error(&mut self, message: &'static str, pos: usize) -> AccessError {
@@ -158,7 +159,7 @@ impl<'a, 'p> Validator<'a, 'p> {
     }
 }
 
-impl ValidationContext for Validator<'_, '_> {
+impl<'a, 'p, S: ChunkSource + ?Sized> ValidationContext for Validator<'a, 'p, S> {
     fn push_depth(&mut self) -> Result<(), AccessError> {
         self.push_depth()
     }

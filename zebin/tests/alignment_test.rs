@@ -47,6 +47,30 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
         limit: &'a Cell<usize>,
     }
 
+    impl<'a> zebin::utils::chunk::ChunkSource for LimitedSink<'a> {
+        fn chunk_count(&self) -> usize {
+            1
+        }
+
+        fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+            if idx == 0 {
+                Some(self.buf.as_slice())
+            } else {
+                None
+            }
+        }
+    }
+
+    impl<'a> zebin::utils::chunk::ChunkSourceMut for LimitedSink<'a> {
+        fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
+            if idx == 0 {
+                Some(self.buf.as_mut_slice())
+            } else {
+                None
+            }
+        }
+    }
+
     impl StorageMut for LimitedSink<'_> {
         type Sharder<'b>
             = zebin::io::NoSharder

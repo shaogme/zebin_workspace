@@ -138,9 +138,9 @@ fn access_known_field(
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
             __entry.check_decodable(__entry_pos, #expected_encoding, #field_var.is_some(), &mut *__field_guard)?;
-            let mut __field_cursor = zebin::io::Cursor::new(__payload, 0);
+            let __field_start = __field_cursor.pos();
             let __value = <#archived_ty as zebin::Access>::access(&mut __field_cursor, &mut *__field_guard)?;
-            __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
+            __entry.check_payload_len(__entry_pos, __field_cursor.pos() - __field_start, &mut *__field_guard)?;
             #field_var = ::core::option::Option::Some(__value);
             Ok(())
         }
@@ -161,9 +161,9 @@ fn validate_known_field(
         #field_id => {
             let mut __field_guard = __guard.push_field(stringify!(#field_name));
             __entry.check_decodable(__entry_pos, #expected_encoding, #seen_expr, &mut *__field_guard)?;
-            let mut __field_cursor = zebin::io::Cursor::new(__payload, 0);
+            let __field_start = __field_cursor.pos();
             <#archived_ty as zebin::Access>::validate(&mut __field_cursor, &mut *__field_guard)?;
-            __entry.check_payload_len(__entry_pos, __field_cursor.pos(), &mut *__field_guard)?;
+            __entry.check_payload_len(__entry_pos, __field_cursor.pos() - __field_start, &mut *__field_guard)?;
             #seen_expr = true;
             Ok(())
         }
@@ -285,7 +285,7 @@ fn record_access_impl(
 
                     #(#var_decls)*
 
-                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
+                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
                         match __entry.field_id {
                             #(#field_arms,)*
                             _ => Ok(()),
@@ -315,7 +315,7 @@ fn record_access_impl(
 
                     #seen_var_decls
 
-                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __payload, __guard| {
+                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
                         match __entry.field_id {
                             #(#validate_field_arms,)*
                             _ => Ok(()),

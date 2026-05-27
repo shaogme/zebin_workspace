@@ -1,5 +1,6 @@
 use core::marker::PhantomData;
 
+use crate::utils::chunk::{ChunkSource, ChunkedView};
 use crate::{prelude::*, validation::ValidationContext};
 
 use super::{DummyContext, MAX_SEQUENCE_LEN};
@@ -14,7 +15,7 @@ pub(crate) use block_index::skip_block_index;
 /// The archived representation of an iterator-based collection.
 #[derive(Clone)]
 pub struct ArchivedIter<'a, A> {
-    pub(crate) bytes: &'a [u8],
+    pub(crate) view: ChunkedView<&'a dyn ChunkSource>,
     pub(crate) start_pos: usize,
     pub(crate) len: usize,
     pub(crate) block_index: Option<BlockIndex>,
@@ -30,12 +31,12 @@ impl<'a, A> ArchivedIter<'a, A> {
         self.len == 0
     }
 
-    pub fn iter<'s>(&'s self) -> ArchivedIterIter<'s, A>
+    pub fn iter(&self) -> ArchivedIterIter<'a, A>
     where
         A: Access,
     {
         ArchivedIterIter {
-            cursor: Cursor::new(self.bytes, self.start_pos),
+            cursor: Cursor::new(self.view.source, self.start_pos),
             remaining: self.len,
             _marker: PhantomData,
         }
@@ -65,11 +66,11 @@ impl<'a, A> ArchivedIter<'a, A> {
             #[cfg(feature = "alloc")]
             let block_start = bi.block_offset(block_idx);
             #[cfg(not(feature = "alloc"))]
-            let block_start = bi.block_offset_from_bytes(self.bytes, block_idx);
+            let block_start = bi.block_offset_from_bytes(self.view.source, block_idx);
 
             if let Some(offset) = block_start {
                 let abs_pos = self.start_pos + offset;
-                let mut cursor = Cursor::new(self.bytes, abs_pos);
+                let mut cursor = Cursor::new(self.view.source, abs_pos);
                 let mut ctx = DummyContext;
                 // Skip `intra` elements, then deserialize the target.
                 for _ in 0..intra {
@@ -101,7 +102,7 @@ impl<'a, A> ArchivedIter<'a, A> {
         }
 
         // Fallback: linear scan from the start.
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         let mut ctx = DummyContext;
         for _ in 0..index {
             let marker = cursor.read_u8(&mut ctx)?;
@@ -133,13 +134,13 @@ impl<'a, A> ArchivedIter<'a, A> {
     ///
     /// If a block index is available the cursor is positioned at the
     /// containing block in O(1); otherwise a linear skip is performed.
-    pub fn iter_from<'s>(&'s self, start: usize) -> ArchivedIterIter<'s, A>
+    pub fn iter_from(&self, start: usize) -> ArchivedIterIter<'a, A>
     where
         A: Access,
     {
         if start >= self.len {
             return ArchivedIterIter {
-                cursor: Cursor::new(self.bytes, self.start_pos),
+                cursor: Cursor::new(self.view.source, self.start_pos),
                 remaining: 0,
                 _marker: PhantomData,
             };
@@ -154,11 +155,11 @@ impl<'a, A> ArchivedIter<'a, A> {
             #[cfg(feature = "alloc")]
             let block_start = bi.block_offset(block_idx);
             #[cfg(not(feature = "alloc"))]
-            let block_start = bi.block_offset_from_bytes(self.bytes, block_idx);
+            let block_start = bi.block_offset_from_bytes(self.view.source, block_idx);
 
             if let Some(offset) = block_start {
                 let abs_pos = self.start_pos + offset;
-                let mut cursor = Cursor::new(self.bytes, abs_pos);
+                let mut cursor = Cursor::new(self.view.source, abs_pos);
                 let mut ctx = DummyContext;
                 // Skip `intra` elements inside the block.
                 for _ in 0..intra {
@@ -178,7 +179,7 @@ impl<'a, A> ArchivedIter<'a, A> {
         }
 
         // Fallback: linear skip.
-        let mut cursor = Cursor::new(self.bytes, self.start_pos);
+        let mut cursor = Cursor::new(self.view.source, self.start_pos);
         let mut ctx = DummyContext;
         for _ in 0..start {
             if let Ok(1) = cursor.read_u8(&mut ctx) {
@@ -230,7 +231,7 @@ where
         let block_index = deserialize_block_index(cursor, context, len)?;
 
         Ok(ArchivedIter {
-            bytes: cursor.bytes(),
+            view: ChunkedView::new(cursor.view().source),
             start_pos,
             len,
             block_index,
@@ -244,7 +245,7 @@ where
     {
         let len = Self::access_sequence_body(cursor, context)?;
         // Also consume block index bytes during validation.
-        let _ = deserialize_block_index::<C>(cursor, context, len)?;
+        let _ = deserialize_block_index(cursor, context, len)?;
         Ok(())
     }
 }
@@ -330,9 +331,10 @@ mod tests {
 
     #[test]
     fn test_archived_iter_empty() {
-        let bytes = [0x00];
+        let bytes = [0x00u8];
+        let slice: &[u8] = &bytes;
         let iter: ArchivedIter<'_, u8> = ArchivedIter {
-            bytes: &bytes,
+            view: ChunkedView::new_ref(&slice as &dyn ChunkSource),
             start_pos: 0,
             len: 0,
             block_index: None,
@@ -345,9 +347,10 @@ mod tests {
 
     #[test]
     fn test_archived_iter_invalid_marker() {
-        let bytes = [0x02, 0x00]; // Invalid marker
+        let bytes = [0x02u8, 0x00u8]; // Invalid marker
+        let slice: &[u8] = &bytes;
         let iter: ArchivedIter<'_, u32> = ArchivedIter {
-            bytes: &bytes,
+            view: ChunkedView::new_ref(&slice as &dyn ChunkSource),
             start_pos: 0,
             len: 1,
             block_index: None,

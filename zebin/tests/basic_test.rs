@@ -7,7 +7,9 @@ use zebin::ZebinError;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
 use zebin::prelude::{SinkProgress, StorageMut, ZebinWriter};
-use zebin::{ZebinArchive, ZebinSerialize, reader, writer};
+#[cfg(feature = "alloc")]
+use zebin::reader;
+use zebin::{ZebinArchive, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
 #[derive(ZebinArchive, ZebinSerialize, Clone)]
@@ -59,6 +61,30 @@ fn test_chunked_writer_resume() {
     struct LimitedSink<'a> {
         buf: Vec<u8>,
         limit: &'a Cell<usize>,
+    }
+
+    impl<'a> zebin::utils::chunk::ChunkSource for LimitedSink<'a> {
+        fn chunk_count(&self) -> usize {
+            1
+        }
+
+        fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+            if idx == 0 {
+                Some(self.buf.as_slice())
+            } else {
+                None
+            }
+        }
+    }
+
+    impl<'a> zebin::utils::chunk::ChunkSourceMut for LimitedSink<'a> {
+        fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
+            if idx == 0 {
+                Some(self.buf.as_mut_slice())
+            } else {
+                None
+            }
+        }
     }
 
     impl StorageMut for LimitedSink<'_> {
@@ -267,20 +293,31 @@ impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
 }
 
 #[cfg(feature = "alloc")]
+impl zebin::utils::chunk::ChunkSource for ShardedStorage {
+    fn chunk_count(&self) -> usize {
+        1
+    }
+
+    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+        if idx == 0 {
+            if self.current_index < self.shards.len() {
+                Some(&self.shards[self.current_index])
+            } else {
+                Some(&[])
+            }
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl zebin::io::Storage for ShardedStorage {
     type Mode = zebin::io::StreamMode;
     type Sharder<'a>
         = &'a mut ShardedStorage
     where
         Self: 'a;
-
-    fn as_slice(&self) -> &[u8] {
-        if self.current_index < self.shards.len() {
-            &self.shards[self.current_index]
-        } else {
-            &[]
-        }
-    }
 
     fn sharder(&mut self) -> Self::Sharder<'_> {
         self

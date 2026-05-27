@@ -6,6 +6,8 @@ use alloc::vec::Vec;
 use crate::archive_impl::iter::BLOCK_INDEX_MAGIC;
 #[cfg(any(not(feature = "alloc"), test))]
 use crate::archive_impl::iter::DummyContext;
+#[cfg(not(feature = "alloc"))]
+use crate::utils::chunk::ChunkSource;
 
 /// Sparse block index for fast random access into archived sequences.
 ///
@@ -39,7 +41,11 @@ impl BlockIndex {
 
     /// Return the byte offset by re-parsing varint deltas on the fly (no_alloc path).
     #[cfg(not(feature = "alloc"))]
-    pub(crate) fn block_offset_from_bytes(&self, bytes: &[u8], block_idx: usize) -> Option<usize> {
+    pub(crate) fn block_offset_from_bytes(
+        &self,
+        bytes: &dyn ChunkSource,
+        block_idx: usize,
+    ) -> Option<usize> {
         if block_idx >= self.no_alloc_state.num_blocks {
             return None;
         }
@@ -204,17 +210,18 @@ mod tests {
                     raw_delta_start: 0,
                 },
             };
-            assert_eq!(bi.block_offset_from_bytes(&bytes, 0), Some(10));
-            assert_eq!(bi.block_offset_from_bytes(&bytes, 1), Some(20));
-            assert_eq!(bi.block_offset_from_bytes(&bytes, 2), Some(30));
-            assert_eq!(bi.block_offset_from_bytes(&bytes, 3), None);
+            assert_eq!(bi.block_offset_from_bytes(&bytes.as_slice(), 0), Some(10));
+            assert_eq!(bi.block_offset_from_bytes(&bytes.as_slice(), 1), Some(20));
+            assert_eq!(bi.block_offset_from_bytes(&bytes.as_slice(), 2), Some(30));
+            assert_eq!(bi.block_offset_from_bytes(&bytes.as_slice(), 3), None);
         }
     }
 
     #[test]
     fn test_deserialize_block_index_missing_magic() {
         let data = [0x00, 0x01, 0x02];
-        let mut cursor = Cursor::new(&data, 0);
+        let slice = &data[..];
+        let mut cursor = Cursor::new(&slice, 0);
         let mut ctx = DummyContext;
         let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_ok());
@@ -228,7 +235,8 @@ mod tests {
         append_varint(0, &mut data); // chunk_size = 0
         append_varint(2, &mut data); // num_blocks = 2
 
-        let mut cursor = Cursor::new(&data, 0);
+        let slice = &data[..];
+        let mut cursor = Cursor::new(&slice, 0);
         let mut ctx = DummyContext;
         let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_err());
@@ -241,7 +249,8 @@ mod tests {
         append_varint(64, &mut data); // chunk_size = 64
         append_varint(5, &mut data); // num_blocks = 5, but len = 10, expected blocks = 1
 
-        let mut cursor = Cursor::new(&data, 0);
+        let slice = &data[..];
+        let mut cursor = Cursor::new(&slice, 0);
         let mut ctx = DummyContext;
         let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_err());

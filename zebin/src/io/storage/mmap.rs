@@ -40,17 +40,26 @@ impl Mmap {
     }
 }
 
+use crate::utils::chunk::{ChunkSource, ChunkSourceMut};
+
+impl ChunkSource for Mmap {
+    #[inline]
+    fn chunk_count(&self) -> usize {
+        1
+    }
+
+    #[inline]
+    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+        if idx == 0 { Some(&self.data) } else { None }
+    }
+}
+
 impl Storage for Mmap {
     type Mode = crate::io::StaticMode;
     type Sharder<'a>
         = crate::io::NoSharder
     where
         Self: 'a;
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        &self.data
-    }
 
     #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
@@ -172,6 +181,29 @@ impl MmapSerializer {
         self.archive_pos = next_archive_pos;
         self.written = end;
         Ok((start, end))
+    }
+}
+
+impl ChunkSource for MmapSerializer {
+    #[inline]
+    fn chunk_count(&self) -> usize {
+        1
+    }
+
+    #[inline]
+    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
+        if idx == 0 { Some(&self.mmap[..]) } else { None }
+    }
+}
+
+impl ChunkSourceMut for MmapSerializer {
+    #[inline]
+    fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
+        if idx == 0 {
+            Some(&mut self.mmap[..])
+        } else {
+            None
+        }
     }
 }
 
