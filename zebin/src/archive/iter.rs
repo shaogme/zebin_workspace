@@ -7,17 +7,17 @@ use crate::{
 };
 
 // Declare submodules
+#[path = "iter/access.rs"]
+mod access;
 #[path = "iter/deserialize.rs"]
 mod deserialize;
-#[path = "iter/restore.rs"]
-mod restore;
 #[path = "iter/serialize.rs"]
 mod serialize;
 
 // Re-export public API
-pub use deserialize::ArchivedIter;
+pub use access::ArchivedIter;
 #[cfg(feature = "alloc")]
-pub(crate) use deserialize::skip_block_index;
+pub(crate) use access::skip_block_index;
 pub(crate) use serialize::OwnedIterSerializer;
 pub use serialize::{IterSerializer, SeqSerializer, measure_block_index_overhead};
 
