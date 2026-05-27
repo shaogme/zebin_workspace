@@ -331,19 +331,11 @@ where
         );
     }
 
-    let mut entries = [FieldEntry::EMPTY; MAX_SCHEMA_FIELDS];
-    let mut entry_positions = [0usize; MAX_SCHEMA_FIELDS];
-
     let mut table_cursor = cursor.with_pos(table_abs_pos);
-    for i in 0..field_count {
-        entry_positions[i] = table_cursor.pos();
-        entries[i] = FieldEntry::access(&mut table_cursor, context)?;
-    }
-
     let mut payload_pos = object_start + 12;
-    for i in 0..field_count {
-        let entry = entries[i];
-        let entry_pos = entry_positions[i];
+    for _ in 0..field_count {
+        let entry_pos = table_cursor.pos();
+        let entry = FieldEntry::access(&mut table_cursor, context)?;
         let payload_len = entry.payload_len as usize;
         if payload_pos + payload_len > table_abs_pos {
             return Err(
