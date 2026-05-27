@@ -360,14 +360,13 @@ impl<'a, const BITS: u8> Serialize for ArchivedPackedU8SliceView<'a, BITS> {
 
 impl<'a> MeasureBody for ArchivedPackedBoolSliceView<'a> {
     fn measure_body(&self) -> Result<usize, ZebinError> {
-        let byte_len =
-            packed_byte_len(self.len(), 1).map_err(|e| ZebinError::SerializationError {
-                pos: 0,
-                message: match e {
-                    AccessError::ValidationError { message, .. } => message,
-                    _ => "packed length overflow",
-                },
-            })?;
+        let byte_len = packed_byte_len(self.len(), 1).map_err(|e| ZebinError::SerializeError {
+            pos: 0,
+            message: match e {
+                AccessError::ValidationError { message, .. } => message,
+                _ => "packed length overflow",
+            },
+        })?;
         4usize
             .checked_add(byte_len)
             .ok_or(ZebinError::ArithmeticOverflow { pos: 0 })
@@ -377,7 +376,7 @@ impl<'a> MeasureBody for ArchivedPackedBoolSliceView<'a> {
 impl<'a, const BITS: u8> MeasureBody for ArchivedPackedU8SliceView<'a, BITS> {
     fn measure_body(&self) -> Result<usize, ZebinError> {
         let byte_len = packed_byte_len(self.len(), usize::from(BITS)).map_err(|e| {
-            ZebinError::SerializationError {
+            ZebinError::SerializeError {
                 pos: 0,
                 message: match e {
                     AccessError::ValidationError { message, .. } => message,

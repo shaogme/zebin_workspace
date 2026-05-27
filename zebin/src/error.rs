@@ -175,7 +175,7 @@ pub enum ZebinError {
         pos: usize,
         required: usize,
     },
-    SerializationError {
+    SerializeError {
         pos: usize,
         message: &'static str,
     },
@@ -221,7 +221,7 @@ impl core::fmt::Display for ZebinError {
             ZebinError::BufferTooSmall { pos, required } => {
                 write!(f, "buffer too small at {pos}: required {required} bytes")
             }
-            ZebinError::SerializationError { pos, message } => {
+            ZebinError::SerializeError { pos, message } => {
                 write!(f, "serialization error at {pos}: {message}")
             }
             ZebinError::DeserializeError { message } => write!(f, "deserialize error: {message}"),

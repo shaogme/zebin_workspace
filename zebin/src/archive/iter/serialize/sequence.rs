@@ -129,7 +129,7 @@ where
     ) -> Result<Poll<()>, ZebinError> {
         if !self.finished {
             if self.next_item.is_some() || self.has_active_serializer || self.marker_cursor < 1 {
-                return Err(ZebinError::SerializationError {
+                return Err(ZebinError::SerializeError {
                     pos: sink.pos(),
                     message: "Serializer is busy",
                 });
@@ -213,13 +213,13 @@ where
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         if self.finished {
-            return Err(ZebinError::SerializationError {
+            return Err(ZebinError::SerializeError {
                 pos: sink.pos(),
                 message: "Serializer already finished",
             });
         }
         if self.next_item.is_some() || self.has_active_serializer || self.marker_cursor < 1 {
-            return Err(ZebinError::SerializationError {
+            return Err(ZebinError::SerializeError {
                 pos: sink.pos(),
                 message: "Serializer is busy",
             });

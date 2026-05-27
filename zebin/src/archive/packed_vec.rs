@@ -91,7 +91,7 @@ impl<'a, I> PackedSequenceSerializer<'a, I> {
                         (1u8 << bits_per_value) - 1
                     };
                     if value > mask {
-                        return Err(ZebinError::SerializationError {
+                        return Err(ZebinError::SerializeError {
                             pos: self.index,
                             message: "Value exceeds packed bit capacity",
                         });
@@ -449,7 +449,7 @@ impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
         for (i, value) in item.values().iter().enumerate() {
             let value = *value;
             if value > mask {
-                return Err(ZebinError::SerializationError {
+                return Err(ZebinError::SerializeError {
                     pos: i,
                     message: "Value exceeds packed bit capacity",
                 });

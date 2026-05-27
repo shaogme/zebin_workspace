@@ -490,7 +490,7 @@ where
     ) -> Result<Poll<()>, ZebinError> {
         if self.stage == 0 {
             if !self.key_started {
-                return Err(ZebinError::SerializationError {
+                return Err(ZebinError::SerializeError {
                     pos: sink.pos(),
                     message: "Tuple2Serializer polled before input",
                 });
@@ -506,7 +506,7 @@ where
                 let v = self
                     .pending_value
                     .take()
-                    .ok_or(ZebinError::SerializationError {
+                    .ok_or(ZebinError::SerializeError {
                         pos: sink.pos(),
                         message: "Tuple2Serializer lost pending value",
                     })?;
@@ -544,7 +544,7 @@ where
         let v = self
             .pending_value
             .take()
-            .ok_or(ZebinError::SerializationError {
+            .ok_or(ZebinError::SerializeError {
                 pos: sink.pos(),
                 message: "Tuple2Serializer lost pending value",
             })?;

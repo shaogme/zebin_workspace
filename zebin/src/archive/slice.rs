@@ -170,12 +170,12 @@ where
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
         if !self.started {
-            return Err(ZebinError::SerializationError {
+            return Err(ZebinError::SerializeError {
                 pos: sink.pos(),
                 message: "ArraySerializer polled before input",
             });
         }
-        let iter = self.items.as_mut().ok_or(ZebinError::SerializationError {
+        let iter = self.items.as_mut().ok_or(ZebinError::SerializeError {
             pos: sink.pos(),
             message: "ArraySerializer iterator missing",
         })?;
@@ -314,7 +314,7 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
-        let iter = self.iter.as_mut().ok_or(ZebinError::SerializationError {
+        let iter = self.iter.as_mut().ok_or(ZebinError::SerializeError {
             pos: sink.pos(),
             message: "RefIterSerializer polled before input",
         })?;

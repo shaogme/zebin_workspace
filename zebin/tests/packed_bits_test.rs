@@ -76,7 +76,7 @@ fn test_packed_nibble_rejects_out_of_range_value() {
     let err = zebin::serialize(packed).unwrap_err();
     assert!(matches!(
         err,
-        zebin::ZebinError::SerializationError {
+        zebin::ZebinError::SerializeError {
             message: "Value exceeds packed bit capacity",
             ..
         }

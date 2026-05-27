@@ -221,7 +221,7 @@ where
                 }
 
                 let progress = if !*started {
-                    let v = val.take().ok_or(ZebinError::SerializationError {
+                    let v = val.take().ok_or(ZebinError::SerializeError {
                         pos: sink.pos(),
                         message: "ResultSerializer lost Ok value",
                     })?;
@@ -248,7 +248,7 @@ where
                 }
 
                 let progress = if !*started {
-                    let v = val.take().ok_or(ZebinError::SerializationError {
+                    let v = val.take().ok_or(ZebinError::SerializeError {
                         pos: sink.pos(),
                         message: "ResultSerializer lost Err value",
                     })?;

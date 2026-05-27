@@ -101,12 +101,10 @@ where
                     {
                         break;
                     }
-                    let serializer = next_serializer.take().ok_or(
-                        ZebinError::SerializationError {
-                            pos: self.storage_mut.pos(),
-                            message: "archive writer state machine error: body serializer missing",
-                        },
-                    )?;
+                    let serializer = next_serializer.take().ok_or(ZebinError::SerializeError {
+                        pos: self.storage_mut.pos(),
+                        message: "archive writer state machine error: body serializer missing",
+                    })?;
                     self.phase = SerializePhase::Body {
                         serializer,
                         started: false,
@@ -117,7 +115,7 @@ where
                     started,
                 } => {
                     if !*started {
-                        let value = self.value.take().ok_or(ZebinError::SerializationError {
+                        let value = self.value.take().ok_or(ZebinError::SerializeError {
                             pos: self.storage_mut.pos(),
                             message: "archive writer used after value taken",
                         })?;

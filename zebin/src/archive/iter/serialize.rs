@@ -149,7 +149,7 @@ where
         &mut self,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
-        let iter = self.iter.as_mut().ok_or(ZebinError::SerializationError {
+        let iter = self.iter.as_mut().ok_or(ZebinError::SerializeError {
             pos: sink.pos(),
             message: "OwnedIterSerializer polled before input",
         })?;

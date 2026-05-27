@@ -197,7 +197,7 @@ impl<E: Serializer> SchemaFieldState<E> {
     #[inline]
     pub fn fill(&mut self, val: E::Input, len: usize) -> Result<(), ZebinError> {
         self.state.fill(val);
-        self.len = u32::try_from(len).map_err(|_| ZebinError::SerializationError {
+        self.len = u32::try_from(len).map_err(|_| ZebinError::SerializeError {
             pos: 0,
             message: "field payload length exceeds u32 range",
         })?;
