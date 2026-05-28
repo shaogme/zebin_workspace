@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use crate::utils::chunk::{ChunkSource, ChunkedView};
+use crate::utils::chunk::ChunkSource;
 use crate::{prelude::*, validation::ValidationPathSegment};
 
 /// Runtime configuration for sequential archive validation.
@@ -21,7 +21,7 @@ impl Default for ValidationConfig {
 
 /// Validator for byte streams to ensure safe sequential decoding.
 pub struct Validator<'a, 'p, S: ChunkSource + ?Sized> {
-    view: ChunkedView<&'a S>,
+    source: &'a S,
     depth: usize,
     config: ValidationConfig,
     path: Option<&'p mut ValidationPathStack>,
@@ -41,7 +41,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
         path: Option<&'p mut ValidationPathStack>,
     ) -> Self {
         Self {
-            view: ChunkedView::new(data),
+            source: data,
             depth: 0,
             config,
             path,
@@ -70,7 +70,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
 
     pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
         if size == 0 {
-            if self.view.source.is_eof(pos) {
+            if self.source.is_eof(pos) {
                 return Ok(());
             }
             return Err(self.validation_error("Pointer out of bounds", pos));
@@ -79,7 +79,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
         let _ = pos
             .checked_add(size)
             .ok_or_else(|| self.validation_error("Pointer range overflow", pos))?;
-        if self.view.source.get_buf(pos, size).is_err() {
+        if self.source.get_buf(pos, size).is_err() {
             return Err(self.validation_error("Pointer out of bounds", pos));
         }
         Ok(())
@@ -150,8 +150,8 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
         self.last_error_path.as_ref()
     }
 
-    pub fn view(&self) -> &ChunkedView<&'a S> {
-        &self.view
+    pub fn source(&self) -> &'a S {
+        self.source
     }
 
     fn validation_error(&mut self, message: &'static str, pos: usize) -> AccessError {

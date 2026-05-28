@@ -1,5 +1,3 @@
-use core::ops::{Index, IndexMut};
-
 use crate::error::ZebinError;
 
 pub struct Buf<'a> {
@@ -95,68 +93,5 @@ impl<S: ChunkSourceMut + ?Sized> ChunkSourceMut for &mut S {
     #[inline]
     fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError> {
         (**self).get_buf_mut(pos, len)
-    }
-}
-
-// ==========================================
-// 3. ChunkedView & ChunkedViewMut
-// ==========================================
-
-#[derive(Clone)]
-pub struct ChunkedView<S: ?Sized> {
-    pub(crate) source: S,
-}
-
-impl<S: ChunkSource + ?Sized> ChunkedView<S> {
-    pub fn new(source: S) -> Self
-    where
-        S: Sized,
-    {
-        Self { source }
-    }
-}
-
-impl<S: ChunkSource + ?Sized> Index<usize> for ChunkedView<S> {
-    type Output = u8;
-
-    #[inline]
-    fn index(&self, index: usize) -> &Self::Output {
-        let buf = self.source.get_buf(index, 1).expect("Index out of bounds");
-        &buf.data[0]
-    }
-}
-
-#[derive(Clone)]
-pub struct ChunkedViewMut<S: ?Sized> {
-    pub(crate) source: S,
-}
-
-impl<S: ChunkSourceMut + ?Sized> ChunkedViewMut<S> {
-    pub fn new(source: S) -> Self
-    where
-        S: Sized,
-    {
-        Self { source }
-    }
-}
-
-impl<S: ChunkSourceMut + ?Sized> Index<usize> for ChunkedViewMut<S> {
-    type Output = u8;
-
-    #[inline]
-    fn index(&self, index: usize) -> &Self::Output {
-        let buf = self.source.get_buf(index, 1).expect("Index out of bounds");
-        &buf.data[0]
-    }
-}
-
-impl<S: ChunkSourceMut + ?Sized> IndexMut<usize> for ChunkedViewMut<S> {
-    #[inline]
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        let buf = self
-            .source
-            .get_buf_mut(index, 1)
-            .expect("Index out of bounds");
-        &mut buf.into_mut_slice()[0]
     }
 }

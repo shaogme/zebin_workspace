@@ -1,10 +1,10 @@
 use crate::prelude::*;
-use crate::utils::chunk::{ChunkSource, ChunkSourceMut, ChunkedView, ChunkedViewMut};
+use crate::utils::chunk::{ChunkSource, ChunkSourceMut};
 use crate::utils::{byteops, padding_for_alignment};
 
 /// Borrowed cursor into an archive byte slice.
 pub struct Cursor<'a> {
-    view: ChunkedView<&'a (dyn ChunkSource + 'a)>,
+    source: &'a (dyn ChunkSource + 'a),
     pos: usize,
 }
 
@@ -12,7 +12,7 @@ impl<'a> Clone for Cursor<'a> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
-            view: self.view.clone(),
+            source: self.source,
             pos: self.pos,
         }
     }
@@ -20,12 +20,11 @@ impl<'a> Clone for Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     pub fn new(source: &'a (dyn ChunkSource + 'a), pos: usize) -> Self {
-        let view = ChunkedView::new(source);
-        Self { view, pos }
+        Self { source, pos }
     }
 
-    pub fn view(&self) -> &ChunkedView<&'a (dyn ChunkSource + 'a)> {
-        &self.view
+    pub fn source(&self) -> &'a (dyn ChunkSource + 'a) {
+        self.source
     }
 
     pub fn pos(&self) -> usize {
@@ -34,7 +33,7 @@ impl<'a> Cursor<'a> {
 
     pub fn with_pos(&self, pos: usize) -> Self {
         Self {
-            view: self.view.clone(),
+            source: self.source,
             pos,
         }
     }
@@ -71,7 +70,7 @@ impl<'a> Cursor<'a> {
         let start = self.pos;
         self.advance(len, context)?;
 
-        let buf = (*self.view.source).get_buf(start, len).map_err(|_| {
+        let buf = (*self.source).get_buf(start, len).map_err(|_| {
             context.validation_error(
                 "Requested range spans across non-contiguous chunks or out of bounds",
                 start,
@@ -86,7 +85,7 @@ impl<'a> Cursor<'a> {
     {
         context.check_range(self.pos, len)?;
 
-        let buf = (*self.view.source).get_buf(self.pos, len).map_err(|_| {
+        let buf = (*self.source).get_buf(self.pos, len).map_err(|_| {
             context.validation_error(
                 "Requested range spans across non-contiguous chunks or out of bounds",
                 self.pos,
@@ -183,33 +182,32 @@ impl<'a> Cursor<'a> {
 
 /// Mutable cursor into an archive chunked view.
 pub struct CursorMut<'a> {
-    view: ChunkedViewMut<&'a mut (dyn ChunkSourceMut + 'a)>,
+    source: &'a mut (dyn ChunkSourceMut + 'a),
     pos: usize,
 }
 
 impl<'a> CursorMut<'a> {
     pub fn new(source: &'a mut (dyn ChunkSourceMut + 'a), pos: usize) -> Self {
-        let view = ChunkedViewMut::new(source);
-        Self { view, pos }
+        Self { source, pos }
     }
 
     pub fn pos(&self) -> usize {
         self.pos
     }
 
-    pub fn view(&self) -> &ChunkedViewMut<&'a mut (dyn ChunkSourceMut + 'a)> {
-        &self.view
+    pub fn source(&self) -> &(dyn ChunkSourceMut + 'a) {
+        self.source
     }
 
-    pub fn view_mut(&mut self) -> &mut ChunkedViewMut<&'a mut (dyn ChunkSourceMut + 'a)> {
-        &mut self.view
+    pub fn source_mut(&mut self) -> &mut (dyn ChunkSourceMut + 'a) {
+        self.source
     }
 
     pub fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         if bytes.is_empty() {
             return Ok(SinkProgress::Complete);
         }
-        let buf = (*self.view.source).get_buf_mut(self.pos, bytes.len())?;
+        let buf = (*self.source).get_buf_mut(self.pos, bytes.len())?;
         let accepted = buf.len();
         if accepted > 0 {
             byteops::copy_exact(buf.into_mut_slice(), &bytes[..accepted]);
@@ -231,7 +229,7 @@ impl<'a> CursorMut<'a> {
         if len == 0 {
             return Ok(SinkProgress::Complete);
         }
-        let buf = (*self.view.source).get_buf_mut(self.pos, len)?;
+        let buf = (*self.source).get_buf_mut(self.pos, len)?;
         let accepted = buf.len();
         if accepted > 0 {
             byteops::fill(buf.into_mut_slice(), 0);
