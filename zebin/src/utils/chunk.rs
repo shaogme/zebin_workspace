@@ -25,45 +25,14 @@ pub trait ChunkSourceMut: ChunkSource {
 
     /// 在指定位置写入数据，默认实现会利用 get_chunk_mut 写入。支持扩容的源可以重写此方法。
     fn write_at(&mut self, pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        if bytes.is_empty() {
-            return Ok(SinkProgress::Complete);
-        }
-        let total_len = self.total_len();
-        if pos >= total_len {
-            return Ok(SinkProgress::Blocked);
-        }
-        let available = total_len - pos;
-        let to_write = bytes.len().min(available);
-        if to_write == 0 {
-            return Ok(SinkProgress::Blocked);
-        }
-
-        let mut current_sum = 0;
-        let mut bytes_written = 0;
-        for idx in 0..self.chunk_count() {
-            if let Some(chunk_len) = self.get_chunk(idx).map(|c| c.len()) {
-                let next_sum = current_sum + chunk_len;
-                if pos + bytes_written >= current_sum && pos + bytes_written < next_sum {
-                    let chunk_offset = (pos + bytes_written) - current_sum;
-                    let chunk_avail = chunk_len - chunk_offset;
-                    let write_len = (to_write - bytes_written).min(chunk_avail);
-                    if write_len > 0 {
-                        if let Some(chunk_mut) = self.get_chunk_mut(idx) {
-                            byteops::copy_exact(
-                                &mut chunk_mut[chunk_offset..chunk_offset + write_len],
-                                &bytes[bytes_written..bytes_written + write_len],
-                            );
-                        }
-                        bytes_written += write_len;
-                    }
-                }
-                current_sum = next_sum;
-            }
-            if bytes_written >= to_write {
-                break;
-            }
-        }
-        Ok(SinkProgress::from_accepted(bytes.len(), bytes_written))
+        mutate_at(
+            self,
+            pos,
+            bytes.len(),
+            |chunk_slice, bytes_written, step_len| {
+                byteops::copy_exact(chunk_slice, &bytes[bytes_written..bytes_written + step_len]);
+            },
+        )
     }
 
     fn align_at(
@@ -76,43 +45,58 @@ pub trait ChunkSourceMut: ChunkSource {
     }
 
     fn skip_at(&mut self, pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
-        if len == 0 {
-            return Ok(SinkProgress::Complete);
-        }
-        let total_len = self.total_len();
-        if pos >= total_len {
-            return Ok(SinkProgress::Blocked);
-        }
-        let available = total_len - pos;
-        let to_skip = len.min(available);
-        if to_skip == 0 {
-            return Ok(SinkProgress::Blocked);
-        }
-
-        let mut current_sum = 0;
-        let mut bytes_skipped = 0;
-        for idx in 0..self.chunk_count() {
-            if let Some(chunk_len) = self.get_chunk(idx).map(|c| c.len()) {
-                let next_sum = current_sum + chunk_len;
-                if pos + bytes_skipped >= current_sum && pos + bytes_skipped < next_sum {
-                    let chunk_offset = (pos + bytes_skipped) - current_sum;
-                    let chunk_avail = chunk_len - chunk_offset;
-                    let skip_len = (to_skip - bytes_skipped).min(chunk_avail);
-                    if skip_len > 0 {
-                        if let Some(chunk_mut) = self.get_chunk_mut(idx) {
-                            byteops::fill(&mut chunk_mut[chunk_offset..chunk_offset + skip_len], 0);
-                        }
-                        bytes_skipped += skip_len;
-                    }
-                }
-                current_sum = next_sum;
-            }
-            if bytes_skipped >= to_skip {
-                break;
-            }
-        }
-        Ok(SinkProgress::from_accepted(len, bytes_skipped))
+        mutate_at(self, pos, len, |chunk_slice, _, _| {
+            byteops::fill(chunk_slice, 0);
+        })
     }
+}
+
+fn mutate_at<S: ChunkSourceMut + ?Sized>(
+    source: &mut S,
+    pos: usize,
+    len: usize,
+    mut f: impl FnMut(&mut [u8], usize, usize),
+) -> Result<SinkProgress, ZebinError> {
+    if len == 0 {
+        return Ok(SinkProgress::Complete);
+    }
+    let total_len = source.total_len();
+    if pos >= total_len {
+        return Ok(SinkProgress::Blocked);
+    }
+    let available = total_len - pos;
+    let target_len = len.min(available);
+    if target_len == 0 {
+        return Ok(SinkProgress::Blocked);
+    }
+
+    let mut current_sum = 0;
+    let mut bytes_processed = 0;
+    for idx in 0..source.chunk_count() {
+        if let Some(chunk_len) = source.get_chunk(idx).map(|c| c.len()) {
+            let next_sum = current_sum + chunk_len;
+            if pos + bytes_processed >= current_sum && pos + bytes_processed < next_sum {
+                let chunk_offset = (pos + bytes_processed) - current_sum;
+                let chunk_avail = chunk_len - chunk_offset;
+                let step_len = (target_len - bytes_processed).min(chunk_avail);
+                if step_len > 0 {
+                    if let Some(chunk_mut) = source.get_chunk_mut(idx) {
+                        f(
+                            &mut chunk_mut[chunk_offset..chunk_offset + step_len],
+                            bytes_processed,
+                            step_len,
+                        );
+                    }
+                    bytes_processed += step_len;
+                }
+            }
+            current_sum = next_sum;
+        }
+        if bytes_processed >= target_len {
+            break;
+        }
+    }
+    Ok(SinkProgress::from_accepted(len, bytes_processed))
 }
 
 // Implement for references
@@ -310,41 +294,7 @@ impl<S: ChunkSource + ?Sized> ChunkedView<S> {
 
     #[inline]
     pub fn translate_address(&self, global_idx: usize) -> Option<(usize, usize)> {
-        if global_idx >= self.total_len {
-            return None;
-        }
-
-        // 1. 快速路径：使用缓存加速连续访问
-        let last = self.last_chunk.get();
-        if last < self.source.chunk_count() {
-            let mut chunk_start = 0;
-            for i in 0..last {
-                if let Some(chunk) = self.source.get_chunk(i) {
-                    chunk_start += chunk.len();
-                }
-            }
-            if let Some(chunk) = self.source.get_chunk(last) {
-                let chunk_end = chunk_start + chunk.len();
-                if global_idx >= chunk_start && global_idx < chunk_end {
-                    return Some((last, global_idx - chunk_start));
-                }
-            }
-        }
-
-        // 2. 慢速路径：从头遍历累加定位分块
-        let mut current_sum = 0;
-        for idx in 0..self.source.chunk_count() {
-            if let Some(chunk) = self.source.get_chunk(idx) {
-                let next_sum = current_sum + chunk.len();
-                if global_idx >= current_sum && global_idx < next_sum {
-                    self.last_chunk.set(idx);
-                    return Some((idx, global_idx - current_sum));
-                }
-                current_sum = next_sum;
-            }
-        }
-
-        None
+        translate_address_impl(&self.source, self.total_len, &self.last_chunk, global_idx)
     }
 }
 
@@ -390,40 +340,52 @@ impl<S: ChunkSourceMut + ?Sized> ChunkedViewMut<S> {
 
     #[inline]
     fn translate_address(&self, global_idx: usize) -> Option<(usize, usize)> {
-        if global_idx >= self.total_len {
-            return None;
-        }
-
-        let last = self.last_chunk.get();
-        if last < self.source.chunk_count() {
-            let mut chunk_start = 0;
-            for i in 0..last {
-                if let Some(chunk) = self.source.get_chunk(i) {
-                    chunk_start += chunk.len();
-                }
-            }
-            if let Some(chunk) = self.source.get_chunk(last) {
-                let chunk_end = chunk_start + chunk.len();
-                if global_idx >= chunk_start && global_idx < chunk_end {
-                    return Some((last, global_idx - chunk_start));
-                }
-            }
-        }
-
-        let mut current_sum = 0;
-        for idx in 0..self.source.chunk_count() {
-            if let Some(chunk) = self.source.get_chunk(idx) {
-                let next_sum = current_sum + chunk.len();
-                if global_idx >= current_sum && global_idx < next_sum {
-                    self.last_chunk.set(idx);
-                    return Some((idx, global_idx - current_sum));
-                }
-                current_sum = next_sum;
-            }
-        }
-
-        None
+        translate_address_impl(&self.source, self.total_len, &self.last_chunk, global_idx)
     }
+}
+
+#[inline]
+fn translate_address_impl<S: ChunkSource + ?Sized>(
+    source: &S,
+    total_len: usize,
+    last_chunk: &Cell<usize>,
+    global_idx: usize,
+) -> Option<(usize, usize)> {
+    if global_idx >= total_len {
+        return None;
+    }
+
+    // 1. 快速路径：使用缓存加速连续访问
+    let last = last_chunk.get();
+    if last < source.chunk_count() {
+        let mut chunk_start = 0;
+        for i in 0..last {
+            if let Some(chunk) = source.get_chunk(i) {
+                chunk_start += chunk.len();
+            }
+        }
+        if let Some(chunk) = source.get_chunk(last) {
+            let chunk_end = chunk_start + chunk.len();
+            if global_idx >= chunk_start && global_idx < chunk_end {
+                return Some((last, global_idx - chunk_start));
+            }
+        }
+    }
+
+    // 2. 慢速路径：从头遍历累加定位分块
+    let mut current_sum = 0;
+    for idx in 0..source.chunk_count() {
+        if let Some(chunk) = source.get_chunk(idx) {
+            let next_sum = current_sum + chunk.len();
+            if global_idx >= current_sum && global_idx < next_sum {
+                last_chunk.set(idx);
+                return Some((idx, global_idx - current_sum));
+            }
+            current_sum = next_sum;
+        }
+    }
+
+    None
 }
 
 impl<S: ChunkSourceMut + ?Sized> Index<usize> for ChunkedViewMut<S> {
