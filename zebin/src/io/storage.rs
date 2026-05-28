@@ -54,15 +54,19 @@ pub trait Storage: ChunkSource {
 
 /// Unified storage layer: byte-backed write access contract.
 pub trait StorageMut: ChunkSourceMut {
-    type Sharder<'a>: Sharder
+    type Writer<'a>: CursorMut
     where
         Self: 'a;
 
+    fn writer(&mut self) -> Self::Writer<'_>;
+}
+
+/// Cursor-based mutable writing contract.
+pub trait CursorMut {
     fn pos(&self) -> usize;
     fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
     fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError>;
     fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
-    fn sharder(&mut self) -> Self::Sharder<'_>;
 }
 
 impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
@@ -92,11 +96,18 @@ impl<S: Storage + ?Sized> Storage for &mut S {
 }
 
 impl<S: StorageMut + ?Sized> StorageMut for &mut S {
-    type Sharder<'a>
-        = S::Sharder<'a>
+    type Writer<'a>
+        = S::Writer<'a>
     where
         Self: 'a;
 
+    #[inline]
+    fn writer(&mut self) -> Self::Writer<'_> {
+        (**self).writer()
+    }
+}
+
+impl<S: CursorMut + ?Sized> CursorMut for &mut S {
     #[inline]
     fn pos(&self) -> usize {
         (**self).pos()
@@ -115,11 +126,6 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     #[inline]
     fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
         (**self).skip(len)
-    }
-
-    #[inline]
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        (**self).sharder()
     }
 }
 
@@ -243,11 +249,17 @@ impl<'a> ChunkSourceMut for SliceSerializer<'a> {
 }
 
 impl StorageMut for SliceSerializer<'_> {
-    type Sharder<'b>
-        = NoSharder
+    type Writer<'b>
+        = &'b mut Self
     where
         Self: 'b;
 
+    fn writer(&mut self) -> Self::Writer<'_> {
+        self
+    }
+}
+
+impl CursorMut for SliceSerializer<'_> {
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -279,10 +291,6 @@ impl StorageMut for SliceSerializer<'_> {
             byteops::fill(&mut self.buf[start..end], 0);
         }
         Ok(SinkProgress::from_accepted(len, written))
-    }
-
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        NoSharder
     }
 }
 
@@ -338,11 +346,18 @@ impl ChunkSourceMut for VecSerializer {
 
 #[cfg(feature = "alloc")]
 impl StorageMut for VecSerializer {
-    type Sharder<'b>
-        = NoSharder
+    type Writer<'b>
+        = &'b mut Self
     where
         Self: 'b;
 
+    fn writer(&mut self) -> Self::Writer<'_> {
+        self
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl CursorMut for VecSerializer {
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -374,9 +389,5 @@ impl StorageMut for VecSerializer {
         self.buf.resize(self.buf.len() + len, 0);
         self.archive_pos = next_pos;
         Ok(SinkProgress::Complete)
-    }
-
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        NoSharder
     }
 }

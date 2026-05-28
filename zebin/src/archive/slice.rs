@@ -154,7 +154,7 @@ where
 {
     type Input = [T; N];
 
-    fn input<Sink: StorageMut + ?Sized>(
+    fn input<Sink: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut Sink,
@@ -165,7 +165,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: StorageMut + ?Sized>(
+    fn poll_pending<Sink: CursorMut + ?Sized>(
         &mut self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -204,7 +204,7 @@ where
         }
     }
 
-    fn finish<Sink: StorageMut + ?Sized>(
+    fn finish<Sink: CursorMut + ?Sized>(
         self,
         sink: &mut Sink,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -301,7 +301,7 @@ where
 {
     type Input = &'a S;
 
-    fn input<Sink: StorageMut + ?Sized>(
+    fn input<Sink: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut Sink,
@@ -310,7 +310,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: StorageMut + ?Sized>(
+    fn poll_pending<Sink: CursorMut + ?Sized>(
         &mut self,
         sink: &mut Sink,
     ) -> Result<Poll<()>, ZebinError> {
@@ -341,7 +341,7 @@ where
         }
     }
 
-    fn finish<Sink: StorageMut + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+    fn finish<Sink: CursorMut + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
         self.seq_serializer.finish(sink)
     }
 }

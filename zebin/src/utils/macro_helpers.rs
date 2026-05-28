@@ -1,6 +1,6 @@
 use crate::{
     error::ZebinError,
-    io::{Serializer, StorageMut},
+    io::{CursorMut, Serializer},
     schema::FieldEncoding,
 };
 
@@ -16,7 +16,7 @@ impl FieldEntrySerializer {
     }
 
     #[inline]
-    pub fn poll_write<S: StorageMut + ?Sized>(
+    pub fn poll_write<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
         field_id: u16,
@@ -65,7 +65,7 @@ impl TagSerializer {
     }
 
     #[inline]
-    pub fn poll_write<S: StorageMut + ?Sized>(
+    pub fn poll_write<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -106,7 +106,7 @@ impl<E: Serializer> FieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write<S: StorageMut + ?Sized>(
+    pub fn poll_write<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -134,7 +134,7 @@ impl<E: Serializer> FieldState<E> {
     }
 
     #[inline]
-    pub fn finish<S: StorageMut + ?Sized>(
+    pub fn finish<S: CursorMut + ?Sized>(
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -205,7 +205,7 @@ impl<E: Serializer> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write_entry<S: StorageMut + ?Sized>(
+    pub fn poll_write_entry<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
         field_id: u16,
@@ -216,7 +216,7 @@ impl<E: Serializer> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write<S: StorageMut + ?Sized>(
+    pub fn poll_write<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -224,7 +224,7 @@ impl<E: Serializer> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn finish<S: StorageMut + ?Sized>(
+    pub fn finish<S: CursorMut + ?Sized>(
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -292,7 +292,7 @@ impl<P: Serializer> EnumSerializer<P> {
     }
 
     #[inline]
-    pub fn poll_write_pending<S: StorageMut + ?Sized>(
+    pub fn poll_write_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -316,7 +316,7 @@ impl<P: Serializer> EnumSerializer<P> {
     }
 
     #[inline]
-    pub fn finish_inner<S: StorageMut + ?Sized>(
+    pub fn finish_inner<S: CursorMut + ?Sized>(
         self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {
@@ -386,7 +386,7 @@ impl SchemaObjectSerializer {
     }
 
     #[inline]
-    pub fn poll_write_header<S: StorageMut + ?Sized>(
+    pub fn poll_write_header<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
         stable_schema_key: u32,
@@ -415,14 +415,14 @@ impl SchemaObjectSerializer {
     }
 
     #[inline]
-    pub fn mark_table_start<S: StorageMut + ?Sized>(&mut self, sink: &mut S) {
+    pub fn mark_table_start<S: CursorMut + ?Sized>(&mut self, sink: &mut S) {
         if self.table_start == 0 {
             self.table_start = sink.pos();
         }
     }
 
     #[inline]
-    pub fn poll_write_footer<S: StorageMut + ?Sized>(
+    pub fn poll_write_footer<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<core::task::Poll<()>, ZebinError> {

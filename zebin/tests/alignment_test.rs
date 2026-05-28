@@ -4,7 +4,7 @@ use core::num::NonZeroUsize;
 use std::cell::Cell;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{SinkProgress, StorageMut, ZebinWriter};
+use zebin::prelude::{CursorMut, SinkProgress, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize};
 use zebin::{access, writer};
@@ -72,11 +72,17 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
     }
 
     impl StorageMut for LimitedSink<'_> {
-        type Sharder<'b>
-            = zebin::io::NoSharder
+        type Writer<'b>
+            = &'b mut Self
         where
             Self: 'b;
 
+        fn writer(&mut self) -> Self::Writer<'_> {
+            self
+        }
+    }
+
+    impl CursorMut for LimitedSink<'_> {
         fn pos(&self) -> usize {
             self.buf.len()
         }
@@ -110,10 +116,6 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             let skip_len = len.min(available);
             self.buf.resize(self.buf.len() + skip_len, 0);
             Ok(SinkProgress::from_accepted(len, skip_len))
-        }
-
-        fn sharder(&mut self) -> Self::Sharder<'_> {
-            zebin::io::NoSharder
         }
     }
 

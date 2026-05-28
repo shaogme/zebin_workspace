@@ -1,4 +1,4 @@
-use crate::io::StorageMut;
+use crate::io::CursorMut;
 use core::{num::NonZeroUsize, task::Poll};
 
 #[cfg(feature = "alloc")]
@@ -406,27 +406,25 @@ pub trait Serializer {
     /// is a borrowed reference (e.g. `&'a [T]`).
     type Input;
 
-    /// Attempts to input a data item into the serializer and serialize it into the underlying `StorageMut`.
+    /// Attempts to input a data item into the serializer and serialize it into the underlying `CursorMut`.
     ///
     /// # Return Value
     /// - `Ok(Poll::Ready(()))`: The current input item has been fully serialized and written.
-    /// - `Ok(Poll::Pending)`: The `StorageMut` is full. The current input item is pending, and the caller should flush/provide a new StorageMut and call `poll_pending`.
-    fn input<S: StorageMut + ?Sized>(
+    /// - `Ok(Poll::Pending)`: The `CursorMut` is full. The current input item is pending, and the caller should flush/provide a new CursorMut and call `poll_pending`.
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError>;
 
-    /// Advances and flushes any state/data previously accumulated inside the serializer due to insufficient `StorageMut` space.
+    /// Advances and flushes any state/data previously accumulated inside the serializer due to insufficient `CursorMut` space.
     ///
     /// Regardless of whether it is a one-off or step-by-step input, this method can be called to advance the remaining encoding progress until it returns `Poll::Ready(())`.
-    fn poll_pending<S: StorageMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError>;
+    fn poll_pending<S: CursorMut + ?Sized>(&mut self, sink: &mut S)
+    -> Result<Poll<()>, ZebinError>;
 
     /// Finishes the encoding process, writing any necessary alignments, paddings, or trailing metadata.
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError>;
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError>;
 }
 
 /// Trait for types that can create resumable archive states.
@@ -488,7 +486,7 @@ where
 {
     type Input = &'b T;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -497,14 +495,14 @@ where
         self.inner.input(value, sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }

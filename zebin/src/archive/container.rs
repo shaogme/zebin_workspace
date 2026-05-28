@@ -37,7 +37,7 @@ where
 {
     type Input = Box<T>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -46,14 +46,14 @@ where
         self.inner.input(inner, sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -120,7 +120,7 @@ impl<'a> Default for BoxStrSerializer<'a> {
 impl<'a> Serializer for BoxStrSerializer<'a> {
     type Input = Box<str>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -134,14 +134,14 @@ impl<'a> Serializer for BoxStrSerializer<'a> {
         self.inner.input(s_ref, sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -233,7 +233,7 @@ where
 {
     type Input = Rc<T>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -242,14 +242,14 @@ where
         self.inner.input(value, sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -260,7 +260,7 @@ where
 {
     type Input = Arc<T>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -269,14 +269,14 @@ where
         self.inner.input(value, sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -321,7 +321,7 @@ where
 {
     type Input = Cow<'cow, B>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -330,14 +330,14 @@ where
         self.inner.input(owned, sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }

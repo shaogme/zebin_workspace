@@ -180,7 +180,7 @@ where
 {
     type Input = Result<T, E>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -200,7 +200,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -263,7 +263,7 @@ where
         }
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         match self.state {
             ResultSerializerState::Uninitialized => Ok(Poll::Ready(())),
             ResultSerializerState::Ok { .. } => self.ok_serializer.finish(sink),

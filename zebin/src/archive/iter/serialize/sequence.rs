@@ -79,7 +79,7 @@ where
     T::Archived: ArchivedLayout,
 {
     #[inline]
-    fn try_align<S: StorageMut + ?Sized>(&mut self, sink: &mut S) -> Result<bool, ZebinError> {
+    fn try_align<S: CursorMut + ?Sized>(&mut self, sink: &mut S) -> Result<bool, ZebinError> {
         if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_none() || self.aligned {
             return Ok(true);
         }
@@ -123,7 +123,7 @@ where
         }
     }
 
-    pub fn finish_ref<S: StorageMut + ?Sized>(
+    pub fn finish_ref<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -207,7 +207,7 @@ where
 {
     type Input = T;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -250,7 +250,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -348,7 +348,7 @@ where
         }
     }
 
-    fn finish<S: StorageMut + ?Sized>(mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(mut self, sink: &mut S) -> Result<Poll<()>, ZebinError> {
         let _ = self.finish_ref(sink)?;
         self.item_serializer.finish(sink)
     }

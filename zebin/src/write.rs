@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use crate::io_impl::storage::{SliceSerializer, StorageMut};
+use crate::io_impl::storage::{CursorMut, SliceSerializer};
 use crate::prelude::*;
 
 #[cfg(feature = "alloc")]
@@ -44,6 +44,7 @@ where
     storage_mut: S,
     value: Option<<T as Serialize>::Input<'a>>,
     phase: SerializePhase<'a, T, H>,
+    pos: usize,
 }
 
 impl<'a, T, S, H> ArchiveWriter<'a, T, S, H>
@@ -53,8 +54,9 @@ where
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {
-    pub fn new(storage_mut: S) -> Result<Self, ZebinError> {
+    pub fn new(mut storage_mut: S) -> Result<Self, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
+        let pos = storage_mut.writer().pos();
         Ok(Self {
             storage_mut,
             value: None,
@@ -63,6 +65,7 @@ where
                 cursor: 0,
                 next_serializer: Some(T::serializer()),
             },
+            pos,
         })
     }
 
@@ -76,7 +79,7 @@ where
     }
 
     pub fn written(&self) -> usize {
-        self.storage_mut.pos()
+        self.pos
     }
 
     pub fn is_finished(&self) -> bool {
@@ -84,7 +87,8 @@ where
     }
 
     fn drive(&mut self) -> Result<usize, ZebinError> {
-        let start_pos = self.storage_mut.pos();
+        let mut writer = self.storage_mut.writer();
+        let start_pos = writer.pos();
         loop {
             match &mut self.phase {
                 SerializePhase::Header {
@@ -93,8 +97,7 @@ where
                     next_serializer,
                 } => {
                     let remaining = bytes.as_ref().len() - *cursor;
-                    if self
-                        .storage_mut
+                    if writer
                         .write(&bytes.as_ref()[*cursor..])?
                         .advance_cursor(cursor, remaining)
                         .is_pending()
@@ -102,7 +105,7 @@ where
                         break;
                     }
                     let serializer = next_serializer.take().ok_or(ZebinError::SerializeError {
-                        pos: self.storage_mut.pos(),
+                        pos: writer.pos(),
                         message: "archive writer state machine error: body serializer missing",
                     })?;
                     self.phase = SerializePhase::Body {
@@ -116,10 +119,10 @@ where
                 } => {
                     if !*started {
                         let value = self.value.take().ok_or(ZebinError::SerializeError {
-                            pos: self.storage_mut.pos(),
+                            pos: writer.pos(),
                             message: "archive writer used after value taken",
                         })?;
-                        match serializer.input(value, &mut self.storage_mut)? {
+                        match serializer.input(value, &mut writer)? {
                             core::task::Poll::Pending => {
                                 *started = true;
                                 break;
@@ -129,7 +132,7 @@ where
                             }
                         }
                     } else {
-                        match serializer.poll_pending(&mut self.storage_mut)? {
+                        match serializer.poll_pending(&mut writer)? {
                             core::task::Poll::Pending => break,
                             core::task::Poll::Ready(()) => {}
                         }
@@ -141,7 +144,7 @@ where
                             _phantom: PhantomData,
                         },
                     ) {
-                        match serializer.finish(&mut self.storage_mut)? {
+                        match serializer.finish(&mut writer)? {
                             core::task::Poll::Pending => {
                                 break;
                             }
@@ -156,7 +159,9 @@ where
                 SerializePhase::Done { .. } => break,
             }
         }
-        Ok(self.storage_mut.pos().saturating_sub(start_pos))
+        let end_pos = writer.pos();
+        self.pos = end_pos;
+        Ok(end_pos.saturating_sub(start_pos))
     }
 
     pub fn write(&mut self, value: <T as Serialize>::Input<'a>) -> Result<usize, ZebinError> {
@@ -176,11 +181,11 @@ where
             self.value = Some(value);
         }
 
-        let start_pos = self.storage_mut.pos();
+        let start_pos = self.pos;
         while !self.is_finished() {
-            let before = self.storage_mut.pos();
+            let before = self.pos;
             let _ = self.drive()?;
-            let after = self.storage_mut.pos();
+            let after = self.pos;
             if before == after && !self.is_finished() {
                 return Err(ZebinError::BufferTooSmall {
                     pos: after,
@@ -188,7 +193,7 @@ where
                 });
             }
         }
-        Ok(self.storage_mut.pos().saturating_sub(start_pos))
+        Ok(self.pos.saturating_sub(start_pos))
     }
 }
 
@@ -202,13 +207,14 @@ where
     pub fn serialize(value: <T as Serialize>::Input<'a>) -> Result<Vec<u8>, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         let mut serializer = VecSerializer::new(0);
-        serializer.write(header.serialize().as_ref())?;
+        let mut writer = serializer.writer();
+        writer.write(header.serialize().as_ref())?;
 
         let mut body_serializer = T::serializer();
-        if body_serializer.input(value, &mut serializer)?.is_pending() {
-            while body_serializer.poll_pending(&mut serializer)?.is_pending() {}
+        if body_serializer.input(value, &mut writer)?.is_pending() {
+            while body_serializer.poll_pending(&mut writer)?.is_pending() {}
         }
-        let _ = body_serializer.finish(&mut serializer)?;
+        let _ = body_serializer.finish(&mut writer)?;
         Ok(serializer.into_inner())
     }
 

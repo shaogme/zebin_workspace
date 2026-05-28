@@ -6,7 +6,7 @@ use std::{
 use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
-use crate::io::{Storage, StorageMut};
+use crate::io::{CursorMut, Storage, StorageMut};
 use crate::traits_impl::SinkProgress;
 use crate::utils::{byteops, padding_for_alignment};
 use core::num::NonZeroUsize;
@@ -208,11 +208,17 @@ impl ChunkSourceMut for MmapSerializer {
 }
 
 impl StorageMut for MmapSerializer {
-    type Sharder<'a>
-        = crate::io::NoSharder
+    type Writer<'a>
+        = &'a mut Self
     where
         Self: 'a;
 
+    fn writer(&mut self) -> Self::Writer<'_> {
+        self
+    }
+}
+
+impl CursorMut for MmapSerializer {
     fn pos(&self) -> usize {
         self.archive_pos
     }
@@ -238,9 +244,5 @@ impl StorageMut for MmapSerializer {
         let (start, end) = self.prepare_range(len)?;
         byteops::fill(&mut self.mmap[start..end], 0);
         Ok(SinkProgress::Complete)
-    }
-
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        crate::io::NoSharder
     }
 }

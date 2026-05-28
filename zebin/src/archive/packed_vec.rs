@@ -120,7 +120,7 @@ where
 {
     type Input = I;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -143,7 +143,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -177,7 +177,7 @@ where
         }
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -327,7 +327,7 @@ impl Default for PackedBoolVecSerializer {
 impl Serializer for PackedBoolVecSerializer {
     type Input = PackedVec<bool, 1>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -350,7 +350,7 @@ impl Serializer for PackedBoolVecSerializer {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -370,7 +370,7 @@ impl Serializer for PackedBoolVecSerializer {
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -427,7 +427,7 @@ impl<const BITS: u8> Default for PackedU8VecSerializer<BITS> {
 impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
     type Input = PackedVec<u8, BITS>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -470,7 +470,7 @@ impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -490,7 +490,7 @@ impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

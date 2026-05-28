@@ -180,7 +180,7 @@ impl<T: VarIntNumber> Default for OwnedVarIntVecSerializer<T> {
 impl<T: VarIntNumber> Serializer for OwnedVarIntVecSerializer<T> {
     type Input = VarIntVec<T>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -195,7 +195,7 @@ impl<T: VarIntNumber> Serializer for OwnedVarIntVecSerializer<T> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -234,7 +234,7 @@ impl<T: VarIntNumber> Serializer for OwnedVarIntVecSerializer<T> {
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -309,7 +309,7 @@ impl<T: VarIntNumber> Default for OwnedArchivedVarIntVecSerializer<T> {
 impl<T: VarIntNumber> Serializer for OwnedArchivedVarIntVecSerializer<T> {
     type Input = ArchivedVarIntVec<T>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -324,7 +324,7 @@ impl<T: VarIntNumber> Serializer for OwnedArchivedVarIntVecSerializer<T> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -363,7 +363,7 @@ impl<T: VarIntNumber> Serializer for OwnedArchivedVarIntVecSerializer<T> {
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -424,7 +424,7 @@ impl<'a, T: VarIntNumber> Default for PackedVarIntSliceSerializer<'a, T> {
 impl<'a, T: VarIntNumber> Serializer for PackedVarIntSliceSerializer<'a, T> {
     type Input = PackedVarIntSlice<'a, T>;
 
-    fn input<S: StorageMut + ?Sized>(
+    fn input<S: CursorMut + ?Sized>(
         &mut self,
         item: Self::Input,
         sink: &mut S,
@@ -440,7 +440,7 @@ impl<'a, T: VarIntNumber> Serializer for PackedVarIntSliceSerializer<'a, T> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: StorageMut + ?Sized>(
+    fn poll_pending<S: CursorMut + ?Sized>(
         &mut self,
         sink: &mut S,
     ) -> Result<Poll<()>, ZebinError> {
@@ -482,7 +482,7 @@ impl<'a, T: VarIntNumber> Serializer for PackedVarIntSliceSerializer<'a, T> {
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: StorageMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
