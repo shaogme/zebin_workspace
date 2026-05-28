@@ -8,16 +8,6 @@ pub struct Cursor<'a> {
     pos: usize,
 }
 
-impl<'a> Clone for Cursor<'a> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source,
-            pos: self.pos,
-        }
-    }
-}
-
 impl<'a> Cursor<'a> {
     pub fn new(source: &'a (dyn ChunkSource + 'a), pos: usize) -> Self {
         Self { source, pos }

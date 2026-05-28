@@ -48,10 +48,7 @@ pub mod prelude {
             StaticMode, Storage, StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter,
             deserialize, reader, writer,
         },
-        schema::{
-            FieldEncoding, FieldEntry, FieldTableReader, ObjectEncoding, SchemaRevision,
-            StableSchemaKey,
-        },
+        schema::{FieldEncoding, FieldEntry, ObjectEncoding, SchemaRevision, StableSchemaKey},
         validation::{
             ValidationConfig, ValidationContext, ValidationPathStack, Validator, validate,
             validate_detailed, validate_with_config,
@@ -88,9 +85,8 @@ pub mod validation {
 /// 架构（Schema）分析与解析
 pub mod schema {
     pub use crate::core_impl::schema::{
-        FieldEncoding, FieldEntry, FieldTableReader, MAX_SCHEMA_FIELDS, ObjectEncoding,
-        SchemaObjectHeader, SchemaRevision, StableSchemaKey, process_field_table,
-        process_forward_field_table,
+        FieldEncoding, FieldEntry, MAX_SCHEMA_FIELDS, ObjectEncoding, SchemaObjectHeader,
+        SchemaRevision, StableSchemaKey, process_forward_field_table,
     };
 }
 
