@@ -348,21 +348,11 @@ where
 #[derive(Default, Debug, Clone)]
 pub struct SchemaObjectSerializer {
     header_cursor: usize,
-    object_start: usize,
-    table_start: usize,
-    table_offset_cursor: usize,
-    object_len_cursor: usize,
 }
 
 impl SchemaObjectSerializer {
     pub const fn new() -> Self {
-        Self {
-            header_cursor: 0,
-            object_start: 0,
-            table_start: 0,
-            table_offset_cursor: 0,
-            object_len_cursor: 0,
-        }
+        Self { header_cursor: 0 }
     }
 
     #[inline]
@@ -373,9 +363,6 @@ impl SchemaObjectSerializer {
         schema_revision: u32,
         field_count: u16,
     ) -> Result<Poll<()>, ZebinError> {
-        if self.header_cursor == 0 {
-            self.object_start = sink.pos();
-        }
         if self.header_cursor < 12 {
             let mut header = [0u8; 12];
             header[0..4].copy_from_slice(&stable_schema_key.to_le_bytes());
@@ -395,38 +382,10 @@ impl SchemaObjectSerializer {
     }
 
     #[inline]
-    pub fn mark_table_start(&mut self, sink: &mut CursorMut<'_>) {
-        if self.table_start == 0 {
-            self.table_start = sink.pos();
-        }
-    }
+    pub fn mark_table_start(&mut self, _sink: &mut CursorMut<'_>) {}
 
     #[inline]
-    pub fn poll_write_footer(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
-        if self.table_offset_cursor < 4 {
-            let offset_val = (self.table_start - self.object_start) as u32;
-            let offset_bytes = offset_val.to_le_bytes();
-            let remaining = 4 - self.table_offset_cursor;
-            if sink
-                .write(&offset_bytes[self.table_offset_cursor..])?
-                .advance_cursor(&mut self.table_offset_cursor, remaining)
-                .is_pending()
-            {
-                return Ok(Poll::Pending);
-            }
-        }
-        if self.object_len_cursor < 4 {
-            let total_len = (sink.pos() - self.object_start + 4 - self.object_len_cursor) as u32;
-            let len_bytes = total_len.to_le_bytes();
-            let remaining = 4 - self.object_len_cursor;
-            if sink
-                .write(&len_bytes[self.object_len_cursor..])?
-                .advance_cursor(&mut self.object_len_cursor, remaining)
-                .is_pending()
-            {
-                return Ok(Poll::Pending);
-            }
-        }
+    pub fn poll_write_footer(&mut self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -434,13 +393,12 @@ impl SchemaObjectSerializer {
 /// 默认枚举 Variant Tag 所占用的字节大小。
 pub const ENUM_TAG_SIZE: usize = 4;
 
-/// 计算含有 schema 的记录所带来的元数据开销（包括头部信息、字段表和尾部对齐/长度信息）。
+/// 计算含有 schema 的记录所带来的元数据开销（包括头部信息和字段表信息）。
 /// - 头部信息：12 字节
 /// - 字段表项：field_count * FieldEntry::SIZE (8 字节)
-/// - 偏移量/长度尾部：8 字节 (4 字节 table_offset + 4 字节 total_len)
 #[inline]
 pub const fn schema_overhead(field_count: usize) -> usize {
-    12 + field_count * crate::schema::FieldEntry::SIZE + 4 + 4
+    12 + field_count * crate::schema::FieldEntry::SIZE
 }
 
 /// 计算压缩布尔数组 (PackedBoolVec / PackedBoolSlice) 的序列化后长度开销（4字节长度前缀 + 向上取整字节数）。

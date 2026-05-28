@@ -263,7 +263,7 @@ fn record_access_impl(
                 where
                     Self: 'a;
                 #[cfg(feature = "alloc")]
-                type AccessStrategy = zebin::io::BackwardSequenceStrategy;
+                type AccessStrategy = zebin::io::ForwardSequenceStrategy;
 
                 fn access<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
                 where
@@ -279,7 +279,7 @@ fn record_access_impl(
 
                     #(#var_decls)*
 
-                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
+                    zebin::schema::process_forward_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
                         match __entry.field_id {
                             #(#field_arms,)*
                             _ => Ok(()),
@@ -309,7 +309,7 @@ fn record_access_impl(
 
                     #seen_var_decls
 
-                    zebin::schema::process_trailing_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
+                    zebin::schema::process_forward_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
                         match __entry.field_id {
                             #(#validate_field_arms,)*
                             _ => Ok(()),

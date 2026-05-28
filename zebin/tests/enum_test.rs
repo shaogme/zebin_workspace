@@ -152,7 +152,7 @@ fn test_enum_layout_mismatch_rejected() {
     let mut buf = zebin::serialize(value).unwrap();
 
     let object_pos = 4 + 4;
-    let label_encoding_pos = object_pos + 12 + 14 + 8 + 2;
+    let label_encoding_pos = object_pos + 12 + 8 + 2;
 
     buf[label_encoding_pos] = zebin::schema::FieldEncoding::Fixed as u8;
 

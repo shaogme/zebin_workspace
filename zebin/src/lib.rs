@@ -90,7 +90,7 @@ pub mod schema {
     pub use crate::core_impl::schema::{
         FieldEncoding, FieldEntry, FieldTableReader, MAX_SCHEMA_FIELDS, ObjectEncoding,
         SchemaObjectHeader, SchemaRevision, StableSchemaKey, process_field_table,
-        process_trailing_field_table,
+        process_forward_field_table,
     };
 }
 

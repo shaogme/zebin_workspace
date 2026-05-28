@@ -289,8 +289,8 @@ where
     Ok(())
 }
 
-/// Helper for processing schema-aware objects with trailing field tables.
-pub fn process_trailing_field_table<'a, C, F>(
+/// Helper for processing schema-aware objects with forward field tables.
+pub fn process_forward_field_table<'a, C, F>(
     cursor: &mut Cursor<'a>,
     field_count: usize,
     context: &mut C,
@@ -300,59 +300,41 @@ where
     C: ValidationContext + ?Sized,
     F: FnMut(FieldEntry, usize, Cursor<'a>, &mut C) -> Result<(), AccessError>,
 {
-    let object_start = cursor.pos() - 12;
-    let object_end = cursor.limit();
-
-    if object_end < object_start + 20 {
-        return Err(context.validation_error(
-            "Object too short to contain trailing table metadata",
-            cursor.pos(),
-        ));
-    }
-
-    let offset_pos = object_end - 8;
-    let mut offset_cursor = cursor.with_pos(offset_pos);
-    let table_offset = offset_cursor.read_u32(context)? as usize;
-    let _object_len = offset_cursor.read_u32(context)? as usize;
-
-    let table_abs_pos = object_start + table_offset;
-    if table_abs_pos < object_start + 12 || table_abs_pos > offset_pos {
-        return Err(context.validation_error("Invalid table offset", offset_pos));
-    }
-
+    let table_start = cursor.pos();
     let table_len = field_count * FieldEntry::SIZE;
-    if table_abs_pos + table_len > offset_pos {
-        return Err(context.validation_error("Field table exceeds object boundary", table_abs_pos));
+    let payloads_start = table_start + table_len;
+
+    if payloads_start > cursor.limit() {
+        return Err(context.validation_error("Field table exceeds object boundary", table_start));
     }
 
     if field_count > MAX_SCHEMA_FIELDS {
         return Err(
-            context.validation_error("Field count exceeds maximum schema fields", object_start)
+            context.validation_error("Field count exceeds maximum schema fields", table_start)
         );
     }
 
-    let mut table_cursor = cursor.with_pos(table_abs_pos);
-    let mut payload_pos = object_start + 12;
+    let mut current_payload_pos = payloads_start;
     for _ in 0..field_count {
-        let entry_pos = table_cursor.pos();
-        let entry = FieldEntry::access(&mut table_cursor, context)?;
+        let entry_pos = cursor.pos();
+        let entry = FieldEntry::access(cursor, context)?;
         let payload_len = entry.payload_len as usize;
-        if payload_pos + payload_len > table_abs_pos {
-            return Err(
-                context.validation_error("Field payload exceeds field table boundary", payload_pos)
-            );
+
+        if current_payload_pos + payload_len > cursor.limit() {
+            return Err(context
+                .validation_error("Field payload exceeds object boundary", current_payload_pos));
         }
 
-        context.check_range(payload_pos, payload_len)?;
+        context.check_range(current_payload_pos, payload_len)?;
         let field_cursor = cursor
-            .with_pos(payload_pos)
-            .with_limit(payload_pos + payload_len);
+            .with_pos(current_payload_pos)
+            .with_limit(current_payload_pos + payload_len);
 
         handler(entry, entry_pos, field_cursor, context)?;
 
-        payload_pos += payload_len;
+        current_payload_pos += payload_len;
     }
 
-    *cursor = cursor.with_pos(object_end);
+    *cursor = cursor.with_pos(current_payload_pos);
     Ok(())
 }

@@ -136,16 +136,7 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
         quote! {}
     };
 
-    let payload_polls = fields.iter().map(|(_, field)| {
-        let state_ident = &field.state_ident;
-        quote! {
-            if self.#state_ident.poll_write(serializer)?.is_pending() {
-                return Ok(::core::task::Poll::Pending);
-            }
-        }
-    });
-
-    let table_write_and_len = if has_schema(record) {
+    let table_write = if has_schema(record) {
         let table_polls = fields.iter().map(|(_, field)| {
             let state_ident = &field.state_ident;
             let field_id = field.field_id.expect("field ids validated");
@@ -163,20 +154,25 @@ fn record_poll_logic(record: &RecordSpec<'_>) -> proc_macro2::TokenStream {
         });
 
         quote! {
-            self.__schema_serializer.mark_table_start(serializer);
             #(#table_polls)*
-            if self.__schema_serializer.poll_write_footer(serializer)?.is_pending() {
-                return Ok(::core::task::Poll::Pending);
-            }
         }
     } else {
         quote! {}
     };
 
+    let payload_polls = fields.iter().map(|(_, field)| {
+        let state_ident = &field.state_ident;
+        quote! {
+            if self.#state_ident.poll_write(serializer)?.is_pending() {
+                return Ok(::core::task::Poll::Pending);
+            }
+        }
+    });
+
     quote! {
         #header_write
+        #table_write
         #(#payload_polls)*
-        #table_write_and_len
         Ok(::core::task::Poll::Ready(()))
     }
 }

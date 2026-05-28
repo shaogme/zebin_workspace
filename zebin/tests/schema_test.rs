@@ -33,17 +33,8 @@ fn test_vtable_generation() {
     let num_fields = u16::from_le_bytes(buf[object_pos + 8..object_pos + 10].try_into().unwrap());
     assert_eq!(num_fields, 3);
 
-    // Read the trailing metadata from the end of the buffer
-    let trailer_pos = buf.len() - 8;
-    let table_offset =
-        u32::from_le_bytes(buf[trailer_pos..trailer_pos + 4].try_into().unwrap()) as usize;
-    let object_len =
-        u32::from_le_bytes(buf[trailer_pos + 4..trailer_pos + 8].try_into().unwrap()) as usize;
-
-    assert_eq!(object_len, buf.len() - object_pos);
-
-    // Locate the field table
-    let table_pos = object_pos + table_offset;
+    // Locate the field table (starts immediately after the 12-byte header)
+    let table_pos = object_pos + 12;
 
     let field0_id = u16::from_le_bytes(buf[table_pos..table_pos + 2].try_into().unwrap());
     let field0_len =
@@ -67,6 +58,9 @@ fn test_vtable_generation() {
 
     assert_eq!(field2_id, 2);
     assert_eq!(field2_len, 4); // u32 age (4 bytes)
+
+    let expected_len = 12 + 3 * 8 + (7 + 8 + 4);
+    assert_eq!(buf.len() - object_pos, expected_len);
 }
 
 #[cfg(feature = "alloc")]
@@ -117,17 +111,8 @@ fn test_vtable_generation_no_alloc() {
     let num_fields = u16::from_le_bytes(buf[object_pos + 8..object_pos + 10].try_into().unwrap());
     assert_eq!(num_fields, 2);
 
-    // Read the trailing metadata from the end of the buffer
-    let trailer_pos = written - 8;
-    let table_offset =
-        u32::from_le_bytes(buf[trailer_pos..trailer_pos + 4].try_into().unwrap()) as usize;
-    let object_len =
-        u32::from_le_bytes(buf[trailer_pos + 4..trailer_pos + 8].try_into().unwrap()) as usize;
-
-    assert_eq!(object_len, written - object_pos);
-
-    // Locate the field table
-    let table_pos = object_pos + table_offset;
+    // Locate the field table (starts immediately after the 12-byte header)
+    let table_pos = object_pos + 12;
 
     let field0_id = u16::from_le_bytes(buf[table_pos..table_pos + 2].try_into().unwrap());
     let field0_len =
@@ -143,6 +128,9 @@ fn test_vtable_generation_no_alloc() {
 
     assert_eq!(field1_id, 2);
     assert_eq!(field1_len, 4); // u32 value (4 bytes)
+
+    let expected_len = 12 + 2 * 8 + (8 + 4);
+    assert_eq!(written - object_pos, expected_len);
 }
 
 #[test]
