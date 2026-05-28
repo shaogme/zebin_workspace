@@ -14,7 +14,13 @@ pub(crate) use block_index::skip_block_index;
 
 /// The archived representation of an iterator-based collection.
 #[derive(Clone)]
-pub struct ArchivedIter<'a, A> {
+pub struct ArchivedIter<A> {
+    _marker: PhantomData<A>,
+}
+
+/// The read view of an iterator-based collection.
+#[derive(Clone)]
+pub struct ArchivedIterView<'a, A> {
     pub(crate) source: &'a dyn ChunkSource,
     pub(crate) start_pos: usize,
     pub(crate) len: usize,
@@ -22,7 +28,7 @@ pub struct ArchivedIter<'a, A> {
     pub(crate) _marker: PhantomData<A>,
 }
 
-impl<'a, A> ArchivedIter<'a, A> {
+impl<'a, A> ArchivedIterView<'a, A> {
     pub fn len(&self) -> usize {
         self.len
     }
@@ -197,19 +203,19 @@ impl<'a, A> ArchivedIter<'a, A> {
     }
 }
 
-impl<A> ArchivedLayout for ArchivedIter<'_, A>
+impl<A> ArchivedLayout for ArchivedIter<A>
 where
     A: ArchivedLayout,
 {
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
-impl<A> Access for ArchivedIter<'_, A>
+impl<A> Access for ArchivedIter<A>
 where
     A: Access,
 {
     type View<'a>
-        = ArchivedIter<'a, A>
+        = ArchivedIterView<'a, A>
     where
         Self: 'a;
 
@@ -230,7 +236,7 @@ where
         // Try to parse trailing block index.
         let block_index = deserialize_block_index(cursor, context, len)?;
 
-        Ok(ArchivedIter {
+        Ok(ArchivedIterView {
             source: cursor.source(),
             start_pos,
             len,
@@ -250,7 +256,7 @@ where
     }
 }
 
-impl<'marker, A> ArchivedIter<'marker, A> {
+impl<A> ArchivedIter<A> {
     fn access_sequence_body<'a, C>(
         cursor: &mut Cursor<'a>,
         context: &mut C,
@@ -323,7 +329,7 @@ impl<'a, A: Access + 'a> Iterator for ArchivedIterIter<'a, A> {
     }
 }
 
-impl<'a, A: 'a> ArchivedField<'a> for ArchivedIter<'a, A> {}
+impl<'a, A: 'a> ArchivedField<'a> for ArchivedIterView<'a, A> {}
 
 #[cfg(test)]
 mod tests {
@@ -333,7 +339,7 @@ mod tests {
     fn test_archived_iter_empty() {
         let bytes = [0x00u8];
         let slice: &[u8] = &bytes;
-        let iter: ArchivedIter<'_, u8> = ArchivedIter {
+        let iter: ArchivedIterView<'_, u8> = ArchivedIterView {
             source: &slice as &dyn ChunkSource,
             start_pos: 0,
             len: 0,
@@ -349,7 +355,7 @@ mod tests {
     fn test_archived_iter_invalid_marker() {
         let bytes = [0x02u8, 0x00u8]; // Invalid marker
         let slice: &[u8] = &bytes;
-        let iter: ArchivedIter<'_, u32> = ArchivedIter {
+        let iter: ArchivedIterView<'_, u32> = ArchivedIterView {
             source: &slice as &dyn ChunkSource,
             start_pos: 0,
             len: 1,

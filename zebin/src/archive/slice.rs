@@ -250,7 +250,7 @@ impl<T> Archive for [T]
 where
     T: Archive,
 {
-    type Archived = crate::archive::ArchivedIter<'static, T::Archived>;
+    type Archived = crate::archive::ArchivedIter<T::Archived>;
 }
 
 /// Borrowed-iterator sequence serializer for DST inputs (`[T]`).

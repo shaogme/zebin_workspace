@@ -53,4 +53,4 @@ mod collections;
 mod iter;
 #[cfg(feature = "alloc")]
 pub(crate) use iter::skip_block_index;
-pub use iter::{ArchivedIter, IterArchive, IterSerializer};
+pub use iter::{ArchivedIter, ArchivedIterView, IterArchive, IterSerializer};

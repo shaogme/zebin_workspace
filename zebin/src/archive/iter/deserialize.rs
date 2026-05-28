@@ -11,7 +11,7 @@ use alloc::{
 use std::collections::{HashMap, HashSet};
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-use super::{DummyContext, IterArchive, access::ArchivedIter};
+use super::{DummyContext, IterArchive, access::ArchivedIterView};
 
 #[cfg(feature = "alloc")]
 pub(crate) fn access_next_element<'a, T: Access>(
@@ -32,10 +32,10 @@ pub(crate) fn access_next_element<'a, T: Access>(
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Deserialize<Vec<U>> for ArchivedIter<'_, T>
+impl<'a, T, U> Deserialize<Vec<U>> for ArchivedIterView<'a, T>
 where
     T: Access,
-    for<'a> T::View<'a>: Deserialize<U>,
+    for<'b> T::View<'b>: Deserialize<U>,
 {
     fn deserialize(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len);
@@ -49,10 +49,10 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Deserialize<VecDeque<U>> for ArchivedIter<'_, T>
+impl<'a, T, U> Deserialize<VecDeque<U>> for ArchivedIterView<'a, T>
 where
     T: Access,
-    for<'a> T::View<'a>: Deserialize<U>,
+    for<'b> T::View<'b>: Deserialize<U>,
 {
     fn deserialize(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut out = VecDeque::with_capacity(self.len);
@@ -66,10 +66,10 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Deserialize<BTreeSet<U>> for ArchivedIter<'_, T>
+impl<'a, T, U> Deserialize<BTreeSet<U>> for ArchivedIterView<'a, T>
 where
     T: Access,
-    for<'a> T::View<'a>: Deserialize<U>,
+    for<'b> T::View<'b>: Deserialize<U>,
     U: Ord,
 {
     fn deserialize(&self) -> Result<BTreeSet<U>, ZebinError> {
@@ -84,10 +84,10 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> Deserialize<BinaryHeap<U>> for ArchivedIter<'_, T>
+impl<'a, T, U> Deserialize<BinaryHeap<U>> for ArchivedIterView<'a, T>
 where
     T: Access,
-    for<'a> T::View<'a>: Deserialize<U>,
+    for<'b> T::View<'b>: Deserialize<U>,
     U: Ord,
 {
     fn deserialize(&self) -> Result<BinaryHeap<U>, ZebinError> {
@@ -102,10 +102,10 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<T, U> Deserialize<HashSet<U>> for ArchivedIter<'_, T>
+impl<'a, T, U> Deserialize<HashSet<U>> for ArchivedIterView<'a, T>
 where
     T: Access,
-    for<'a> T::View<'a>: Deserialize<U>,
+    for<'b> T::View<'b>: Deserialize<U>,
     U: Eq + core::hash::Hash,
 {
     fn deserialize(&self) -> Result<HashSet<U>, ZebinError> {
@@ -120,7 +120,7 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, I, U> Deserialize<IterArchive<I, U>> for ArchivedIter<'_, T>
+impl<'a, T, I, U> Deserialize<IterArchive<I, U>> for ArchivedIterView<'a, T>
 where
     Self: Deserialize<I>,
 {
@@ -130,10 +130,10 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<T, UK, UV> Deserialize<BTreeMap<UK, UV>> for ArchivedIter<'_, T>
+impl<'a, T, UK, UV> Deserialize<BTreeMap<UK, UV>> for ArchivedIterView<'a, T>
 where
     T: Access,
-    for<'a> T::View<'a>: Deserialize<(UK, UV)>,
+    for<'b> T::View<'b>: Deserialize<(UK, UV)>,
     UK: Ord,
 {
     fn deserialize(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
@@ -149,10 +149,10 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<T, UK, UV> Deserialize<HashMap<UK, UV>> for ArchivedIter<'_, T>
+impl<'a, T, UK, UV> Deserialize<HashMap<UK, UV>> for ArchivedIterView<'a, T>
 where
     T: Access,
-    for<'a> T::View<'a>: Deserialize<(UK, UV)>,
+    for<'b> T::View<'b>: Deserialize<(UK, UV)>,
     UK: Eq + core::hash::Hash,
 {
     fn deserialize(&self) -> Result<HashMap<UK, UV>, ZebinError> {

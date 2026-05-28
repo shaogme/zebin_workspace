@@ -15,9 +15,9 @@ mod deserialize;
 mod serialize;
 
 // Re-export public API
-pub use access::ArchivedIter;
 #[cfg(feature = "alloc")]
 pub(crate) use access::skip_block_index;
+pub use access::{ArchivedIter, ArchivedIterView};
 pub(crate) use serialize::OwnedIterSerializer;
 pub use serialize::{IterSerializer, SeqSerializer, measure_block_index_overhead};
 
@@ -96,7 +96,7 @@ where
     for<'a> &'a I: IntoIterator<Item = &'a T>,
     T: Archive,
 {
-    type Archived = ArchivedIter<'static, T::Archived>;
+    type Archived = ArchivedIter<T::Archived>;
 }
 
 impl<I, T> Serialize for IterArchive<I, T>
