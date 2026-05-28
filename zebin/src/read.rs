@@ -47,7 +47,7 @@ where
     }
 
     pub fn is_finished(&self) -> bool {
-        self.offset >= self.storage.total_len()
+        self.storage.is_eof(self.offset)
     }
 
     pub fn access(
@@ -74,8 +74,7 @@ where
         T: Archive,
         T::Archived: Access,
     {
-        let len = self.storage.total_len();
-        if self.offset >= len {
+        if self.is_finished() {
             self.storage.sharder().advance()?;
             self.offset = 0;
         }
@@ -133,7 +132,7 @@ where
     let (result, error_path) = {
         let mut validator = Validator::with_config(storage, config, stack.as_deref_mut());
         let res = T::Archived::validate(&mut cursor, &mut validator).and_then(|()| {
-            if cursor.pos() != storage.total_len() {
+            if !storage.is_eof(cursor.pos()) {
                 Err(validator.validation_error("Trailing bytes after root object", cursor.pos()))
             } else {
                 Ok(())

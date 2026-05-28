@@ -41,7 +41,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
         path: Option<&'p mut ValidationPathStack>,
     ) -> Self {
         Self {
-            view: ChunkedView::new_ref(data),
+            view: ChunkedView::new(data),
             depth: 0,
             config,
             path,
@@ -70,16 +70,16 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
 
     pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
         if size == 0 {
-            if pos <= self.view.len() {
+            if self.view.source.is_eof(pos) {
                 return Ok(());
             }
             return Err(self.validation_error("Pointer out of bounds", pos));
         }
 
-        let end = pos
+        let _ = pos
             .checked_add(size)
             .ok_or_else(|| self.validation_error("Pointer range overflow", pos))?;
-        if end > self.view.len() {
+        if self.view.source.get_buf(pos, size).is_err() {
             return Err(self.validation_error("Pointer out of bounds", pos));
         }
         Ok(())

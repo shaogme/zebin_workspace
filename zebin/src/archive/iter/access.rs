@@ -334,7 +334,7 @@ mod tests {
         let bytes = [0x00u8];
         let slice: &[u8] = &bytes;
         let iter: ArchivedIter<'_, u8> = ArchivedIter {
-            view: ChunkedView::new_ref(&slice as &dyn ChunkSource),
+            view: ChunkedView::new(&slice as &dyn ChunkSource),
             start_pos: 0,
             len: 0,
             block_index: None,
@@ -350,7 +350,7 @@ mod tests {
         let bytes = [0x02u8, 0x00u8]; // Invalid marker
         let slice: &[u8] = &bytes;
         let iter: ArchivedIter<'_, u32> = ArchivedIter {
-            view: ChunkedView::new_ref(&slice as &dyn ChunkSource),
+            view: ChunkedView::new(&slice as &dyn ChunkSource),
             start_pos: 0,
             len: 1,
             block_index: None,

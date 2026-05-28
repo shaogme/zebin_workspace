@@ -279,10 +279,7 @@ where
     }) = reader.next(context)?
     {
         let payload_len = entry.payload_len as usize;
-        let field_cursor = reader
-            .cursor
-            .with_pos(reader.cursor.pos() - payload_len)
-            .with_limit(reader.cursor.pos());
+        let field_cursor = reader.cursor.with_pos(reader.cursor.pos() - payload_len);
         handler(entry, entry_pos, field_cursor, context)?;
     }
     *cursor = reader.cursor;
@@ -304,10 +301,6 @@ where
     let table_len = field_count * FieldEntry::SIZE;
     let payloads_start = table_start + table_len;
 
-    if payloads_start > cursor.limit() {
-        return Err(context.validation_error("Field table exceeds object boundary", table_start));
-    }
-
     if field_count > MAX_SCHEMA_FIELDS {
         return Err(
             context.validation_error("Field count exceeds maximum schema fields", table_start)
@@ -320,15 +313,8 @@ where
         let entry = FieldEntry::access(cursor, context)?;
         let payload_len = entry.payload_len as usize;
 
-        if current_payload_pos + payload_len > cursor.limit() {
-            return Err(context
-                .validation_error("Field payload exceeds object boundary", current_payload_pos));
-        }
-
         context.check_range(current_payload_pos, payload_len)?;
-        let field_cursor = cursor
-            .with_pos(current_payload_pos)
-            .with_limit(current_payload_pos + payload_len);
+        let field_cursor = cursor.with_pos(current_payload_pos);
 
         handler(entry, entry_pos, field_cursor, context)?;
 

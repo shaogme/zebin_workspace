@@ -100,8 +100,8 @@ impl ChunkSource for [u8] {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.len()
+    fn is_eof(&self, pos: usize) -> bool {
+        pos >= self.len()
     }
 }
 
@@ -135,8 +135,8 @@ impl ChunkSource for Vec<u8> {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.len()
+    fn is_eof(&self, pos: usize) -> bool {
+        pos >= self.len()
     }
 }
 
@@ -191,8 +191,8 @@ impl<'a> ChunkSource for SliceSerializer<'a> {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.buf.len()
+    fn is_eof(&self, pos: usize) -> bool {
+        pos >= self.buf.len()
     }
 }
 
@@ -264,8 +264,8 @@ impl ChunkSource for VecSerializer {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.buf.len()
+    fn is_eof(&self, pos: usize) -> bool {
+        pos >= self.buf.len()
     }
 }
 

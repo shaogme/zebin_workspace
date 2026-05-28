@@ -60,9 +60,8 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             }
             Ok(Buf::new(&self.buf[pos..end]))
         }
-
-        fn total_len(&self) -> usize {
-            self.buf.len()
+        fn is_eof(&self, pos: usize) -> bool {
+            pos >= self.buf.len()
         }
     }
 

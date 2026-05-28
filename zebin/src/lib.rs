@@ -118,8 +118,7 @@ pub mod io {
     };
     #[cfg(feature = "alloc")]
     pub use crate::traits_impl::{
-        BackwardSequenceStrategy, FixedSequenceStrategy, ForwardSequenceStrategy,
-        SequenceAccessStrategy,
+        FixedSequenceStrategy, ForwardSequenceStrategy, SequenceAccessStrategy,
     };
     pub use crate::utils::chunk::{Buf, BufMut};
     pub use crate::utils::cursor::Cursor;

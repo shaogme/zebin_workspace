@@ -62,7 +62,7 @@ impl<'a> core::ops::DerefMut for BufMut<'a> {
 
 pub trait ChunkSource {
     fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError>;
-    fn total_len(&self) -> usize;
+    fn is_eof(&self, pos: usize) -> bool;
 }
 
 pub trait ChunkSourceMut: ChunkSource {
@@ -77,8 +77,8 @@ impl<S: ChunkSource + ?Sized> ChunkSource for &S {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        (**self).total_len()
+    fn is_eof(&self, pos: usize) -> bool {
+        (**self).is_eof(pos)
     }
 }
 
@@ -89,8 +89,8 @@ impl<S: ChunkSource + ?Sized> ChunkSource for &mut S {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        (**self).total_len()
+    fn is_eof(&self, pos: usize) -> bool {
+        (**self).is_eof(pos)
     }
 }
 
@@ -121,8 +121,12 @@ impl ChunkSource for &[&[u8]] {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.iter().map(|c| c.len()).sum()
+    fn is_eof(&self, pos: usize) -> bool {
+        let mut sum = 0;
+        for chunk in self.iter() {
+            sum += chunk.len();
+        }
+        pos >= sum
     }
 }
 
@@ -147,8 +151,12 @@ impl ChunkSource for Vec<&[u8]> {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.iter().map(|c| c.len()).sum()
+    fn is_eof(&self, pos: usize) -> bool {
+        let mut sum = 0;
+        for chunk in self.iter() {
+            sum += chunk.len();
+        }
+        pos >= sum
     }
 }
 
@@ -172,8 +180,12 @@ impl ChunkSource for &mut [&mut [u8]] {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.iter().map(|c| c.len()).sum()
+    fn is_eof(&self, pos: usize) -> bool {
+        let mut sum = 0;
+        for chunk in self.iter() {
+            sum += chunk.len();
+        }
+        pos >= sum
     }
 }
 
@@ -217,8 +229,12 @@ impl ChunkSource for Vec<&mut [u8]> {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.iter().map(|c| c.len()).sum()
+    fn is_eof(&self, pos: usize) -> bool {
+        let mut sum = 0;
+        for chunk in self.iter() {
+            sum += chunk.len();
+        }
+        pos >= sum
     }
 }
 
@@ -248,7 +264,6 @@ impl ChunkSourceMut for Vec<&mut [u8]> {
 
 #[derive(Clone)]
 pub struct ChunkedView<S: ?Sized> {
-    pub(crate) total_len: usize,
     pub(crate) source: S,
 }
 
@@ -257,23 +272,7 @@ impl<S: ChunkSource + ?Sized> ChunkedView<S> {
     where
         S: Sized,
     {
-        let total_len = source.total_len();
-        Self { source, total_len }
-    }
-
-    pub fn new_ref(source: &S) -> ChunkedView<&S> {
-        let total_len = source.total_len();
-        ChunkedView { source, total_len }
-    }
-
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.total_len
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.total_len == 0
+        Self { source }
     }
 }
 
@@ -289,7 +288,6 @@ impl<S: ChunkSource + ?Sized> Index<usize> for ChunkedView<S> {
 
 #[derive(Clone)]
 pub struct ChunkedViewMut<S: ?Sized> {
-    pub(crate) total_len: usize,
     pub(crate) source: S,
 }
 
@@ -298,18 +296,7 @@ impl<S: ChunkSourceMut + ?Sized> ChunkedViewMut<S> {
     where
         S: Sized,
     {
-        let total_len = source.total_len();
-        Self { source, total_len }
-    }
-
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.total_len
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.total_len == 0
+        Self { source }
     }
 }
 

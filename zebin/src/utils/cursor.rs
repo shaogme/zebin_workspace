@@ -6,7 +6,6 @@ use crate::utils::{byteops, padding_for_alignment};
 pub struct Cursor<'a> {
     view: ChunkedView<&'a (dyn ChunkSource + 'a)>,
     pos: usize,
-    limit: usize,
 }
 
 impl<'a> Clone for Cursor<'a> {
@@ -15,16 +14,14 @@ impl<'a> Clone for Cursor<'a> {
         Self {
             view: self.view.clone(),
             pos: self.pos,
-            limit: self.limit,
         }
     }
 }
 
 impl<'a> Cursor<'a> {
     pub fn new(source: &'a (dyn ChunkSource + 'a), pos: usize) -> Self {
-        let view = ChunkedView::new_ref(source);
-        let limit = view.len();
-        Self { view, pos, limit }
+        let view = ChunkedView::new(source);
+        Self { view, pos }
     }
 
     pub fn view(&self) -> &ChunkedView<&'a (dyn ChunkSource + 'a)> {
@@ -35,27 +32,10 @@ impl<'a> Cursor<'a> {
         self.pos
     }
 
-    pub fn limit(&self) -> usize {
-        self.limit
-    }
-
-    pub fn remaining(&self) -> usize {
-        self.limit.saturating_sub(self.pos)
-    }
-
     pub fn with_pos(&self, pos: usize) -> Self {
         Self {
             view: self.view.clone(),
             pos,
-            limit: self.limit,
-        }
-    }
-
-    pub fn with_limit(&self, limit: usize) -> Self {
-        Self {
-            view: self.view.clone(),
-            pos: self.pos,
-            limit,
         }
     }
 
@@ -67,9 +47,6 @@ impl<'a> Cursor<'a> {
             .pos
             .checked_add(len)
             .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
-        if end > self.limit {
-            return Err(context.validation_error("Cursor advance out of limit", self.pos));
-        }
         context.check_range(self.pos, len)?;
         self.pos = end;
         Ok(())
@@ -107,9 +84,6 @@ impl<'a> Cursor<'a> {
     where
         C: ValidationContext + ?Sized,
     {
-        if self.pos + len > self.limit {
-            return Err(context.validation_error("Peek out of limit", self.pos));
-        }
         context.check_range(self.pos, len)?;
 
         let buf = (*self.view.source).get_buf(self.pos, len).map_err(|_| {
@@ -242,7 +216,6 @@ impl<'a> CursorMut<'a> {
         }
         let progress = SinkProgress::from_accepted(bytes.len(), accepted);
         self.pos += progress.accepted_for(bytes.len());
-        self.view.total_len = self.view.source.total_len();
         Ok(progress)
     }
 
@@ -265,7 +238,6 @@ impl<'a> CursorMut<'a> {
         }
         let progress = SinkProgress::from_accepted(len, accepted);
         self.pos += progress.accepted_for(len);
-        self.view.total_len = self.view.source.total_len();
         Ok(progress)
     }
 }

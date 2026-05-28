@@ -54,8 +54,8 @@ impl ChunkSource for Mmap {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.data.len()
+    fn is_eof(&self, pos: usize) -> bool {
+        pos >= self.data.len()
     }
 }
 
@@ -185,8 +185,8 @@ impl ChunkSource for MmapSerializer {
     }
 
     #[inline]
-    fn total_len(&self) -> usize {
-        self.mmap.len()
+    fn is_eof(&self, pos: usize) -> bool {
+        pos >= self.mmap.len()
     }
 }
 

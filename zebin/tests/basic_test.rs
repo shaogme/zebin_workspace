@@ -76,9 +76,8 @@ fn test_chunked_writer_resume() {
             }
             Ok(Buf::new(&self.buf[pos..end]))
         }
-
-        fn total_len(&self) -> usize {
-            self.buf.len()
+        fn is_eof(&self, pos: usize) -> bool {
+            pos >= self.buf.len()
         }
     }
 
@@ -282,12 +281,11 @@ impl ChunkSource for ShardedStorage {
             Err(ZebinError::BufferTooSmall { pos, required: len })
         }
     }
-
-    fn total_len(&self) -> usize {
+    fn is_eof(&self, pos: usize) -> bool {
         if self.current_index < self.shards.len() {
-            self.shards[self.current_index].len()
+            pos >= self.shards[self.current_index].len()
         } else {
-            0
+            true
         }
     }
 }

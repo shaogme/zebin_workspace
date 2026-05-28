@@ -79,13 +79,11 @@ pub(crate) fn deserialize_block_index<C>(
 where
     C: ValidationContext + ?Sized,
 {
-    // No index written for short sequences.
-    if cursor.remaining() == 0 {
-        return Ok(None);
-    }
-
-    // Peek at the next byte – if it isn't the magic, there is no index.
-    let peeked = cursor.peek_exact(1, context)?;
+    // Peek at the next byte – if we can't or it isn't the magic, there is no index.
+    let peeked = match cursor.peek_exact(1, context) {
+        Ok(bytes) => bytes,
+        Err(_) => return Ok(None),
+    };
     if peeked[0] != BLOCK_INDEX_MAGIC {
         return Ok(None);
     }
@@ -153,10 +151,10 @@ pub(crate) fn skip_block_index<C>(
 where
     C: ValidationContext + ?Sized,
 {
-    if cursor.remaining() == 0 {
-        return Ok(());
-    }
-    let peeked = cursor.peek_exact(1, context)?;
+    let peeked = match cursor.peek_exact(1, context) {
+        Ok(bytes) => bytes,
+        Err(_) => return Ok(()),
+    };
     if peeked[0] != BLOCK_INDEX_MAGIC {
         return Ok(());
     }
