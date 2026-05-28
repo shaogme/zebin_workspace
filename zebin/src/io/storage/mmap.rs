@@ -52,6 +52,11 @@ impl ChunkSource for Mmap {
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         if idx == 0 { Some(&self.data) } else { None }
     }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.data.len()
+    }
 }
 
 impl Storage for Mmap {
@@ -193,6 +198,11 @@ impl ChunkSource for MmapSerializer {
     #[inline]
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         if idx == 0 { Some(&self.mmap[..]) } else { None }
+    }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.mmap.len()
     }
 }
 

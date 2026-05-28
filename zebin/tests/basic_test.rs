@@ -77,6 +77,10 @@ fn test_chunked_writer_resume() {
                 None
             }
         }
+
+        fn total_len(&self) -> usize {
+            self.buf.len()
+        }
     }
 
     impl<'a> ChunkSourceMut for LimitedSink<'a> {
@@ -305,6 +309,14 @@ impl ChunkSource for ShardedStorage {
             }
         } else {
             None
+        }
+    }
+
+    fn total_len(&self) -> usize {
+        if self.current_index < self.shards.len() {
+            self.shards[self.current_index].len()
+        } else {
+            0
         }
     }
 }

@@ -61,6 +61,10 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
                 None
             }
         }
+
+        fn total_len(&self) -> usize {
+            self.buf.len()
+        }
     }
 
     impl<'a> ChunkSourceMut for LimitedSink<'a> {

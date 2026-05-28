@@ -16,15 +16,7 @@ pub trait ChunkSource {
     fn get_chunk(&self, idx: usize) -> Option<&[u8]>;
 
     /// 计算所有分块的总长度
-    fn total_len(&self) -> usize {
-        let mut len = 0;
-        let mut idx = 0;
-        while let Some(chunk) = self.get_chunk(idx) {
-            len += chunk.len();
-            idx += 1;
-        }
-        len
-    }
+    fn total_len(&self) -> usize;
 }
 
 pub trait ChunkSourceMut: ChunkSource {
@@ -134,6 +126,11 @@ impl<S: ChunkSource + ?Sized> ChunkSource for &S {
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         (**self).get_chunk(idx)
     }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        (**self).total_len()
+    }
 }
 
 impl<S: ChunkSource + ?Sized> ChunkSource for &mut S {
@@ -145,6 +142,11 @@ impl<S: ChunkSource + ?Sized> ChunkSource for &mut S {
     #[inline]
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         (**self).get_chunk(idx)
+    }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        (**self).total_len()
     }
 }
 
@@ -185,6 +187,11 @@ impl ChunkSource for &[&[u8]] {
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         self.get(idx).copied()
     }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.iter().map(|c| c.len()).sum()
+    }
 }
 
 // Vec of slices: Vec<&'a [u8]>
@@ -199,6 +206,11 @@ impl ChunkSource for Vec<&[u8]> {
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         self.get(idx).copied()
     }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.iter().map(|c| c.len()).sum()
+    }
 }
 
 // Slice of mutable slices: &'a mut [&'b mut [u8]]
@@ -211,6 +223,11 @@ impl ChunkSource for &mut [&mut [u8]] {
     #[inline]
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         self.get(idx).map(|s| &**s)
+    }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.iter().map(|c| c.len()).sum()
     }
 }
 
@@ -232,6 +249,11 @@ impl ChunkSource for Vec<&mut [u8]> {
     #[inline]
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         self.get(idx).map(|s| &**s)
+    }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.iter().map(|c| c.len()).sum()
     }
 }
 

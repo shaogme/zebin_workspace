@@ -101,6 +101,11 @@ impl ChunkSource for [u8] {
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         if idx == 0 { Some(self) } else { None }
     }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.len()
+    }
 }
 
 impl Storage for [u8] {
@@ -130,6 +135,11 @@ impl ChunkSource for Vec<u8> {
         } else {
             None
         }
+    }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.len()
     }
 }
 
@@ -200,6 +210,11 @@ impl<'a> ChunkSource for SliceSerializer<'a> {
     #[inline]
     fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
         if idx == 0 { Some(self.buf) } else { None }
+    }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.buf.len()
     }
 }
 
@@ -285,6 +300,11 @@ impl ChunkSource for VecSerializer {
         } else {
             None
         }
+    }
+
+    #[inline]
+    fn total_len(&self) -> usize {
+        self.buf.len()
     }
 }
 
