@@ -9,6 +9,8 @@ use zebin::io::SliceSerializer;
 use zebin::prelude::{CursorMut, SinkProgress, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::reader;
+#[cfg(feature = "alloc")]
+use zebin::utils::chunk::{ChunkSource, ChunkSourceMut};
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
@@ -63,7 +65,7 @@ fn test_chunked_writer_resume() {
         limit: &'a Cell<usize>,
     }
 
-    impl<'a> zebin::utils::chunk::ChunkSource for LimitedSink<'a> {
+    impl<'a> ChunkSource for LimitedSink<'a> {
         fn chunk_count(&self) -> usize {
             1
         }
@@ -77,7 +79,7 @@ fn test_chunked_writer_resume() {
         }
     }
 
-    impl<'a> zebin::utils::chunk::ChunkSourceMut for LimitedSink<'a> {
+    impl<'a> ChunkSourceMut for LimitedSink<'a> {
         fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
             if idx == 0 {
                 Some(self.buf.as_mut_slice())
@@ -289,7 +291,7 @@ impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
 }
 
 #[cfg(feature = "alloc")]
-impl zebin::utils::chunk::ChunkSource for ShardedStorage {
+impl ChunkSource for ShardedStorage {
     fn chunk_count(&self) -> usize {
         1
     }

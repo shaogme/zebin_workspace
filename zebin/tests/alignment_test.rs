@@ -6,6 +6,8 @@ use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
 use zebin::prelude::{CursorMut, SinkProgress, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
+use zebin::utils::chunk::{ChunkSource, ChunkSourceMut};
+#[cfg(feature = "alloc")]
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize};
 use zebin::{access, writer};
 
@@ -47,7 +49,7 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
         limit: &'a Cell<usize>,
     }
 
-    impl<'a> zebin::utils::chunk::ChunkSource for LimitedSink<'a> {
+    impl<'a> ChunkSource for LimitedSink<'a> {
         fn chunk_count(&self) -> usize {
             1
         }
@@ -61,7 +63,7 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
         }
     }
 
-    impl<'a> zebin::utils::chunk::ChunkSourceMut for LimitedSink<'a> {
+    impl<'a> ChunkSourceMut for LimitedSink<'a> {
         fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
             if idx == 0 {
                 Some(self.buf.as_mut_slice())
