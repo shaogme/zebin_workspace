@@ -105,7 +105,7 @@ pub mod io {
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
     pub use crate::io_impl::storage::{
-        CursorMut, NoSharder, Sharder, StaticMode, Storage, StorageMode, StorageMut, StreamMode,
+        NoSharder, Sharder, StaticMode, Storage, StorageMode, StorageMut, StreamMode,
     };
     pub use crate::pub_fn::{deserialize, reader, writer};
     #[cfg(feature = "alloc")]
@@ -122,6 +122,7 @@ pub mod io {
         SequenceAccessStrategy,
     };
     pub use crate::utils::cursor::Cursor;
+    pub use crate::utils::cursor::CursorMut;
     pub use crate::write::{ArchiveWriter, ZebinWriter};
 }
 

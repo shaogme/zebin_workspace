@@ -205,25 +205,8 @@ impl ChunkSourceMut for MmapSerializer {
             None
         }
     }
-}
 
-impl StorageMut for MmapSerializer {
-    type Writer<'a>
-        = &'a mut Self
-    where
-        Self: 'a;
-
-    fn writer(&mut self) -> Self::Writer<'_> {
-        self
-    }
-}
-
-impl CursorMut for MmapSerializer {
-    fn pos(&self) -> usize {
-        self.archive_pos
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+    fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         if bytes.is_empty() {
             return Ok(SinkProgress::Complete);
         }
@@ -232,17 +215,28 @@ impl CursorMut for MmapSerializer {
         Ok(SinkProgress::Complete)
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+    fn align_at(
+        &mut self,
+        _pos: usize,
+        alignment: NonZeroUsize,
+    ) -> Result<SinkProgress, ZebinError> {
         let padding = padding_for_alignment(self.archive_pos, alignment);
-        self.skip(padding)
+        self.skip_at(_pos, padding)
     }
 
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+    fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
         if len == 0 {
             return Ok(SinkProgress::Complete);
         }
         let (start, end) = self.prepare_range(len)?;
         byteops::fill(&mut self.mmap[start..end], 0);
         Ok(SinkProgress::Complete)
+    }
+}
+
+impl StorageMut for MmapSerializer {
+    fn writer(&mut self) -> CursorMut<'_> {
+        let pos = self.archive_pos;
+        CursorMut::new(self, pos)
     }
 }

@@ -9,6 +9,7 @@ use core::num::NonZeroUsize;
 use crate::{
     error::ZebinError,
     traits_impl::SinkProgress,
+    utils::cursor::CursorMut,
     utils::{byteops, padding_for_alignment},
 };
 
@@ -54,19 +55,7 @@ pub trait Storage: ChunkSource {
 
 /// Unified storage layer: byte-backed write access contract.
 pub trait StorageMut: ChunkSourceMut {
-    type Writer<'a>: CursorMut
-    where
-        Self: 'a;
-
-    fn writer(&mut self) -> Self::Writer<'_>;
-}
-
-/// Cursor-based mutable writing contract.
-pub trait CursorMut {
-    fn pos(&self) -> usize;
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError>;
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
+    fn writer(&mut self) -> CursorMut<'_>;
 }
 
 impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
@@ -96,36 +85,9 @@ impl<S: Storage + ?Sized> Storage for &mut S {
 }
 
 impl<S: StorageMut + ?Sized> StorageMut for &mut S {
-    type Writer<'a>
-        = S::Writer<'a>
-    where
-        Self: 'a;
-
     #[inline]
-    fn writer(&mut self) -> Self::Writer<'_> {
+    fn writer(&mut self) -> CursorMut<'_> {
         (**self).writer()
-    }
-}
-
-impl<S: CursorMut + ?Sized> CursorMut for &mut S {
-    #[inline]
-    fn pos(&self) -> usize {
-        (**self).pos()
-    }
-
-    #[inline]
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        (**self).write(bytes)
-    }
-
-    #[inline]
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-        (**self).align(alignment)
-    }
-
-    #[inline]
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        (**self).skip(len)
     }
 }
 
@@ -246,25 +208,8 @@ impl<'a> ChunkSourceMut for SliceSerializer<'a> {
     fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
         if idx == 0 { Some(self.buf) } else { None }
     }
-}
 
-impl StorageMut for SliceSerializer<'_> {
-    type Writer<'b>
-        = &'b mut Self
-    where
-        Self: 'b;
-
-    fn writer(&mut self) -> Self::Writer<'_> {
-        self
-    }
-}
-
-impl CursorMut for SliceSerializer<'_> {
-    fn pos(&self) -> usize {
-        self.archive_pos
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+    fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         if bytes.is_empty() {
             return Ok(SinkProgress::Complete);
         }
@@ -276,12 +221,16 @@ impl CursorMut for SliceSerializer<'_> {
         Ok(SinkProgress::from_accepted(bytes.len(), len))
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+    fn align_at(
+        &mut self,
+        _pos: usize,
+        alignment: NonZeroUsize,
+    ) -> Result<SinkProgress, ZebinError> {
         let padding = padding_for_alignment(self.archive_pos, alignment);
-        self.skip(padding)
+        self.skip_at(_pos, padding)
     }
 
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+    fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
         if len == 0 {
             return Ok(SinkProgress::Complete);
         }
@@ -291,6 +240,13 @@ impl CursorMut for SliceSerializer<'_> {
             byteops::fill(&mut self.buf[start..end], 0);
         }
         Ok(SinkProgress::from_accepted(len, written))
+    }
+}
+
+impl StorageMut for SliceSerializer<'_> {
+    fn writer(&mut self) -> CursorMut<'_> {
+        let pos = self.archive_pos;
+        CursorMut::new(self, pos)
     }
 }
 
@@ -342,27 +298,8 @@ impl ChunkSourceMut for VecSerializer {
             None
         }
     }
-}
 
-#[cfg(feature = "alloc")]
-impl StorageMut for VecSerializer {
-    type Writer<'b>
-        = &'b mut Self
-    where
-        Self: 'b;
-
-    fn writer(&mut self) -> Self::Writer<'_> {
-        self
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl CursorMut for VecSerializer {
-    fn pos(&self) -> usize {
-        self.archive_pos
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+    fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         let next_pos =
             self.archive_pos
                 .checked_add(bytes.len())
@@ -374,12 +311,16 @@ impl CursorMut for VecSerializer {
         Ok(SinkProgress::Complete)
     }
 
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+    fn align_at(
+        &mut self,
+        _pos: usize,
+        alignment: NonZeroUsize,
+    ) -> Result<SinkProgress, ZebinError> {
         let padding = padding_for_alignment(self.archive_pos, alignment);
-        self.skip(padding)
+        self.skip_at(_pos, padding)
     }
 
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+    fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
         let next_pos = self
             .archive_pos
             .checked_add(len)
@@ -389,5 +330,13 @@ impl CursorMut for VecSerializer {
         self.buf.resize(self.buf.len() + len, 0);
         self.archive_pos = next_pos;
         Ok(SinkProgress::Complete)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl StorageMut for VecSerializer {
+    fn writer(&mut self) -> CursorMut<'_> {
+        let pos = self.archive_pos;
+        CursorMut::new(self, pos)
     }
 }

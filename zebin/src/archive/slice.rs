@@ -154,10 +154,10 @@ where
 {
     type Input = [T; N];
 
-    fn input<Sink: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut Sink,
+        sink: &mut CursorMut<'_>,
     ) -> Result<core::task::Poll<()>, ZebinError> {
         self.items = Some(item.into_iter());
         self.started = true;
@@ -165,9 +165,9 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: CursorMut + ?Sized>(
+    fn poll_pending(
         &mut self,
-        sink: &mut Sink,
+        sink: &mut CursorMut<'_>,
     ) -> Result<core::task::Poll<()>, ZebinError> {
         if !self.started {
             return Err(ZebinError::SerializeError {
@@ -204,10 +204,7 @@ where
         }
     }
 
-    fn finish<Sink: CursorMut + ?Sized>(
-        self,
-        sink: &mut Sink,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut CursorMut<'_>) -> Result<core::task::Poll<()>, ZebinError> {
         self.item_serializer.finish(sink)
     }
 }
@@ -301,19 +298,16 @@ where
 {
     type Input = &'a S;
 
-    fn input<Sink: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut Sink,
+        sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.iter = Some(item.into_iter());
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut Sink,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         let iter = self.iter.as_mut().ok_or(ZebinError::SerializeError {
             pos: sink.pos(),
             message: "RefIterSerializer polled before input",
@@ -341,7 +335,7 @@ where
         }
     }
 
-    fn finish<Sink: CursorMut + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.seq_serializer.finish(sink)
     }
 }

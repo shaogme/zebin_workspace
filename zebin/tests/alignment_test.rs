@@ -69,25 +69,8 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
                 None
             }
         }
-    }
 
-    impl StorageMut for LimitedSink<'_> {
-        type Writer<'b>
-            = &'b mut Self
-        where
-            Self: 'b;
-
-        fn writer(&mut self) -> Self::Writer<'_> {
-            self
-        }
-    }
-
-    impl CursorMut for LimitedSink<'_> {
-        fn pos(&self) -> usize {
-            self.buf.len()
-        }
-
-        fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
             if bytes.is_empty() {
                 return Ok(SinkProgress::Complete);
             }
@@ -100,12 +83,16 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             Ok(SinkProgress::from_accepted(bytes.len(), write_len))
         }
 
-        fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-            let padding = (alignment.get() - (self.pos() % alignment.get())) % alignment.get();
-            self.skip(padding)
+        fn align_at(
+            &mut self,
+            pos: usize,
+            alignment: NonZeroUsize,
+        ) -> Result<SinkProgress, ZebinError> {
+            let padding = (alignment.get() - (pos % alignment.get())) % alignment.get();
+            self.skip_at(pos, padding)
         }
 
-        fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+        fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
             if len == 0 {
                 return Ok(SinkProgress::Complete);
             }
@@ -116,6 +103,13 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             let skip_len = len.min(available);
             self.buf.resize(self.buf.len() + skip_len, 0);
             Ok(SinkProgress::from_accepted(len, skip_len))
+        }
+    }
+
+    impl StorageMut for LimitedSink<'_> {
+        fn writer(&mut self) -> CursorMut<'_> {
+            let pos = self.buf.len();
+            CursorMut::new(self, pos)
         }
     }
 

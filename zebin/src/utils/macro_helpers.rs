@@ -3,6 +3,7 @@ use crate::{
     io::{CursorMut, Serializer},
     schema::FieldEncoding,
 };
+use core::task::Poll;
 
 /// Helper serializer to serialize a field entry reentrantly.
 #[derive(Default, Debug, Clone)]
@@ -16,13 +17,13 @@ impl FieldEntrySerializer {
     }
 
     #[inline]
-    pub fn poll_write<S: CursorMut + ?Sized>(
+    pub fn poll_write(
         &mut self,
-        sink: &mut S,
+        sink: &mut CursorMut<'_>,
         field_id: u16,
         encoding: FieldEncoding,
         payload_len: u32,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    ) -> Result<Poll<()>, ZebinError> {
         if self.cursor < crate::schema::FieldEntry::SIZE {
             let entry = crate::schema::FieldEntry {
                 field_id,
@@ -36,10 +37,10 @@ impl FieldEntrySerializer {
                 .advance_cursor(&mut self.cursor, remaining)
                 .is_pending()
             {
-                return Ok(core::task::Poll::Pending);
+                return Ok(Poll::Pending);
             }
         }
-        Ok(core::task::Poll::Ready(()))
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -65,10 +66,7 @@ impl TagSerializer {
     }
 
     #[inline]
-    pub fn poll_write<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn poll_write(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.cursor < 4 {
             let remaining = 4 - self.cursor;
             if sink
@@ -76,10 +74,10 @@ impl TagSerializer {
                 .advance_cursor(&mut self.cursor, remaining)
                 .is_pending()
             {
-                return Ok(core::task::Poll::Pending);
+                return Ok(Poll::Pending);
             }
         }
-        Ok(core::task::Poll::Ready(()))
+        Ok(Poll::Ready(()))
     }
 }
 
@@ -106,38 +104,32 @@ impl<E: Serializer> FieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn poll_write(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if !self.started {
             let val = self
                 .slot
                 .take()
                 .expect("field already consumed or slot is empty");
             match self.serializer.input(val, sink)? {
-                core::task::Poll::Pending => {
+                Poll::Pending => {
                     self.started = true;
-                    return Ok(core::task::Poll::Pending);
+                    return Ok(Poll::Pending);
                 }
-                core::task::Poll::Ready(()) => {
+                Poll::Ready(()) => {
                     self.started = true;
                 }
             }
         } else {
             match self.serializer.poll_pending(sink)? {
-                core::task::Poll::Pending => return Ok(core::task::Poll::Pending),
-                core::task::Poll::Ready(()) => {}
+                Poll::Pending => return Ok(Poll::Pending),
+                Poll::Ready(()) => {}
             }
         }
-        Ok(core::task::Poll::Ready(()))
+        Ok(Poll::Ready(()))
     }
 
     #[inline]
-    pub fn finish<S: CursorMut + ?Sized>(
-        self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.serializer.finish(sink)
     }
 }
@@ -205,29 +197,23 @@ impl<E: Serializer> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write_entry<S: CursorMut + ?Sized>(
+    pub fn poll_write_entry(
         &mut self,
-        sink: &mut S,
+        sink: &mut CursorMut<'_>,
         field_id: u16,
         encoding: FieldEncoding,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    ) -> Result<Poll<()>, ZebinError> {
         self.entry_serializer
             .poll_write(sink, field_id, encoding, self.len)
     }
 
     #[inline]
-    pub fn poll_write<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn poll_write(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.state.poll_write(sink)
     }
 
     #[inline]
-    pub fn finish<S: CursorMut + ?Sized>(
-        self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.state.serializer.finish(sink)
     }
 }
@@ -292,38 +278,32 @@ impl<P: Serializer> EnumSerializer<P> {
     }
 
     #[inline]
-    pub fn poll_write_pending<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn poll_write_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.tag_serializer.poll_write(sink)?.is_pending() {
-            return Ok(core::task::Poll::Pending);
+            return Ok(Poll::Pending);
         }
         if let Some(payload) = &mut self.payload {
             if let Some(item) = self.pending_item.take() {
                 match payload.input(item, sink)? {
-                    core::task::Poll::Pending => return Ok(core::task::Poll::Pending),
-                    core::task::Poll::Ready(()) => return Ok(core::task::Poll::Ready(())),
+                    Poll::Pending => return Ok(Poll::Pending),
+                    Poll::Ready(()) => return Ok(Poll::Ready(())),
                 }
             }
             match payload.poll_pending(sink)? {
-                core::task::Poll::Pending => Ok(core::task::Poll::Pending),
-                core::task::Poll::Ready(()) => Ok(core::task::Poll::Ready(())),
+                Poll::Pending => Ok(Poll::Pending),
+                Poll::Ready(()) => Ok(Poll::Ready(())),
             }
         } else {
-            Ok(core::task::Poll::Ready(()))
+            Ok(Poll::Ready(()))
         }
     }
 
     #[inline]
-    pub fn finish_inner<S: CursorMut + ?Sized>(
-        self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn finish_inner(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if let Some(payload) = self.payload {
             payload.finish(sink)
         } else {
-            Ok(core::task::Poll::Ready(()))
+            Ok(Poll::Ready(()))
         }
     }
 }
@@ -386,13 +366,13 @@ impl SchemaObjectSerializer {
     }
 
     #[inline]
-    pub fn poll_write_header<S: CursorMut + ?Sized>(
+    pub fn poll_write_header(
         &mut self,
-        sink: &mut S,
+        sink: &mut CursorMut<'_>,
         stable_schema_key: u32,
         schema_revision: u32,
         field_count: u16,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    ) -> Result<Poll<()>, ZebinError> {
         if self.header_cursor == 0 {
             self.object_start = sink.pos();
         }
@@ -408,24 +388,21 @@ impl SchemaObjectSerializer {
                 .advance_cursor(&mut self.header_cursor, remaining)
                 .is_pending()
             {
-                return Ok(core::task::Poll::Pending);
+                return Ok(Poll::Pending);
             }
         }
-        Ok(core::task::Poll::Ready(()))
+        Ok(Poll::Ready(()))
     }
 
     #[inline]
-    pub fn mark_table_start<S: CursorMut + ?Sized>(&mut self, sink: &mut S) {
+    pub fn mark_table_start(&mut self, sink: &mut CursorMut<'_>) {
         if self.table_start == 0 {
             self.table_start = sink.pos();
         }
     }
 
     #[inline]
-    pub fn poll_write_footer<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<core::task::Poll<()>, ZebinError> {
+    pub fn poll_write_footer(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.table_offset_cursor < 4 {
             let offset_val = (self.table_start - self.object_start) as u32;
             let offset_bytes = offset_val.to_le_bytes();
@@ -435,7 +412,7 @@ impl SchemaObjectSerializer {
                 .advance_cursor(&mut self.table_offset_cursor, remaining)
                 .is_pending()
             {
-                return Ok(core::task::Poll::Pending);
+                return Ok(Poll::Pending);
             }
         }
         if self.object_len_cursor < 4 {
@@ -447,10 +424,10 @@ impl SchemaObjectSerializer {
                 .advance_cursor(&mut self.object_len_cursor, remaining)
                 .is_pending()
             {
-                return Ok(core::task::Poll::Pending);
+                return Ok(Poll::Pending);
             }
         }
-        Ok(core::task::Poll::Ready(()))
+        Ok(Poll::Ready(()))
     }
 }
 

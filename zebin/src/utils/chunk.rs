@@ -1,8 +1,13 @@
 use core::cell::Cell;
+use core::num::NonZeroUsize;
 use core::ops::{Index, IndexMut};
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
+
+use crate::error::ZebinError;
+use crate::traits_impl::SinkProgress;
+use crate::utils::{byteops, padding_for_alignment};
 
 pub trait ChunkSource {
     /// 获取分块总数
@@ -25,6 +30,97 @@ pub trait ChunkSource {
 pub trait ChunkSourceMut: ChunkSource {
     /// 获取指定索引的可写分块
     fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]>;
+
+    /// 在指定位置写入数据，默认实现会利用 get_chunk_mut 写入。支持扩容的源可以重写此方法。
+    fn write_at(&mut self, pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        if bytes.is_empty() {
+            return Ok(SinkProgress::Complete);
+        }
+        let total_len = self.total_len();
+        if pos >= total_len {
+            return Ok(SinkProgress::Blocked);
+        }
+        let available = total_len - pos;
+        let to_write = bytes.len().min(available);
+        if to_write == 0 {
+            return Ok(SinkProgress::Blocked);
+        }
+
+        let mut current_sum = 0;
+        let mut bytes_written = 0;
+        for idx in 0..self.chunk_count() {
+            if let Some(chunk_len) = self.get_chunk(idx).map(|c| c.len()) {
+                let next_sum = current_sum + chunk_len;
+                if pos + bytes_written >= current_sum && pos + bytes_written < next_sum {
+                    let chunk_offset = (pos + bytes_written) - current_sum;
+                    let chunk_avail = chunk_len - chunk_offset;
+                    let write_len = (to_write - bytes_written).min(chunk_avail);
+                    if write_len > 0 {
+                        if let Some(chunk_mut) = self.get_chunk_mut(idx) {
+                            byteops::copy_exact(
+                                &mut chunk_mut[chunk_offset..chunk_offset + write_len],
+                                &bytes[bytes_written..bytes_written + write_len],
+                            );
+                        }
+                        bytes_written += write_len;
+                    }
+                }
+                current_sum = next_sum;
+            }
+            if bytes_written >= to_write {
+                break;
+            }
+        }
+        Ok(SinkProgress::from_accepted(bytes.len(), bytes_written))
+    }
+
+    fn align_at(
+        &mut self,
+        pos: usize,
+        alignment: NonZeroUsize,
+    ) -> Result<SinkProgress, ZebinError> {
+        let padding = padding_for_alignment(pos, alignment);
+        self.skip_at(pos, padding)
+    }
+
+    fn skip_at(&mut self, pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
+        if len == 0 {
+            return Ok(SinkProgress::Complete);
+        }
+        let total_len = self.total_len();
+        if pos >= total_len {
+            return Ok(SinkProgress::Blocked);
+        }
+        let available = total_len - pos;
+        let to_skip = len.min(available);
+        if to_skip == 0 {
+            return Ok(SinkProgress::Blocked);
+        }
+
+        let mut current_sum = 0;
+        let mut bytes_skipped = 0;
+        for idx in 0..self.chunk_count() {
+            if let Some(chunk_len) = self.get_chunk(idx).map(|c| c.len()) {
+                let next_sum = current_sum + chunk_len;
+                if pos + bytes_skipped >= current_sum && pos + bytes_skipped < next_sum {
+                    let chunk_offset = (pos + bytes_skipped) - current_sum;
+                    let chunk_avail = chunk_len - chunk_offset;
+                    let skip_len = (to_skip - bytes_skipped).min(chunk_avail);
+                    if skip_len > 0 {
+                        if let Some(chunk_mut) = self.get_chunk_mut(idx) {
+                            byteops::fill(&mut chunk_mut[chunk_offset..chunk_offset + skip_len], 0);
+                        }
+                        bytes_skipped += skip_len;
+                    }
+                }
+                current_sum = next_sum;
+            }
+            if bytes_skipped >= to_skip {
+                break;
+            }
+        }
+        Ok(SinkProgress::from_accepted(len, bytes_skipped))
+    }
 }
 
 // Implement for references
@@ -56,6 +152,25 @@ impl<S: ChunkSourceMut + ?Sized> ChunkSourceMut for &mut S {
     #[inline]
     fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
         (**self).get_chunk_mut(idx)
+    }
+
+    #[inline]
+    fn write_at(&mut self, pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        (**self).write_at(pos, bytes)
+    }
+
+    #[inline]
+    fn align_at(
+        &mut self,
+        pos: usize,
+        alignment: NonZeroUsize,
+    ) -> Result<SinkProgress, ZebinError> {
+        (**self).align_at(pos, alignment)
+    }
+
+    #[inline]
+    fn skip_at(&mut self, pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
+        (**self).skip_at(pos, len)
     }
 }
 

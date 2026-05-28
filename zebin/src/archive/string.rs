@@ -148,10 +148,10 @@ impl Default for StringSerializer {
 impl Serializer for StringSerializer {
     type Input = String;
 
-    fn input<S: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut S,
+        sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let bytes = item.into_bytes();
         let len = bytes.len() as u32;
@@ -162,10 +162,7 @@ impl Serializer for StringSerializer {
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
             if sink
@@ -183,7 +180,7 @@ impl Serializer for StringSerializer {
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -219,10 +216,10 @@ where
 {
     type Input = &'a T;
 
-    fn input<S: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut S,
+        sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let bytes = item.to_bytes_ref();
         let len = bytes.len() as u32;
@@ -233,10 +230,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
             if sink
@@ -254,7 +248,7 @@ where
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

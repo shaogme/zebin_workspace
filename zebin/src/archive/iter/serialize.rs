@@ -59,10 +59,7 @@ impl<'a, T: Serialize + Archive + 'a> SeqItemSerializer<'a, T> {
         }
     }
 
-    pub(crate) fn finish<S: CursorMut + ?Sized>(
-        self,
-        sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError> {
+    pub(crate) fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if let Some(serializer) = self.inner {
             serializer.finish(sink)
         } else {
@@ -136,19 +133,16 @@ where
 {
     type Input = S;
 
-    fn input<Sink: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut Sink,
+        sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.iter = Some(item.into_iter());
         self.poll_pending(sink)
     }
 
-    fn poll_pending<Sink: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut Sink,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         let iter = self.iter.as_mut().ok_or(ZebinError::SerializeError {
             pos: sink.pos(),
             message: "OwnedIterSerializer polled before input",
@@ -176,7 +170,7 @@ where
         }
     }
 
-    fn finish<Sink: CursorMut + ?Sized>(self, sink: &mut Sink) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.seq_serializer.finish(sink)
     }
 }
@@ -232,7 +226,8 @@ mod tests {
         let mut sink = SliceSerializer::new(&mut buf, 0);
         let mut serializer: OwnedIterSerializer<'_, Vec<u32>, u32> = OwnedIterSerializer::new();
 
-        let res = serializer.poll_pending(&mut sink);
+        let mut writer = sink.writer();
+        let res = serializer.poll_pending(&mut writer);
         assert!(res.is_err());
     }
 }

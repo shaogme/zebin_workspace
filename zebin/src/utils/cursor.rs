@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::utils::chunk::{ChunkSource, ChunkedView};
+use crate::utils::chunk::{ChunkSource, ChunkSourceMut, ChunkedView, ChunkedViewMut};
 use crate::utils::{byteops, padding_for_alignment};
 
 /// Borrowed cursor into an archive byte slice.
@@ -224,5 +224,55 @@ impl<'a> Cursor<'a> {
         let mut array = [0u8; 8];
         byteops::copy_exact(&mut array, bytes);
         Ok(i64::from_le_bytes(array))
+    }
+}
+
+/// Mutable cursor into an archive chunked view.
+pub struct CursorMut<'a> {
+    view: ChunkedViewMut<&'a mut (dyn ChunkSourceMut + 'a)>,
+    pos: usize,
+}
+
+impl<'a> CursorMut<'a> {
+    pub fn new(source: &'a mut (dyn ChunkSourceMut + 'a), pos: usize) -> Self {
+        let view = ChunkedViewMut::new(source);
+        Self { view, pos }
+    }
+
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
+    pub fn view(&self) -> &ChunkedViewMut<&'a mut (dyn ChunkSourceMut + 'a)> {
+        &self.view
+    }
+
+    pub fn view_mut(&mut self) -> &mut ChunkedViewMut<&'a mut (dyn ChunkSourceMut + 'a)> {
+        &mut self.view
+    }
+
+    pub fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        let progress = self.view.source.write_at(self.pos, bytes)?;
+        self.pos += progress.accepted_for(bytes.len());
+        self.view.total_len = self.view.source.total_len();
+        Ok(progress)
+    }
+
+    pub fn align(
+        &mut self,
+        alignment: core::num::NonZeroUsize,
+    ) -> Result<SinkProgress, ZebinError> {
+        let progress = self.view.source.align_at(self.pos, alignment)?;
+        let padding = padding_for_alignment(self.pos, alignment);
+        self.pos += progress.accepted_for(padding);
+        self.view.total_len = self.view.source.total_len();
+        Ok(progress)
+    }
+
+    pub fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+        let progress = self.view.source.skip_at(self.pos, len)?;
+        self.pos += progress.accepted_for(len);
+        self.view.total_len = self.view.source.total_len();
+        Ok(progress)
     }
 }

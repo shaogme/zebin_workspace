@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use crate::io_impl::storage::{CursorMut, SliceSerializer};
+use crate::io_impl::storage::SliceSerializer;
 use crate::prelude::*;
 
 #[cfg(feature = "alloc")]

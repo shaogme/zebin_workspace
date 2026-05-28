@@ -59,27 +59,24 @@ where
 {
     type Input = T;
 
-    fn input<S: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut S,
+        sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.bytes = item.to_bytes();
         self.cursor = 0;
         self.poll_pending(sink)
     }
 
-    fn poll_pending<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         let remaining = N - self.cursor;
         Ok(sink
             .write(&self.bytes[self.cursor..])?
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -313,22 +310,19 @@ impl<T> Default for UnitSerializer<T> {
 impl<T> Serializer for UnitSerializer<T> {
     type Input = T;
 
-    fn input<S: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         _item: Self::Input,
-        _sink: &mut S,
+        _sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 
-    fn poll_pending<S: CursorMut + ?Sized>(
-        &mut self,
-        _sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -465,10 +459,10 @@ where
 {
     type Input = (K, V);
 
-    fn input<S: CursorMut + ?Sized>(
+    fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut S,
+        sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let (key, value) = item;
         self.pending_value = Some(value);
@@ -484,10 +478,7 @@ where
         }
     }
 
-    fn poll_pending<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.stage == 0 {
             if !self.key_started {
                 return Err(ZebinError::SerializeError {
@@ -526,7 +517,7 @@ where
         Ok(Poll::Ready(()))
     }
 
-    fn finish<S: CursorMut + ?Sized>(self, _sink: &mut S) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -536,10 +527,7 @@ where
     K: Serialize<Input<'a> = K> + Archive + 'a,
     V: Serialize<Input<'a> = V> + Archive + 'a,
 {
-    fn advance_after_key<S: CursorMut + ?Sized>(
-        &mut self,
-        sink: &mut S,
-    ) -> Result<Poll<()>, ZebinError> {
+    fn advance_after_key(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.stage = 1;
         let v = self
             .pending_value
