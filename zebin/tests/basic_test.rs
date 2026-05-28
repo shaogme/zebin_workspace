@@ -1,12 +1,10 @@
 #[cfg(feature = "alloc")]
-use core::num::NonZeroUsize;
-#[cfg(feature = "alloc")]
 use std::cell::Cell;
 #[cfg(feature = "alloc")]
 use zebin::ZebinError;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{CursorMut, SinkProgress, StorageMut, ZebinWriter};
+use zebin::prelude::{Buf, BufMut, CursorMut, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::reader;
 #[cfg(feature = "alloc")]
@@ -66,16 +64,17 @@ fn test_chunked_writer_resume() {
     }
 
     impl<'a> ChunkSource for LimitedSink<'a> {
-        fn chunk_count(&self) -> usize {
-            1
-        }
-
-        fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-            if idx == 0 {
-                Some(self.buf.as_slice())
-            } else {
-                None
+        fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+            let end = pos
+                .checked_add(len)
+                .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+            if end > self.buf.len() {
+                return Err(ZebinError::BufferTooSmall {
+                    pos,
+                    required: end - self.buf.len(),
+                });
             }
+            Ok(Buf::new(&self.buf[pos..end]))
         }
 
         fn total_len(&self) -> usize {
@@ -84,47 +83,17 @@ fn test_chunked_writer_resume() {
     }
 
     impl<'a> ChunkSourceMut for LimitedSink<'a> {
-        fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
-            if idx == 0 {
-                Some(self.buf.as_mut_slice())
-            } else {
-                None
+        fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError> {
+            let available = self.limit.get().saturating_sub(pos);
+            let count = len.min(available);
+            if count == 0 && len > 0 {
+                return Ok(BufMut::new(&mut []));
             }
-        }
-
-        fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-            if bytes.is_empty() {
-                return Ok(SinkProgress::Complete);
+            let end = pos + count;
+            if end > self.buf.len() {
+                self.buf.resize(end, 0);
             }
-            let available = self.limit.get().saturating_sub(self.buf.len());
-            if available == 0 {
-                return Ok(SinkProgress::Blocked);
-            }
-            let write_len = bytes.len().min(available);
-            self.buf.extend_from_slice(&bytes[..write_len]);
-            Ok(SinkProgress::from_accepted(bytes.len(), write_len))
-        }
-
-        fn align_at(
-            &mut self,
-            pos: usize,
-            alignment: NonZeroUsize,
-        ) -> Result<SinkProgress, ZebinError> {
-            let padding = (alignment.get() - (pos % alignment.get())) % alignment.get();
-            self.skip_at(pos, padding)
-        }
-
-        fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
-            if len == 0 {
-                return Ok(SinkProgress::Complete);
-            }
-            let available = self.limit.get().saturating_sub(self.buf.len());
-            if available == 0 {
-                return Ok(SinkProgress::Blocked);
-            }
-            let skip_len = len.min(available);
-            self.buf.resize(self.buf.len() + skip_len, 0);
-            Ok(SinkProgress::from_accepted(len, skip_len))
+            Ok(BufMut::new(&mut self.buf[pos..end]))
         }
     }
 
@@ -296,19 +265,21 @@ impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
 
 #[cfg(feature = "alloc")]
 impl ChunkSource for ShardedStorage {
-    fn chunk_count(&self) -> usize {
-        1
-    }
-
-    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-        if idx == 0 {
-            if self.current_index < self.shards.len() {
-                Some(&self.shards[self.current_index])
-            } else {
-                Some(&[])
+    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+        if self.current_index < self.shards.len() {
+            let shard = &self.shards[self.current_index];
+            let end = pos
+                .checked_add(len)
+                .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+            if end > shard.len() {
+                return Err(ZebinError::BufferTooSmall {
+                    pos,
+                    required: end - shard.len(),
+                });
             }
+            Ok(Buf::new(&shard[pos..end]))
         } else {
-            None
+            Err(ZebinError::BufferTooSmall { pos, required: len })
         }
     }
 

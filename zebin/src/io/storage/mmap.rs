@@ -7,9 +7,7 @@ use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
 use crate::io::{CursorMut, Storage, StorageMut};
-use crate::traits_impl::SinkProgress;
-use crate::utils::{byteops, padding_for_alignment};
-use core::num::NonZeroUsize;
+use crate::utils::chunk::{Buf, BufMut, ChunkSource, ChunkSourceMut};
 
 /// Memory-mapped storage backend for read-only archive access.
 pub struct Mmap {
@@ -40,17 +38,19 @@ impl Mmap {
     }
 }
 
-use crate::utils::chunk::{ChunkSource, ChunkSourceMut};
-
 impl ChunkSource for Mmap {
     #[inline]
-    fn chunk_count(&self) -> usize {
-        1
-    }
-
-    #[inline]
-    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-        if idx == 0 { Some(&self.data) } else { None }
+    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+        let end = pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.data.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos,
+                required: end - self.data.len(),
+            });
+        }
+        Ok(Buf::new(&self.data[pos..end]))
     }
 
     #[inline]
@@ -152,6 +152,10 @@ impl MmapSerializer {
         self.written
     }
 
+    pub fn pos(&self) -> usize {
+        self.archive_pos
+    }
+
     pub fn capacity(&self) -> usize {
         self.mmap.len()
     }
@@ -163,41 +167,21 @@ impl MmapSerializer {
     pub fn flush(&self) -> Result<(), ZebinError> {
         self.mmap.flush().map_err(ZebinError::from)
     }
-
-    fn prepare_range(&mut self, len: usize) -> Result<(usize, usize), ZebinError> {
-        let start = self.written;
-        let end = start
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow {
-                pos: self.archive_pos,
-            })?;
-        if end > self.mmap.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos: self.archive_pos,
-                required: end - self.mmap.len(),
-            });
-        }
-        let next_archive_pos =
-            self.archive_pos
-                .checked_add(len)
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
-        self.archive_pos = next_archive_pos;
-        self.written = end;
-        Ok((start, end))
-    }
 }
 
 impl ChunkSource for MmapSerializer {
     #[inline]
-    fn chunk_count(&self) -> usize {
-        1
-    }
-
-    #[inline]
-    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-        if idx == 0 { Some(&self.mmap[..]) } else { None }
+    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+        let end = pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.mmap.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos,
+                required: end - self.mmap.len(),
+            });
+        }
+        Ok(Buf::new(&self.mmap[pos..end]))
     }
 
     #[inline]
@@ -208,39 +192,19 @@ impl ChunkSource for MmapSerializer {
 
 impl ChunkSourceMut for MmapSerializer {
     #[inline]
-    fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
-        if idx == 0 {
-            Some(&mut self.mmap[..])
-        } else {
-            None
+    fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        let end = pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.mmap.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos: self.archive_pos,
+                required: end - self.mmap.len(),
+            });
         }
-    }
-
-    fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        if bytes.is_empty() {
-            return Ok(SinkProgress::Complete);
-        }
-        let (start, end) = self.prepare_range(bytes.len())?;
-        byteops::copy_exact(&mut self.mmap[start..end], bytes);
-        Ok(SinkProgress::Complete)
-    }
-
-    fn align_at(
-        &mut self,
-        _pos: usize,
-        alignment: NonZeroUsize,
-    ) -> Result<SinkProgress, ZebinError> {
-        let padding = padding_for_alignment(self.archive_pos, alignment);
-        self.skip_at(_pos, padding)
-    }
-
-    fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
-        if len == 0 {
-            return Ok(SinkProgress::Complete);
-        }
-        let (start, end) = self.prepare_range(len)?;
-        byteops::fill(&mut self.mmap[start..end], 0);
-        Ok(SinkProgress::Complete)
+        self.archive_pos = self.archive_pos.max(end);
+        self.written = self.written.max(end);
+        Ok(BufMut::new(&mut self.mmap[pos..end]))
     }
 }
 

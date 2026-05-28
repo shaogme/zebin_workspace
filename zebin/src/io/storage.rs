@@ -2,16 +2,9 @@
 #[path = "storage/mmap.rs"]
 pub mod mmap;
 
+use crate::{error::ZebinError, utils::cursor::CursorMut};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-use core::num::NonZeroUsize;
-
-use crate::{
-    error::ZebinError,
-    traits_impl::SinkProgress,
-    utils::cursor::CursorMut,
-    utils::{byteops, padding_for_alignment},
-};
 
 /// Storage mode indicating if it supports stream sharding.
 pub trait StorageMode {}
@@ -41,7 +34,7 @@ impl Sharder for NoSharder {
     }
 }
 
-use crate::utils::chunk::{ChunkSource, ChunkSourceMut};
+use crate::utils::chunk::{Buf, BufMut, ChunkSource, ChunkSourceMut};
 
 /// Unified storage layer: byte-backed read access contract.
 pub trait Storage: ChunkSource {
@@ -93,13 +86,17 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
 
 impl ChunkSource for [u8] {
     #[inline]
-    fn chunk_count(&self) -> usize {
-        1
-    }
-
-    #[inline]
-    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-        if idx == 0 { Some(self) } else { None }
+    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+        let end = pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos,
+                required: end - self.len(),
+            });
+        }
+        Ok(Buf::new(&self[pos..end]))
     }
 
     #[inline]
@@ -124,17 +121,17 @@ impl Storage for [u8] {
 #[cfg(feature = "alloc")]
 impl ChunkSource for Vec<u8> {
     #[inline]
-    fn chunk_count(&self) -> usize {
-        1
-    }
-
-    #[inline]
-    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-        if idx == 0 {
-            Some(self.as_slice())
-        } else {
-            None
+    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+        let end = pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos,
+                required: end - self.len(),
+            });
         }
+        Ok(Buf::new(&self[pos..end]))
     }
 
     #[inline]
@@ -176,40 +173,21 @@ impl<'a> SliceSerializer<'a> {
     pub fn written(&self) -> usize {
         self.written
     }
-
-    fn prepare_range(&mut self, len: usize) -> Result<(usize, usize), ZebinError> {
-        let remaining_buf = self.buf.len().saturating_sub(self.written);
-        let count = remaining_buf.min(len);
-
-        if count == 0 && len > 0 {
-            return Ok((0, 0));
-        }
-
-        let start = self.written;
-        let end = start + count;
-
-        let next_archive_pos =
-            self.archive_pos
-                .checked_add(count)
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
-
-        self.archive_pos = next_archive_pos;
-        self.written = end;
-        Ok((start, end))
-    }
 }
 
 impl<'a> ChunkSource for SliceSerializer<'a> {
     #[inline]
-    fn chunk_count(&self) -> usize {
-        1
-    }
-
-    #[inline]
-    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-        if idx == 0 { Some(self.buf) } else { None }
+    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+        let end = pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.buf.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos,
+                required: end - self.buf.len(),
+            });
+        }
+        Ok(Buf::new(&self.buf[pos..end]))
     }
 
     #[inline]
@@ -220,41 +198,24 @@ impl<'a> ChunkSource for SliceSerializer<'a> {
 
 impl<'a> ChunkSourceMut for SliceSerializer<'a> {
     #[inline]
-    fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
-        if idx == 0 { Some(self.buf) } else { None }
-    }
+    fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        let remaining = self.buf.len().saturating_sub(pos);
+        let count = remaining.min(len);
+        if count == 0 && len > 0 {
+            return Ok(BufMut::new(&mut []));
+        }
+        let end = pos + count;
 
-    fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        if bytes.is_empty() {
-            return Ok(SinkProgress::Complete);
-        }
-        let (start, end) = self.prepare_range(bytes.len())?;
-        let len = end - start;
-        if len > 0 {
-            byteops::copy_exact(&mut self.buf[start..end], &bytes[..len]);
-        }
-        Ok(SinkProgress::from_accepted(bytes.len(), len))
-    }
+        let next_archive_pos =
+            self.archive_pos
+                .checked_add(count)
+                .ok_or(ZebinError::ArithmeticOverflow {
+                    pos: self.archive_pos,
+                })?;
 
-    fn align_at(
-        &mut self,
-        _pos: usize,
-        alignment: NonZeroUsize,
-    ) -> Result<SinkProgress, ZebinError> {
-        let padding = padding_for_alignment(self.archive_pos, alignment);
-        self.skip_at(_pos, padding)
-    }
-
-    fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
-        if len == 0 {
-            return Ok(SinkProgress::Complete);
-        }
-        let (start, end) = self.prepare_range(len)?;
-        let written = end - start;
-        if written > 0 {
-            byteops::fill(&mut self.buf[start..end], 0);
-        }
-        Ok(SinkProgress::from_accepted(len, written))
+        self.archive_pos = next_archive_pos;
+        self.written = self.written.max(end);
+        Ok(BufMut::new(&mut self.buf[pos..end]))
     }
 }
 
@@ -289,17 +250,17 @@ impl VecSerializer {
 #[cfg(feature = "alloc")]
 impl ChunkSource for VecSerializer {
     #[inline]
-    fn chunk_count(&self) -> usize {
-        1
-    }
-
-    #[inline]
-    fn get_chunk(&self, idx: usize) -> Option<&[u8]> {
-        if idx == 0 {
-            Some(self.buf.as_slice())
-        } else {
-            None
+    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
+        let end = pos
+            .checked_add(len)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.buf.len() {
+            return Err(ZebinError::BufferTooSmall {
+                pos,
+                required: end - self.buf.len(),
+            });
         }
+        Ok(Buf::new(&self.buf[pos..end]))
     }
 
     #[inline]
@@ -311,45 +272,15 @@ impl ChunkSource for VecSerializer {
 #[cfg(feature = "alloc")]
 impl ChunkSourceMut for VecSerializer {
     #[inline]
-    fn get_chunk_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
-        if idx == 0 {
-            Some(self.buf.as_mut_slice())
-        } else {
-            None
-        }
-    }
-
-    fn write_at(&mut self, _pos: usize, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        let next_pos =
-            self.archive_pos
-                .checked_add(bytes.len())
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
-        self.buf.extend_from_slice(bytes);
-        self.archive_pos = next_pos;
-        Ok(SinkProgress::Complete)
-    }
-
-    fn align_at(
-        &mut self,
-        _pos: usize,
-        alignment: NonZeroUsize,
-    ) -> Result<SinkProgress, ZebinError> {
-        let padding = padding_for_alignment(self.archive_pos, alignment);
-        self.skip_at(_pos, padding)
-    }
-
-    fn skip_at(&mut self, _pos: usize, len: usize) -> Result<SinkProgress, ZebinError> {
-        let next_pos = self
-            .archive_pos
+    fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        let end = pos
             .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow {
-                pos: self.archive_pos,
-            })?;
-        self.buf.resize(self.buf.len() + len, 0);
-        self.archive_pos = next_pos;
-        Ok(SinkProgress::Complete)
+            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
+        if end > self.buf.len() {
+            self.buf.resize(end, 0);
+        }
+        self.archive_pos = self.archive_pos.max(end);
+        Ok(BufMut::new(&mut self.buf[pos..end]))
     }
 }
 

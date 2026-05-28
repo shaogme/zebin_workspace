@@ -42,13 +42,14 @@ where
     T: for<'a> Serialize<Input<'a> = T>,
 {
     let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
-    serializer.write(header.serialize().as_ref())?;
+    let mut writer = serializer.writer();
+    writer.write(header.serialize().as_ref())?;
 
     let mut body_serializer = T::serializer();
-    if body_serializer.input(value, serializer)?.is_pending() {
-        while body_serializer.poll_pending(serializer)?.is_pending() {}
+    if body_serializer.input(value, &mut writer)?.is_pending() {
+        while body_serializer.poll_pending(&mut writer)?.is_pending() {}
     }
-    let _ = body_serializer.finish(serializer)?;
+    let _ = body_serializer.finish(&mut writer)?;
     Ok(())
 }
 
@@ -184,15 +185,24 @@ fn test_mmap_serializer_skip_and_align() -> Result<(), Box<dyn std::error::Error
     assert_eq!(serializer.pos(), 0);
     assert_eq!(serializer.capacity(), 64);
 
-    serializer.skip(5)?;
+    {
+        let mut writer = serializer.writer();
+        writer.skip(5)?;
+    }
     assert_eq!(serializer.pos(), 5);
     assert_eq!(serializer.written(), 5);
 
-    serializer.align(NonZeroUsize::new(8).unwrap())?;
+    {
+        let mut writer = serializer.writer();
+        writer.align(NonZeroUsize::new(8).unwrap())?;
+    }
     assert_eq!(serializer.pos(), 8);
     assert_eq!(serializer.written(), 8);
 
-    serializer.write(b"hello")?;
+    {
+        let mut writer = serializer.writer();
+        writer.write(b"hello")?;
+    }
     assert_eq!(serializer.pos(), 13);
     assert_eq!(serializer.written(), 13);
 
@@ -212,9 +222,12 @@ fn test_mmap_serializer_write_past_end_errors() -> Result<(), Box<dyn std::error
     let mmap_mut = open_writable_mmap(&path, 4);
 
     let mut serializer = MmapSerializer::new(mmap_mut, 0);
-    serializer.write(b"abc")?;
-    let err = serializer.write(b"too long").unwrap_err();
-    assert!(matches!(err, ZebinError::BufferTooSmall { .. }));
+    {
+        let mut writer = serializer.writer();
+        writer.write(b"abc")?;
+        let err = writer.write(b"too long").unwrap_err();
+        assert!(matches!(err, ZebinError::BufferTooSmall { .. }));
+    }
 
     drop(serializer);
     fs::remove_file(&path)?;

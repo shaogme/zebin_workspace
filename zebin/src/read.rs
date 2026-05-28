@@ -7,21 +7,13 @@ fn get_contiguous_slice<S: ChunkSource + ?Sized>(
     offset: usize,
     len: usize,
 ) -> Result<&[u8], AccessError> {
-    let mut current_sum = 0;
-    for idx in 0..storage.chunk_count() {
-        if let Some(chunk) = storage.get_chunk(idx) {
-            let next_sum = current_sum + chunk.len();
-            if offset >= current_sum && offset + len <= next_sum {
-                let start = offset - current_sum;
-                return Ok(&chunk[start..start + len]);
-            }
-            current_sum = next_sum;
-        }
-    }
-    Err(AccessError::ValidationError {
-        message: "Requested slice spans across non-contiguous chunks or out of bounds",
-        pos: offset,
-    })
+    let buf = storage
+        .get_buf(offset, len)
+        .map_err(|_| AccessError::ValidationError {
+            message: "Requested slice spans across non-contiguous chunks or out of bounds",
+            pos: offset,
+        })?;
+    Ok(buf.into_slice())
 }
 
 /// Safe access layer output that keeps the validated byte slice alive.

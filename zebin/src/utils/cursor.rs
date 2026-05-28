@@ -27,14 +27,6 @@ impl<'a> Cursor<'a> {
         Self { view, pos, limit }
     }
 
-    pub fn new_with_limit(source: &'a (dyn ChunkSource + 'a), pos: usize, limit: usize) -> Self {
-        Self {
-            view: ChunkedView::new_ref(source),
-            pos,
-            limit,
-        }
-    }
-
     pub fn view(&self) -> &ChunkedView<&'a (dyn ChunkSource + 'a)> {
         &self.view
     }
@@ -102,18 +94,13 @@ impl<'a> Cursor<'a> {
         let start = self.pos;
         self.advance(len, context)?;
 
-        let (chunk_idx, local_idx) = self
-            .view
-            .translate_address(start)
-            .ok_or_else(|| context.validation_error("Address translation failed", start))?;
-
-        let chunk = self.view.source.get_chunk(chunk_idx).unwrap();
-        if local_idx + len <= chunk.len() {
-            Ok(&chunk[local_idx..local_idx + len])
-        } else {
-            Err(context
-                .validation_error("Requested range spans across non-contiguous chunks", start))
-        }
+        let buf = (*self.view.source).get_buf(start, len).map_err(|_| {
+            context.validation_error(
+                "Requested range spans across non-contiguous chunks or out of bounds",
+                start,
+            )
+        })?;
+        Ok(buf.into_slice())
     }
 
     pub fn peek_exact<C>(&self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
@@ -125,22 +112,15 @@ impl<'a> Cursor<'a> {
         }
         context.check_range(self.pos, len)?;
 
-        let (chunk_idx, local_idx) = self
-            .view
-            .translate_address(self.pos)
-            .ok_or_else(|| context.validation_error("Address translation failed", self.pos))?;
-
-        let chunk = self.view.source.get_chunk(chunk_idx).unwrap();
-        if local_idx + len <= chunk.len() {
-            Ok(&chunk[local_idx..local_idx + len])
-        } else {
-            Err(context.validation_error(
-                "Requested range spans across non-contiguous chunks",
+        let buf = (*self.view.source).get_buf(self.pos, len).map_err(|_| {
+            context.validation_error(
+                "Requested range spans across non-contiguous chunks or out of bounds",
                 self.pos,
-            ))
-        }
+            )
+        })?;
+        Ok(buf.into_slice())
     }
-
+    // ... [rest of Cursor methods unchanged, view_file showed them] ...
     pub fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], AccessError>
     where
         C: ValidationContext + ?Sized,
@@ -252,7 +232,15 @@ impl<'a> CursorMut<'a> {
     }
 
     pub fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        let progress = self.view.source.write_at(self.pos, bytes)?;
+        if bytes.is_empty() {
+            return Ok(SinkProgress::Complete);
+        }
+        let buf = (*self.view.source).get_buf_mut(self.pos, bytes.len())?;
+        let accepted = buf.len();
+        if accepted > 0 {
+            byteops::copy_exact(buf.into_mut_slice(), &bytes[..accepted]);
+        }
+        let progress = SinkProgress::from_accepted(bytes.len(), accepted);
         self.pos += progress.accepted_for(bytes.len());
         self.view.total_len = self.view.source.total_len();
         Ok(progress)
@@ -262,15 +250,20 @@ impl<'a> CursorMut<'a> {
         &mut self,
         alignment: core::num::NonZeroUsize,
     ) -> Result<SinkProgress, ZebinError> {
-        let progress = self.view.source.align_at(self.pos, alignment)?;
         let padding = padding_for_alignment(self.pos, alignment);
-        self.pos += progress.accepted_for(padding);
-        self.view.total_len = self.view.source.total_len();
-        Ok(progress)
+        self.skip(padding)
     }
 
     pub fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        let progress = self.view.source.skip_at(self.pos, len)?;
+        if len == 0 {
+            return Ok(SinkProgress::Complete);
+        }
+        let buf = (*self.view.source).get_buf_mut(self.pos, len)?;
+        let accepted = buf.len();
+        if accepted > 0 {
+            byteops::fill(buf.into_mut_slice(), 0);
+        }
+        let progress = SinkProgress::from_accepted(len, accepted);
         self.pos += progress.accepted_for(len);
         self.view.total_len = self.view.source.total_len();
         Ok(progress)
