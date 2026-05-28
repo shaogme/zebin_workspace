@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use crate::archive_impl::string::{StringBytes, StringBytesSerializer};
 use alloc::{borrow::Cow, borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc};
 use core::task::Poll;
 
@@ -94,27 +95,25 @@ where
 }
 
 /// `Box<str>`: serializes the inner `&str` (DST path).
-pub struct BoxStrSerializer<'a> {
-    inner: <str as Serialize>::Serializer<'a>,
-    pending: Option<Box<str>>,
+pub struct BoxStrSerializer {
+    inner: StringBytesSerializer<'static>,
 }
 
-impl<'a> BoxStrSerializer<'a> {
+impl BoxStrSerializer {
     pub fn new() -> Self {
         Self {
-            inner: <str as Serialize>::serializer(),
-            pending: None,
+            inner: StringBytesSerializer::new_empty(),
         }
     }
 }
 
-impl<'a> Default for BoxStrSerializer<'a> {
+impl Default for BoxStrSerializer {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> Serializer for BoxStrSerializer<'a> {
+impl Serializer for BoxStrSerializer {
     type Input = Box<str>;
 
     fn input(
@@ -122,13 +121,7 @@ impl<'a> Serializer for BoxStrSerializer<'a> {
         item: Self::Input,
         sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
-        // SAFETY: we keep `pending` alive while `inner` borrows from it.
-        // The `'a` lifetime in `<str as Serialize>::Serializer<'a>` is satisfied because
-        // we drop the box only after the serializer finishes.
-        self.pending = Some(item);
-        let s_ref: &str = self.pending.as_ref().unwrap();
-        let s_ref: &'a str = unsafe { core::mem::transmute::<&str, &'a str>(s_ref) };
-        self.inner.input(s_ref, sink)
+        self.inner.input(StringBytes::OwnedBoxStr(item), sink)
     }
 
     fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
@@ -146,7 +139,7 @@ impl Serialize for Box<str> {
     where
         Self: 'a;
     type Serializer<'a>
-        = BoxStrSerializer<'a>
+        = BoxStrSerializer
     where
         Self: 'a;
 
@@ -174,6 +167,44 @@ where
 {
     fn deserialize(&self) -> Result<Box<str>, ZebinError> {
         Ok(self.deserialize()?.into_boxed_str())
+    }
+}
+
+pub struct RcStrSerializer {
+    inner: StringBytesSerializer<'static>,
+}
+
+impl RcStrSerializer {
+    pub fn new() -> Self {
+        Self {
+            inner: StringBytesSerializer::new_empty(),
+        }
+    }
+}
+
+impl Default for RcStrSerializer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Serializer for RcStrSerializer {
+    type Input = Rc<str>;
+
+    fn input(
+        &mut self,
+        item: Self::Input,
+        sink: &mut CursorMut<'_>,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.inner.input(StringBytes::OwnedRcStr(item), sink)
+    }
+
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        self.inner.poll_pending(sink)
+    }
+
+    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        self.inner.finish(sink)
     }
 }
 
@@ -329,7 +360,7 @@ where
 
 impl<T> Archive for Rc<T>
 where
-    T: Archive,
+    T: Archive + ?Sized,
 {
     type Archived = T::Archived;
 }
@@ -353,6 +384,24 @@ where
         Self: 'a,
     {
         SharedRefSerializer::new()
+    }
+}
+
+impl Serialize for Rc<str> {
+    type Input<'a>
+        = Rc<str>
+    where
+        Self: 'a;
+    type Serializer<'a>
+        = RcStrSerializer
+    where
+        Self: 'a;
+
+    fn serializer<'a>() -> Self::Serializer<'a>
+    where
+        Self: 'a,
+    {
+        RcStrSerializer::new()
     }
 }
 
@@ -394,9 +443,47 @@ where
     }
 }
 
+pub struct ArcStrSerializer {
+    inner: StringBytesSerializer<'static>,
+}
+
+impl ArcStrSerializer {
+    pub fn new() -> Self {
+        Self {
+            inner: StringBytesSerializer::new_empty(),
+        }
+    }
+}
+
+impl Default for ArcStrSerializer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Serializer for ArcStrSerializer {
+    type Input = Arc<str>;
+
+    fn input(
+        &mut self,
+        item: Self::Input,
+        sink: &mut CursorMut<'_>,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.inner.input(StringBytes::OwnedArcStr(item), sink)
+    }
+
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        self.inner.poll_pending(sink)
+    }
+
+    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        self.inner.finish(sink)
+    }
+}
+
 impl<T> Archive for Arc<T>
 where
-    T: Archive,
+    T: Archive + ?Sized,
 {
     type Archived = T::Archived;
 }
@@ -420,6 +507,24 @@ where
         Self: 'a,
     {
         SharedRefSerializer::new()
+    }
+}
+
+impl Serialize for Arc<str> {
+    type Input<'a>
+        = Arc<str>
+    where
+        Self: 'a;
+    type Serializer<'a>
+        = ArcStrSerializer
+    where
+        Self: 'a;
+
+    fn serializer<'a>() -> Self::Serializer<'a>
+    where
+        Self: 'a,
+    {
+        ArcStrSerializer::new()
     }
 }
 

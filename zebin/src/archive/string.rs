@@ -1,7 +1,6 @@
-use core::{marker::PhantomData, ops::Deref, str, task::Poll};
+use core::{ops::Deref, str, task::Poll};
 
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::{boxed::Box, rc::Rc, string::String, string::ToString, sync::Arc};
 
 #[cfg(feature = "alloc")]
 use crate::io::ForwardSequenceStrategy;
@@ -101,40 +100,124 @@ impl Deserialize<String> for ArchivedStringView<'_> {
 
 impl<'a> ArchivedField<'a> for ArchivedStringView<'a> {}
 
-pub trait ToBytesRef<'a> {
-    fn to_bytes_ref(self) -> &'a [u8];
+#[derive(Debug, Clone)]
+pub(crate) enum StringBytes<'a> {
+    Empty,
+    Borrowed(&'a str),
+    OwnedString(String),
+    OwnedBoxStr(Box<str>),
+    OwnedRcStr(Rc<str>),
+    OwnedArcStr(Arc<str>),
 }
 
-impl<'a> ToBytesRef<'a> for &'a String {
-    fn to_bytes_ref(self) -> &'a [u8] {
-        self.as_bytes()
+impl StringBytes<'_> {
+    fn len(&self) -> usize {
+        self.as_str().len()
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        self.as_str().as_bytes()
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Empty => "",
+            Self::Borrowed(value) => value,
+            Self::OwnedString(value) => value.as_str(),
+            Self::OwnedBoxStr(value) => value,
+            Self::OwnedRcStr(value) => value,
+            Self::OwnedArcStr(value) => value,
+        }
     }
 }
 
-impl<'a> ToBytesRef<'a> for &'a str {
-    fn to_bytes_ref(self) -> &'a [u8] {
-        self.as_bytes()
+impl<'a> Default for StringBytes<'a> {
+    fn default() -> Self {
+        Self::Empty
     }
 }
 
-/// Resumable serialization state for an owned `String`.
-///
-/// On `input(String)`, the string is moved into the serializer via `into_bytes`,
-/// so the original allocation is owned by the serializer while it streams.
-pub struct StringSerializer {
-    bytes: Vec<u8>,
+/// Resumable serialization state for borrowed or owned string-like inputs.
+pub(crate) struct StringBytesSerializer<'a> {
+    bytes: StringBytes<'a>,
     len_prefix: [u8; 4],
     prefix_cursor: usize,
     cursor: usize,
 }
 
-impl StringSerializer {
+impl<'a> StringBytesSerializer<'a> {
     pub(crate) fn new_empty() -> Self {
         Self {
-            bytes: Vec::new(),
+            bytes: StringBytes::Empty,
             len_prefix: [0; 4],
             prefix_cursor: 0,
             cursor: 0,
+        }
+    }
+
+    fn input_bytes(
+        &mut self,
+        bytes: StringBytes<'a>,
+        sink: &mut CursorMut<'_>,
+    ) -> Result<Poll<()>, ZebinError> {
+        let len = bytes.len() as u32;
+        self.bytes = bytes;
+        self.len_prefix = len.to_le_bytes();
+        self.prefix_cursor = 0;
+        self.cursor = 0;
+        self.poll_pending(sink)
+    }
+}
+
+impl<'a> Default for StringBytesSerializer<'a> {
+    fn default() -> Self {
+        Self::new_empty()
+    }
+}
+
+impl<'a> Serializer for StringBytesSerializer<'a> {
+    type Input = StringBytes<'a>;
+
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        if self.prefix_cursor < self.len_prefix.len() {
+            let remaining = self.len_prefix.len() - self.prefix_cursor;
+            if sink
+                .write(&self.len_prefix[self.prefix_cursor..])?
+                .advance_cursor(&mut self.prefix_cursor, remaining)
+                .is_pending()
+            {
+                return Ok(Poll::Pending);
+            }
+        }
+
+        let bytes = self.bytes.as_bytes();
+        let remaining = bytes.len() - self.cursor;
+        Ok(sink
+            .write(&bytes[self.cursor..])?
+            .advance_cursor(&mut self.cursor, remaining))
+    }
+
+    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        Ok(Poll::Ready(()))
+    }
+
+    fn input(
+        &mut self,
+        item: Self::Input,
+        sink: &mut CursorMut<'_>,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.input_bytes(item, sink)
+    }
+}
+
+pub struct StringSerializer {
+    inner: StringBytesSerializer<'static>,
+}
+
+impl StringSerializer {
+    pub(crate) fn new_empty() -> Self {
+        Self {
+            inner: StringBytesSerializer::new_empty(),
         }
     }
 }
@@ -153,103 +236,15 @@ impl Serializer for StringSerializer {
         item: Self::Input,
         sink: &mut CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
-        let bytes = item.into_bytes();
-        let len = bytes.len() as u32;
-        self.bytes = bytes;
-        self.len_prefix = len.to_le_bytes();
-        self.prefix_cursor = 0;
-        self.cursor = 0;
-        self.poll_pending(sink)
+        self.inner.input(StringBytes::OwnedString(item), sink)
     }
 
     fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
-        if self.prefix_cursor < self.len_prefix.len() {
-            let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if sink
-                .write(&self.len_prefix[self.prefix_cursor..])?
-                .advance_cursor(&mut self.prefix_cursor, remaining)
-                .is_pending()
-            {
-                return Ok(Poll::Pending);
-            }
-        }
-
-        let remaining = self.bytes.len() - self.cursor;
-        Ok(sink
-            .write(&self.bytes[self.cursor..])?
-            .advance_cursor(&mut self.cursor, remaining))
+        self.inner.poll_pending(sink)
     }
 
-    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
-        Ok(Poll::Ready(()))
-    }
-}
-
-/// Resumable serialization state for borrowed string-like inputs (`&str`).
-pub struct StrSerializer<'a, T: ?Sized = str> {
-    bytes: &'a [u8],
-    len_prefix: [u8; 4],
-    prefix_cursor: usize,
-    cursor: usize,
-    _marker: PhantomData<&'a T>,
-}
-
-impl<'a, T> StrSerializer<'a, T>
-where
-    T: ?Sized,
-{
-    pub(crate) fn new_empty() -> Self {
-        Self {
-            bytes: &[],
-            len_prefix: [0; 4],
-            prefix_cursor: 0,
-            cursor: 0,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'a, T> Serializer for StrSerializer<'a, T>
-where
-    T: ?Sized,
-    &'a T: ToBytesRef<'a>,
-{
-    type Input = &'a T;
-
-    fn input(
-        &mut self,
-        item: Self::Input,
-        sink: &mut CursorMut<'_>,
-    ) -> Result<Poll<()>, ZebinError> {
-        let bytes = item.to_bytes_ref();
-        let len = bytes.len() as u32;
-        self.bytes = bytes;
-        self.len_prefix = len.to_le_bytes();
-        self.prefix_cursor = 0;
-        self.cursor = 0;
-        self.poll_pending(sink)
-    }
-
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
-        if self.prefix_cursor < self.len_prefix.len() {
-            let remaining = self.len_prefix.len() - self.prefix_cursor;
-            if sink
-                .write(&self.len_prefix[self.prefix_cursor..])?
-                .advance_cursor(&mut self.prefix_cursor, remaining)
-                .is_pending()
-            {
-                return Ok(Poll::Pending);
-            }
-        }
-
-        let remaining = self.bytes.len() - self.cursor;
-        Ok(sink
-            .write(&self.bytes[self.cursor..])?
-            .advance_cursor(&mut self.cursor, remaining))
-    }
-
-    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
-        Ok(Poll::Ready(()))
+    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        self.inner.finish(sink)
     }
 }
 
@@ -285,7 +280,7 @@ impl Serialize for str {
     where
         Self: 'a;
     type Serializer<'a>
-        = StrSerializer<'a, str>
+        = StrRefSerializer<'a>
     where
         Self: 'a;
 
@@ -293,7 +288,45 @@ impl Serialize for str {
     where
         Self: 'a,
     {
-        StrSerializer::new_empty()
+        StrRefSerializer::new()
+    }
+}
+
+pub struct StrRefSerializer<'a> {
+    inner: StringBytesSerializer<'a>,
+}
+
+impl<'a> StrRefSerializer<'a> {
+    pub fn new() -> Self {
+        Self {
+            inner: StringBytesSerializer::new_empty(),
+        }
+    }
+}
+
+impl<'a> Default for StrRefSerializer<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a> Serializer for StrRefSerializer<'a> {
+    type Input = &'a str;
+
+    fn input(
+        &mut self,
+        item: Self::Input,
+        sink: &mut CursorMut<'_>,
+    ) -> Result<Poll<()>, ZebinError> {
+        self.inner.input(StringBytes::Borrowed(item), sink)
+    }
+
+    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        self.inner.poll_pending(sink)
+    }
+
+    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+        self.inner.finish(sink)
     }
 }
 

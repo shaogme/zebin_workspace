@@ -2,13 +2,15 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, collections::VecDeque};
+use alloc::{borrow::Cow, collections::VecDeque, rc::Rc, sync::Arc};
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize};
 
 #[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
 struct NativeContainers {
     maybe_name: Option<String>,
     boxed_name: Box<str>,
+    rc_name: Rc<str>,
+    arc_name: Arc<str>,
     tags: [String; 2],
     numbers: [u32; 4],
     outcome: Result<String, String>,
@@ -32,6 +34,8 @@ fn test_native_container_round_trip_some() {
     let value = NativeContainers {
         maybe_name: Some("Alice".to_string()),
         boxed_name: "boxed".into(),
+        rc_name: Rc::<str>::from("shared-rc"),
+        arc_name: Arc::<str>::from("shared-arc"),
         tags: ["alpha".to_string(), "beta".to_string()],
         numbers: [1, 2, 3, 4],
         outcome: Ok("success".to_string()),
@@ -47,6 +51,8 @@ fn test_native_container_round_trip_some() {
         "Alice"
     );
     assert_eq!(unsafe { archived.boxed_name.as_str() }, "boxed");
+    assert_eq!(unsafe { archived.rc_name.as_str() }, "shared-rc");
+    assert_eq!(unsafe { archived.arc_name.as_str() }, "shared-arc");
     assert_eq!(unsafe { archived.tags[0].as_str() }, "alpha");
     assert_eq!(unsafe { archived.tags[1].as_str() }, "beta");
     assert_eq!(archived.numbers, [1, 2, 3, 4]);
@@ -70,6 +76,8 @@ fn test_native_container_round_trip_none() {
     let value = NativeContainers {
         maybe_name: None,
         boxed_name: "root".into(),
+        rc_name: Rc::<str>::from("rc-root"),
+        arc_name: Arc::<str>::from("arc-root"),
         tags: ["one".to_string(), "two".to_string()],
         numbers: [9, 8, 7, 6],
         outcome: Err("failure".to_string()),
@@ -81,6 +89,8 @@ fn test_native_container_round_trip_none() {
 
     assert!(archived.maybe_name.is_none());
     assert_eq!(unsafe { archived.boxed_name.as_str() }, "root");
+    assert_eq!(unsafe { archived.rc_name.as_str() }, "rc-root");
+    assert_eq!(unsafe { archived.arc_name.as_str() }, "arc-root");
     assert_eq!(unsafe { archived.tags[0].as_str() }, "one");
     assert_eq!(unsafe { archived.tags[1].as_str() }, "two");
     assert_eq!(archived.numbers, [9, 8, 7, 6]);
