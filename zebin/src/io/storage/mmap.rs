@@ -197,7 +197,7 @@ impl ChunkSourceMut for MmapSerializer {
     }
 
     #[inline]
-    fn get_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
         let pos = self.archive_pos;
         let end = pos
             .checked_add(len)
@@ -208,9 +208,13 @@ impl ChunkSourceMut for MmapSerializer {
                 required: end - self.mmap.len(),
             });
         }
-        self.archive_pos = end;
-        self.written = self.written.max(end);
         Ok(BufMut::new(&mut self.mmap[pos..end]))
+    }
+
+    #[inline]
+    fn advance(&mut self, len: usize) {
+        self.archive_pos = self.archive_pos.checked_add(len).expect("overflow");
+        self.written = self.written.max(self.archive_pos);
     }
 }
 

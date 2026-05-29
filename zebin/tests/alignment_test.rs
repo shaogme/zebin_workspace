@@ -71,7 +71,7 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             self.write_pos
         }
 
-        fn get_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
             let pos = self.write_pos;
             let available = self.limit.get().saturating_sub(pos);
             let count = len.min(available);
@@ -82,8 +82,14 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             if end > self.buf.len() {
                 self.buf.resize(end, 0);
             }
-            self.write_pos = end;
             Ok(BufMut::new(&mut self.buf[pos..end]))
+        }
+
+        fn advance(&mut self, len: usize) {
+            let pos = self.write_pos;
+            let available = self.limit.get().saturating_sub(pos);
+            let count = len.min(available);
+            self.write_pos += count;
         }
     }
 

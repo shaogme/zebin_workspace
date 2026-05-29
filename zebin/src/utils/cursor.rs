@@ -188,10 +188,11 @@ impl<'a> CursorMut<'a> {
         if bytes.is_empty() {
             return Ok(SinkProgress::Complete);
         }
-        let buf = (*self.source).get_buf_mut(bytes.len())?;
+        let buf = (*self.source).peek_buf_mut(bytes.len())?;
         let accepted = buf.len();
         if accepted > 0 {
             byteops::copy_exact(buf.into_mut_slice(), &bytes[..accepted]);
+            self.source.advance(accepted);
         }
         let progress = SinkProgress::from_accepted(bytes.len(), accepted);
         Ok(progress)
@@ -209,10 +210,11 @@ impl<'a> CursorMut<'a> {
         if len == 0 {
             return Ok(SinkProgress::Complete);
         }
-        let buf = (*self.source).get_buf_mut(len)?;
+        let buf = (*self.source).peek_buf_mut(len)?;
         let accepted = buf.len();
         if accepted > 0 {
             byteops::fill(buf.into_mut_slice(), 0);
+            self.source.advance(accepted);
         }
         let progress = SinkProgress::from_accepted(len, accepted);
         Ok(progress)

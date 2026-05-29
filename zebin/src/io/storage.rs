@@ -198,7 +198,7 @@ impl<'a> ChunkSourceMut for SliceSerializer<'a> {
     }
 
     #[inline]
-    fn get_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
         let pos = self.write_pos;
         let remaining = self.buf.len().saturating_sub(pos);
         let count = remaining.min(len);
@@ -206,18 +206,18 @@ impl<'a> ChunkSourceMut for SliceSerializer<'a> {
             return Ok(BufMut::new(&mut []));
         }
         let end = pos + count;
-
-        let next_archive_pos =
-            self.archive_pos
-                .checked_add(count)
-                .ok_or(ZebinError::ArithmeticOverflow {
-                    pos: self.archive_pos,
-                })?;
-
-        self.archive_pos = next_archive_pos;
-        self.write_pos = end;
-        self.written = self.written.max(end);
         Ok(BufMut::new(&mut self.buf[pos..end]))
+    }
+
+    #[inline]
+    fn advance(&mut self, len: usize) {
+        let pos = self.write_pos;
+        let remaining = self.buf.len().saturating_sub(pos);
+        let count = remaining.min(len);
+        let next_archive_pos = self.archive_pos.checked_add(count).expect("overflow");
+        self.archive_pos = next_archive_pos;
+        self.write_pos = pos + count;
+        self.written = self.written.max(self.write_pos);
     }
 }
 
@@ -274,7 +274,7 @@ impl ChunkSourceMut for VecSerializer {
     }
 
     #[inline]
-    fn get_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
         let pos = self.archive_pos;
         let end = pos
             .checked_add(len)
@@ -282,8 +282,12 @@ impl ChunkSourceMut for VecSerializer {
         if end > self.buf.len() {
             self.buf.resize(end, 0);
         }
-        self.archive_pos = end;
         Ok(BufMut::new(&mut self.buf[pos..end]))
+    }
+
+    #[inline]
+    fn advance(&mut self, len: usize) {
+        self.archive_pos = self.archive_pos.checked_add(len).expect("overflow");
     }
 }
 
