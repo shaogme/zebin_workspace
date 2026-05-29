@@ -83,7 +83,7 @@ impl<'a> Cursor<'a> {
         })?;
         Ok(buf.into_slice())
     }
-    // ... [rest of Cursor methods unchanged, view_file showed them] ...
+
     pub fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], AccessError>
     where
         C: ValidationContext + ?Sized,
@@ -183,14 +183,6 @@ impl<'a> CursorMut<'a> {
 
     pub fn pos(&self) -> usize {
         self.pos
-    }
-
-    pub fn source(&self) -> &(dyn ChunkSourceMut + 'a) {
-        self.source
-    }
-
-    pub fn source_mut(&mut self) -> &mut (dyn ChunkSourceMut + 'a) {
-        self.source
     }
 
     pub fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
