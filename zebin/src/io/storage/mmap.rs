@@ -6,7 +6,7 @@ use std::{
 use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
-use crate::io::{CursorMut, Storage, StorageMut};
+use crate::io::{Storage, StorageMut};
 use crate::utils::chunk::{Buf, BufMut, ChunkSource, ChunkSourceMut};
 
 /// Memory-mapped storage backend for read-only archive access.
@@ -209,8 +209,8 @@ impl ChunkSourceMut for MmapSerializer {
 }
 
 impl StorageMut for MmapSerializer {
-    fn writer(&mut self) -> CursorMut<'_> {
-        let pos = self.archive_pos;
-        CursorMut::new(self, pos)
+    #[inline]
+    fn pos(&self) -> usize {
+        self.archive_pos
     }
 }

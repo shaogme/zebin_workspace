@@ -360,12 +360,14 @@ mod tests {
         let mut serializer: SeqSerializer<'_, u32> = SeqSerializer::new();
 
         // Feed first item
-        let mut writer = sink.writer();
+        let pos = sink.pos();
+        let mut writer = CursorMut::new(&mut sink, pos);
         let poll_res = serializer.input(42, &mut writer);
         assert!(poll_res.is_ok());
 
         // Try feeding again while busy
-        let mut writer = sink.writer();
+        let pos = sink.pos();
+        let mut writer = CursorMut::new(&mut sink, pos);
         let poll_err = serializer.input(43, &mut writer);
         assert!(poll_err.is_err());
     }
@@ -376,9 +378,11 @@ mod tests {
         let mut sink = SliceSerializer::new(&mut buf, 0);
         let mut serializer: SeqSerializer<'_, u32> = SeqSerializer::new();
 
-        let mut writer = sink.writer();
+        let pos = sink.pos();
+        let mut writer = CursorMut::new(&mut sink, pos);
         let _ = serializer.finish_ref(&mut writer);
-        let mut writer = sink.writer();
+        let pos = sink.pos();
+        let mut writer = CursorMut::new(&mut sink, pos);
         let res = serializer.input(42, &mut writer);
         assert!(res.is_err());
     }

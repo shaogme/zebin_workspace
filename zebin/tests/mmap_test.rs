@@ -8,8 +8,8 @@ use std::{
 };
 
 use zebin::prelude::{
-    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, Mmap, MmapMut, MmapSerializer, Serialize,
-    Serializer, StorageMut, ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize,
+    ArchiveHeader, ArchiveHeaderTrait, ArchivedLayout, CursorMut, Mmap, MmapMut, MmapSerializer,
+    Serialize, Serializer, StorageMut, ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize,
 };
 use zebin::{access, serialize};
 
@@ -42,7 +42,8 @@ where
     T: for<'a> Serialize<Input<'a> = T>,
 {
     let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
-    let mut writer = serializer.writer();
+    let pos = serializer.pos();
+    let mut writer = CursorMut::new(serializer, pos);
     writer.write(header.serialize().as_ref())?;
 
     let mut body_serializer = T::serializer();
@@ -186,21 +187,24 @@ fn test_mmap_serializer_skip_and_align() -> Result<(), Box<dyn std::error::Error
     assert_eq!(serializer.capacity(), 64);
 
     {
-        let mut writer = serializer.writer();
+        let pos = serializer.pos();
+        let mut writer = CursorMut::new(&mut serializer, pos);
         writer.skip(5)?;
     }
     assert_eq!(serializer.pos(), 5);
     assert_eq!(serializer.written(), 5);
 
     {
-        let mut writer = serializer.writer();
+        let pos = serializer.pos();
+        let mut writer = CursorMut::new(&mut serializer, pos);
         writer.align(NonZeroUsize::new(8).unwrap())?;
     }
     assert_eq!(serializer.pos(), 8);
     assert_eq!(serializer.written(), 8);
 
     {
-        let mut writer = serializer.writer();
+        let pos = serializer.pos();
+        let mut writer = CursorMut::new(&mut serializer, pos);
         writer.write(b"hello")?;
     }
     assert_eq!(serializer.pos(), 13);
@@ -223,7 +227,8 @@ fn test_mmap_serializer_write_past_end_errors() -> Result<(), Box<dyn std::error
 
     let mut serializer = MmapSerializer::new(mmap_mut, 0);
     {
-        let mut writer = serializer.writer();
+        let pos = serializer.pos();
+        let mut writer = CursorMut::new(&mut serializer, pos);
         writer.write(b"abc")?;
         let err = writer.write(b"too long").unwrap_err();
         assert!(matches!(err, ZebinError::BufferTooSmall { .. }));

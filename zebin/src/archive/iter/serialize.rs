@@ -226,7 +226,8 @@ mod tests {
         let mut sink = SliceSerializer::new(&mut buf, 0);
         let mut serializer: OwnedIterSerializer<'_, Vec<u32>, u32> = OwnedIterSerializer::new();
 
-        let mut writer = sink.writer();
+        let pos = sink.pos();
+        let mut writer = CursorMut::new(&mut sink, pos);
         let res = serializer.poll_pending(&mut writer);
         assert!(res.is_err());
     }

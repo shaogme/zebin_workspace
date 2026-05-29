@@ -4,7 +4,7 @@ use std::cell::Cell;
 use zebin::ZebinError;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{Buf, BufMut, CursorMut, StorageMut, ZebinWriter};
+use zebin::prelude::{Buf, BufMut, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::reader;
 #[cfg(feature = "alloc")]
@@ -97,9 +97,9 @@ fn test_chunked_writer_resume() {
     }
 
     impl StorageMut for LimitedSink<'_> {
-        fn writer(&mut self) -> CursorMut<'_> {
-            let pos = self.buf.len();
-            CursorMut::new(self, pos)
+        #[inline]
+        fn pos(&self) -> usize {
+            self.buf.len()
         }
     }
 

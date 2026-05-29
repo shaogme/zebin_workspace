@@ -2,7 +2,7 @@
 #[path = "storage/mmap.rs"]
 pub mod mmap;
 
-use crate::{error::ZebinError, utils::cursor::CursorMut};
+use crate::error::ZebinError;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -48,7 +48,7 @@ pub trait Storage: ChunkSource {
 
 /// Unified storage layer: byte-backed write access contract.
 pub trait StorageMut: ChunkSourceMut {
-    fn writer(&mut self) -> CursorMut<'_>;
+    fn pos(&self) -> usize;
 }
 
 impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
@@ -79,8 +79,8 @@ impl<S: Storage + ?Sized> Storage for &mut S {
 
 impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     #[inline]
-    fn writer(&mut self) -> CursorMut<'_> {
-        (**self).writer()
+    fn pos(&self) -> usize {
+        (**self).pos()
     }
 }
 
@@ -220,9 +220,9 @@ impl<'a> ChunkSourceMut for SliceSerializer<'a> {
 }
 
 impl StorageMut for SliceSerializer<'_> {
-    fn writer(&mut self) -> CursorMut<'_> {
-        let pos = self.archive_pos;
-        CursorMut::new(self, pos)
+    #[inline]
+    fn pos(&self) -> usize {
+        self.archive_pos
     }
 }
 
@@ -286,8 +286,8 @@ impl ChunkSourceMut for VecSerializer {
 
 #[cfg(feature = "alloc")]
 impl StorageMut for VecSerializer {
-    fn writer(&mut self) -> CursorMut<'_> {
-        let pos = self.archive_pos;
-        CursorMut::new(self, pos)
+    #[inline]
+    fn pos(&self) -> usize {
+        self.archive_pos
     }
 }

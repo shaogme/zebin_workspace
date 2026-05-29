@@ -54,9 +54,9 @@ where
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {
-    pub fn new(mut storage_mut: S) -> Result<Self, ZebinError> {
+    pub fn new(storage_mut: S) -> Result<Self, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
-        let pos = storage_mut.writer().pos();
+        let pos = storage_mut.pos();
         Ok(Self {
             storage_mut,
             value: None,
@@ -87,7 +87,8 @@ where
     }
 
     fn drive(&mut self) -> Result<usize, ZebinError> {
-        let mut writer = self.storage_mut.writer();
+        let pos = self.storage_mut.pos();
+        let mut writer = CursorMut::new(&mut self.storage_mut, pos);
         let start_pos = writer.pos();
         loop {
             match &mut self.phase {
@@ -207,7 +208,8 @@ where
     pub fn serialize(value: <T as Serialize>::Input<'a>) -> Result<Vec<u8>, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         let mut serializer = VecSerializer::new(0);
-        let mut writer = serializer.writer();
+        let pos = serializer.pos();
+        let mut writer = CursorMut::new(&mut serializer, pos);
         writer.write(header.serialize().as_ref())?;
 
         let mut body_serializer = T::serializer();
