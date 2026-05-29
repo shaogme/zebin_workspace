@@ -1,5 +1,6 @@
+use crate::io::StorageMut;
 use crate::prelude::*;
-use crate::utils::chunk::{ChunkSource, ChunkSourceMut};
+use crate::utils::chunk::ChunkSource;
 use crate::utils::{byteops, padding_for_alignment};
 
 /// Borrowed cursor into an archive byte slice.
@@ -170,13 +171,13 @@ impl<'a> Cursor<'a> {
     }
 }
 
-/// Mutable cursor into an archive chunked view.
+/// Writable cursor into an archive chunked view.
 pub struct CursorMut<'a> {
-    source: &'a mut (dyn ChunkSourceMut + 'a),
+    source: &'a mut (dyn StorageMut + 'a),
 }
 
 impl<'a> CursorMut<'a> {
-    pub fn new(source: &'a mut (dyn ChunkSourceMut + 'a)) -> Self {
+    pub fn new(source: &'a mut (dyn StorageMut + 'a)) -> Self {
         Self { source }
     }
 

@@ -4,7 +4,7 @@ use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
 use zebin::prelude::{Buf, BufMut, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
-use zebin::utils::chunk::{ChunkSource, ChunkSourceMut};
+use zebin::utils::chunk::ChunkSource;
 #[cfg(feature = "alloc")]
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize};
 use zebin::{access, writer};
@@ -66,7 +66,7 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
         }
     }
 
-    impl<'a> ChunkSourceMut for LimitedSink<'a> {
+    impl<'a> StorageMut for LimitedSink<'a> {
         fn pos(&self) -> usize {
             self.write_pos
         }
@@ -92,8 +92,6 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             self.write_pos += count;
         }
     }
-
-    impl StorageMut for LimitedSink<'_> {}
 
     let mut sink = LimitedSink {
         buf: Vec::new(),

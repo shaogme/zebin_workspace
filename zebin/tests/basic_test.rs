@@ -8,7 +8,7 @@ use zebin::prelude::{Buf, BufMut, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::reader;
 #[cfg(feature = "alloc")]
-use zebin::utils::chunk::{ChunkSource, ChunkSourceMut};
+use zebin::utils::chunk::ChunkSource;
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
@@ -82,7 +82,7 @@ fn test_chunked_writer_resume() {
         }
     }
 
-    impl<'a> ChunkSourceMut for LimitedSink<'a> {
+    impl<'a> StorageMut for LimitedSink<'a> {
         fn pos(&self) -> usize {
             self.write_pos
         }
@@ -108,8 +108,6 @@ fn test_chunked_writer_resume() {
             self.write_pos += count;
         }
     }
-
-    impl StorageMut for LimitedSink<'_> {}
 
     let mut sink = LimitedSink {
         buf: Vec::new(),

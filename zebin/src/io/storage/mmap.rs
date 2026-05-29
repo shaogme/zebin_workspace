@@ -7,7 +7,7 @@ use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
 use crate::io::{Storage, StorageMut};
-use crate::utils::chunk::{Buf, BufMut, ChunkSource, ChunkSourceMut};
+use crate::utils::chunk::{Buf, BufMut, ChunkSource};
 
 /// Memory-mapped storage backend for read-only archive access.
 pub struct Mmap {
@@ -190,7 +190,7 @@ impl ChunkSource for MmapSerializer {
     }
 }
 
-impl ChunkSourceMut for MmapSerializer {
+impl StorageMut for MmapSerializer {
     #[inline]
     fn pos(&self) -> usize {
         self.archive_pos
@@ -217,5 +217,3 @@ impl ChunkSourceMut for MmapSerializer {
         self.written = self.written.max(self.archive_pos);
     }
 }
-
-impl StorageMut for MmapSerializer {}

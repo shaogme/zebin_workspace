@@ -34,7 +34,7 @@ impl Sharder for NoSharder {
     }
 }
 
-use crate::utils::chunk::{Buf, BufMut, ChunkSource, ChunkSourceMut};
+use crate::utils::chunk::{Buf, BufMut, ChunkSource};
 
 /// Unified storage layer: byte-backed read access contract.
 pub trait Storage: ChunkSource {
@@ -47,7 +47,11 @@ pub trait Storage: ChunkSource {
 }
 
 /// Unified storage layer: byte-backed write access contract.
-pub trait StorageMut: ChunkSourceMut {}
+pub trait StorageMut {
+    fn pos(&self) -> usize;
+    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError>;
+    fn advance(&mut self, len: usize);
+}
 
 impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
     type Mode = StaticMode;
@@ -75,7 +79,22 @@ impl<S: Storage + ?Sized> Storage for &mut S {
     }
 }
 
-impl<S: StorageMut + ?Sized> StorageMut for &mut S {}
+impl<S: StorageMut + ?Sized> StorageMut for &mut S {
+    #[inline]
+    fn pos(&self) -> usize {
+        (**self).pos()
+    }
+
+    #[inline]
+    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        (**self).peek_buf_mut(len)
+    }
+
+    #[inline]
+    fn advance(&mut self, len: usize) {
+        (**self).advance(len);
+    }
+}
 
 impl ChunkSource for [u8] {
     #[inline]
@@ -191,7 +210,7 @@ impl<'a> ChunkSource for SliceSerializer<'a> {
     }
 }
 
-impl<'a> ChunkSourceMut for SliceSerializer<'a> {
+impl<'a> StorageMut for SliceSerializer<'a> {
     #[inline]
     fn pos(&self) -> usize {
         self.archive_pos
@@ -220,8 +239,6 @@ impl<'a> ChunkSourceMut for SliceSerializer<'a> {
         self.written = self.written.max(self.write_pos);
     }
 }
-
-impl StorageMut for SliceSerializer<'_> {}
 
 #[cfg(feature = "alloc")]
 /// Serializer that writes into a dynamically growing vector.
@@ -267,7 +284,7 @@ impl ChunkSource for VecSerializer {
 }
 
 #[cfg(feature = "alloc")]
-impl ChunkSourceMut for VecSerializer {
+impl StorageMut for VecSerializer {
     #[inline]
     fn pos(&self) -> usize {
         self.archive_pos
@@ -290,6 +307,3 @@ impl ChunkSourceMut for VecSerializer {
         self.archive_pos = self.archive_pos.checked_add(len).expect("overflow");
     }
 }
-
-#[cfg(feature = "alloc")]
-impl StorageMut for VecSerializer {}

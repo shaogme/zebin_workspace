@@ -60,12 +60,6 @@ pub trait ChunkSource {
     fn is_eof(&self, pos: usize) -> bool;
 }
 
-pub trait ChunkSourceMut {
-    fn pos(&self) -> usize;
-    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError>;
-    fn advance(&mut self, len: usize);
-}
-
 // Implement for references
 impl<S: ChunkSource + ?Sized> ChunkSource for &S {
     #[inline]
@@ -88,22 +82,5 @@ impl<S: ChunkSource + ?Sized> ChunkSource for &mut S {
     #[inline]
     fn is_eof(&self, pos: usize) -> bool {
         (**self).is_eof(pos)
-    }
-}
-
-impl<S: ChunkSourceMut + ?Sized> ChunkSourceMut for &mut S {
-    #[inline]
-    fn pos(&self) -> usize {
-        (**self).pos()
-    }
-
-    #[inline]
-    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
-        (**self).peek_buf_mut(len)
-    }
-
-    #[inline]
-    fn advance(&mut self, len: usize) {
-        (**self).advance(len);
     }
 }
