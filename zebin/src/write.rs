@@ -87,8 +87,7 @@ where
     }
 
     fn drive(&mut self) -> Result<usize, ZebinError> {
-        let pos = self.storage_mut.pos();
-        let mut writer = CursorMut::new(&mut self.storage_mut, pos);
+        let mut writer = CursorMut::new(&mut self.storage_mut);
         let start_pos = writer.pos();
         loop {
             match &mut self.phase {
@@ -208,8 +207,7 @@ where
     pub fn serialize(value: <T as Serialize>::Input<'a>) -> Result<Vec<u8>, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         let mut serializer = VecSerializer::new(0);
-        let pos = serializer.pos();
-        let mut writer = CursorMut::new(&mut serializer, pos);
+        let mut writer = CursorMut::new(&mut serializer);
         writer.write(header.serialize().as_ref())?;
 
         let mut body_serializer = T::serializer();

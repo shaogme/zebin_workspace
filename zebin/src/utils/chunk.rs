@@ -61,7 +61,8 @@ pub trait ChunkSource {
 }
 
 pub trait ChunkSourceMut {
-    fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError>;
+    fn pos(&self) -> usize;
+    fn get_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError>;
 }
 
 // Implement for references
@@ -91,7 +92,12 @@ impl<S: ChunkSource + ?Sized> ChunkSource for &mut S {
 
 impl<S: ChunkSourceMut + ?Sized> ChunkSourceMut for &mut S {
     #[inline]
-    fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError> {
-        (**self).get_buf_mut(pos, len)
+    fn pos(&self) -> usize {
+        (**self).pos()
+    }
+
+    #[inline]
+    fn get_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        (**self).get_buf_mut(len)
     }
 }

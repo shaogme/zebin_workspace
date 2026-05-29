@@ -173,29 +173,27 @@ impl<'a> Cursor<'a> {
 /// Mutable cursor into an archive chunked view.
 pub struct CursorMut<'a> {
     source: &'a mut (dyn ChunkSourceMut + 'a),
-    pos: usize,
 }
 
 impl<'a> CursorMut<'a> {
-    pub fn new(source: &'a mut (dyn ChunkSourceMut + 'a), pos: usize) -> Self {
-        Self { source, pos }
+    pub fn new(source: &'a mut (dyn ChunkSourceMut + 'a)) -> Self {
+        Self { source }
     }
 
     pub fn pos(&self) -> usize {
-        self.pos
+        self.source.pos()
     }
 
     pub fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
         if bytes.is_empty() {
             return Ok(SinkProgress::Complete);
         }
-        let buf = (*self.source).get_buf_mut(self.pos, bytes.len())?;
+        let buf = (*self.source).get_buf_mut(bytes.len())?;
         let accepted = buf.len();
         if accepted > 0 {
             byteops::copy_exact(buf.into_mut_slice(), &bytes[..accepted]);
         }
         let progress = SinkProgress::from_accepted(bytes.len(), accepted);
-        self.pos += progress.accepted_for(bytes.len());
         Ok(progress)
     }
 
@@ -203,7 +201,7 @@ impl<'a> CursorMut<'a> {
         &mut self,
         alignment: core::num::NonZeroUsize,
     ) -> Result<SinkProgress, ZebinError> {
-        let padding = padding_for_alignment(self.pos, alignment);
+        let padding = padding_for_alignment(self.pos(), alignment);
         self.skip(padding)
     }
 
@@ -211,13 +209,12 @@ impl<'a> CursorMut<'a> {
         if len == 0 {
             return Ok(SinkProgress::Complete);
         }
-        let buf = (*self.source).get_buf_mut(self.pos, len)?;
+        let buf = (*self.source).get_buf_mut(len)?;
         let accepted = buf.len();
         if accepted > 0 {
             byteops::fill(buf.into_mut_slice(), 0);
         }
         let progress = SinkProgress::from_accepted(len, accepted);
-        self.pos += progress.accepted_for(len);
         Ok(progress)
     }
 }
