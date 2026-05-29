@@ -60,7 +60,7 @@ pub trait ChunkSource {
     fn is_eof(&self, pos: usize) -> bool;
 }
 
-pub trait ChunkSourceMut: ChunkSource {
+pub trait ChunkSourceMut {
     fn get_buf_mut(&mut self, pos: usize, len: usize) -> Result<BufMut<'_>, ZebinError>;
 }
 

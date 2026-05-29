@@ -28,14 +28,8 @@ pub struct Validator<'a, 'p, S: ChunkSource + ?Sized> {
     last_error_path: Option<ValidationPathStack>,
 }
 
-impl<'a> Validator<'a, 'static, [u8]> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self::with_config(data, ValidationConfig::default(), None)
-    }
-}
-
 impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
-    pub fn with_config(
+    pub fn new(
         data: &'a S,
         config: ValidationConfig,
         path: Option<&'p mut ValidationPathStack>,
@@ -54,7 +48,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
         max_depth: usize,
         path: Option<&'p mut ValidationPathStack>,
     ) -> Self {
-        Self::with_config(
+        Self::new(
             data,
             ValidationConfig {
                 max_depth,
