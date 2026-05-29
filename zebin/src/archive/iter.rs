@@ -36,10 +36,6 @@ impl ValidationContext for DummyContext {
 
     fn record_error_path(&mut self) {}
 
-    fn check_range(&mut self, _pos: usize, _size: usize) -> Result<(), AccessError> {
-        Ok(())
-    }
-
     fn check_alignment(
         &mut self,
         _pos: usize,

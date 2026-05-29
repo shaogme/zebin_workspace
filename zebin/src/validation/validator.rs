@@ -1,6 +1,5 @@
 use core::num::NonZeroUsize;
 
-use crate::utils::chunk::ChunkSource;
 use crate::{prelude::*, validation::ValidationPathSegment};
 
 /// Runtime configuration for sequential archive validation.
@@ -19,23 +18,17 @@ impl Default for ValidationConfig {
     }
 }
 
-/// Validator for byte streams to ensure safe sequential decoding.
-pub struct Validator<'a, 'p, S: ChunkSource + ?Sized> {
-    source: &'a S,
+/// Validator for managing sequential archive validation state.
+pub struct Validator<'p> {
     depth: usize,
     config: ValidationConfig,
     path: Option<&'p mut ValidationPathStack>,
     last_error_path: Option<ValidationPathStack>,
 }
 
-impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
-    pub fn new(
-        data: &'a S,
-        config: ValidationConfig,
-        path: Option<&'p mut ValidationPathStack>,
-    ) -> Self {
+impl<'p> Validator<'p> {
+    pub fn new(config: ValidationConfig, path: Option<&'p mut ValidationPathStack>) -> Self {
         Self {
-            source: data,
             depth: 0,
             config,
             path,
@@ -43,13 +36,8 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
         }
     }
 
-    pub fn with_max_depth(
-        data: &'a S,
-        max_depth: usize,
-        path: Option<&'p mut ValidationPathStack>,
-    ) -> Self {
+    pub fn with_max_depth(max_depth: usize, path: Option<&'p mut ValidationPathStack>) -> Self {
         Self::new(
-            data,
             ValidationConfig {
                 max_depth,
                 ..ValidationConfig::default()
@@ -60,23 +48,6 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
 
     pub fn config(&self) -> ValidationConfig {
         self.config
-    }
-
-    pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
-        if size == 0 {
-            if self.source.is_eof(pos) {
-                return Ok(());
-            }
-            return Err(self.validation_error("Pointer out of bounds", pos));
-        }
-
-        let _ = pos
-            .checked_add(size)
-            .ok_or_else(|| self.validation_error("Pointer range overflow", pos))?;
-        if self.source.get_buf(pos, size).is_err() {
-            return Err(self.validation_error("Pointer out of bounds", pos));
-        }
-        Ok(())
     }
 
     pub fn check_alignment(
@@ -143,17 +114,9 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
     pub fn last_error_path(&self) -> Option<&ValidationPathStack> {
         self.last_error_path.as_ref()
     }
-
-    pub fn source(&self) -> &'a S {
-        self.source
-    }
-
-    fn validation_error(&mut self, message: &'static str, pos: usize) -> AccessError {
-        self.error(AccessError::ValidationError { message, pos })
-    }
 }
 
-impl<'a, 'p, S: ChunkSource + ?Sized> ValidationContext for Validator<'a, 'p, S> {
+impl<'p> ValidationContext for Validator<'p> {
     fn push_depth(&mut self) -> Result<(), AccessError> {
         self.push_depth()
     }
@@ -172,10 +135,6 @@ impl<'a, 'p, S: ChunkSource + ?Sized> ValidationContext for Validator<'a, 'p, S>
 
     fn record_error_path(&mut self) {
         self.record_error_path()
-    }
-
-    fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
-        self.check_range(pos, size)
     }
 
     fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), AccessError> {

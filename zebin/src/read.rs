@@ -63,7 +63,7 @@ where
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
-        let mut validator = Validator::new(storage, config, None);
+        let mut validator = Validator::new(config, None);
         let mut cursor = Cursor::new(storage, H::SIZE);
         let view = T::Archived::access(&mut cursor, &mut validator)?;
         Ok(view)
@@ -83,7 +83,7 @@ where
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
-        let mut validator = Validator::new(&self.storage, self.config, None);
+        let mut validator = Validator::new(self.config, None);
         let mut cursor = Cursor::new(&self.storage, self.offset + H::SIZE);
         let view = T::Archived::access(&mut cursor, &mut validator)?;
         self.offset = cursor.pos();
@@ -130,7 +130,7 @@ where
 {
     let mut cursor = Cursor::new(storage, root_pos);
     let (result, error_path) = {
-        let mut validator = Validator::new(storage, config, stack.as_deref_mut());
+        let mut validator = Validator::new(config, stack.as_deref_mut());
         let res = T::Archived::validate(&mut cursor, &mut validator).and_then(|()| {
             if !storage.is_eof(cursor.pos()) {
                 Err(validator.validation_error("Trailing bytes after root object", cursor.pos()))

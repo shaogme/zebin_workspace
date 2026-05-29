@@ -235,7 +235,7 @@ where
         let entry = FieldEntry::access(cursor, context)?;
         let payload_len = entry.payload_len as usize;
 
-        context.check_range(current_payload_pos, payload_len)?;
+        cursor.check_range(current_payload_pos, payload_len, context)?;
         let field_cursor = cursor.with_pos(current_payload_pos);
 
         handler(entry, entry_pos, field_cursor, context)?;

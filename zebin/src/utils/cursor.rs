@@ -29,6 +29,26 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    pub fn check_range<C>(&self, pos: usize, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        if len == 0 {
+            if self.source.is_eof(pos) {
+                return Ok(());
+            }
+            return Err(context.validation_error("Pointer out of bounds", pos));
+        }
+
+        let _ = pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Pointer range overflow", pos))?;
+        if self.source.get_buf(pos, len).is_err() {
+            return Err(context.validation_error("Pointer out of bounds", pos));
+        }
+        Ok(())
+    }
+
     pub fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
@@ -37,7 +57,7 @@ impl<'a> Cursor<'a> {
             .pos
             .checked_add(len)
             .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
-        context.check_range(self.pos, len)?;
+        self.check_range(self.pos, len, context)?;
         self.pos = end;
         Ok(())
     }
@@ -74,7 +94,7 @@ impl<'a> Cursor<'a> {
     where
         C: ValidationContext + ?Sized,
     {
-        context.check_range(self.pos, len)?;
+        self.check_range(self.pos, len, context)?;
 
         let buf = (*self.source).get_buf(self.pos, len).map_err(|_| {
             context.validation_error(
