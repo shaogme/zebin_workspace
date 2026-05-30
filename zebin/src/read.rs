@@ -3,47 +3,45 @@ use crate::io::Storage;
 use crate::prelude::*;
 
 /// Safe access layer output that keeps the validated byte slice alive.
-pub struct ZebinReader<'a, T, S, H = ArchiveHeader>
+pub struct ZebinReader<'a, T, C, H = ArchiveHeader>
 where
-    S: Storage,
+    C: Cursor<'a>,
     H: ArchiveHeaderTrait,
 {
-    storage: S,
-    offset: usize,
+    cursor: C,
     config: ValidationConfig,
-    _phantom: core::marker::PhantomData<(T, H, &'a S)>,
+    _phantom: core::marker::PhantomData<(T, H, &'a ())>,
 }
 
-impl<'a, T, S, H> ZebinReader<'a, T, S, H>
+impl<'a, T, C, H> ZebinReader<'a, T, C, H>
 where
-    S: Storage,
+    C: Cursor<'a>,
     H: ArchiveHeaderTrait,
 {
-    pub fn new(storage: S, config: ValidationConfig) -> Result<Self, ZebinError> {
+    pub fn new(cursor: C, config: ValidationConfig) -> Result<Self, ZebinError> {
         Ok(Self {
-            storage,
-            offset: 0,
+            cursor,
             config,
             _phantom: core::marker::PhantomData,
         })
     }
 
     pub fn offset(&self) -> usize {
-        self.offset
+        self.cursor.pos()
     }
 
     pub fn is_finished(&self) -> bool {
-        self.storage.cursor(self.offset).is_eof()
+        self.cursor.is_eof()
     }
 
-    pub fn access(
+    pub fn access<S>(
         storage: &'a S,
         config: ValidationConfig,
     ) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
     where
         T: Archive,
         T::Archived: Access,
-        S: Storage<Mode = StaticMode>,
+        S: Storage<Mode = StaticMode> + ?Sized,
     {
         let mut validator = Validator::new(config, None);
         let mut cursor = storage.cursor(0);
@@ -56,40 +54,33 @@ where
         Ok(view)
     }
 
-    pub fn read(&mut self) -> Result<<T::Archived as Access>::View<'_>, ZebinError>
+    pub fn read(&mut self) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
     where
         T: Archive,
         T::Archived: Access,
     {
-        if self.is_finished() {
-            self.storage.advance_sharder()?;
-            self.offset = 0;
-        }
-
         let mut validator = Validator::new(self.config, None);
-        let mut cursor = self.storage.cursor(self.offset);
-        let header_bytes = cursor.peek_exact(H::SIZE, &mut validator)?;
+        let header_bytes = self.cursor.peek_exact(H::SIZE, &mut validator)?;
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
-        cursor.advance(H::SIZE, &mut validator)?;
-        let view = T::Archived::access(&mut cursor, &mut validator)?;
-        self.offset = cursor.pos();
+        self.cursor.advance(H::SIZE, &mut validator)?;
+        let view = T::Archived::access(&mut self.cursor, &mut validator)?;
         Ok(view)
     }
 
-    pub fn deserialize(storage: S) -> Result<T, ZebinError>
+    pub fn deserialize(cursor: C) -> Result<T, ZebinError>
     where
-        T: Archive,
+        T: Archive + 'a,
         T::Archived: Access,
         for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
     {
-        let mut reader = Self::new(storage, ValidationConfig::default())?;
+        let mut reader = Self::new(cursor, ValidationConfig::default())?;
         let view = reader.read()?;
         view.deserialize()
     }
 
-    pub fn validate(
+    pub fn validate<S>(
         storage: &'a S,
         config: ValidationConfig,
         stack: Option<&mut ValidationPathStack>,
@@ -97,28 +88,28 @@ where
     where
         T: Archive,
         T::Archived: Access,
+        S: Storage + ?Sized,
     {
         let mut header_validator = Validator::new(config, None);
-        let cursor = storage.cursor(0);
+        let mut cursor = storage.cursor(0);
         let header_bytes = cursor.peek_exact(H::SIZE, &mut header_validator)?;
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
-        validate_root::<T, S>(storage, H::SIZE, config, stack)
+        cursor.advance(H::SIZE, &mut header_validator)?;
+        validate_root::<T, S::Cursor<'a>>(cursor, config, stack)
     }
 }
 
-fn validate_root<T, S>(
-    storage: &S,
-    root_pos: usize,
+fn validate_root<'a, T, C>(
+    mut cursor: C,
     config: ValidationConfig,
     mut stack: Option<&mut ValidationPathStack>,
 ) -> Result<(), ZebinError>
 where
     T: Archive,
-    S: Storage,
+    C: Cursor<'a>,
     T::Archived: Access,
 {
-    let mut cursor = storage.cursor(root_pos);
     let (result, error_path) = {
         let mut validator = Validator::new(config, stack.as_deref_mut());
         let res = T::Archived::validate(&mut cursor, &mut validator).and_then(|()| {

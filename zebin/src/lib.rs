@@ -139,44 +139,46 @@ pub use pub_fn::*;
 mod pub_fn {
     use super::prelude::*;
     /// Create a reader for the archived root object using the default header.
-    pub fn reader<'a, T, S>(storage: S) -> Result<ZebinReader<'a, T, S>, ZebinError>
+    pub fn reader<'a, T, S>(storage: &'a S) -> Result<ZebinReader<'a, T, S::Cursor<'a>>, ZebinError>
     where
         T: Archive,
-        S: Storage,
+        S: Storage + ?Sized,
         T::Archived: Access,
     {
-        ZebinReader::new(storage, ValidationConfig::default())
+        let cursor = storage.cursor(0);
+        ZebinReader::new(cursor, ValidationConfig::default())
     }
 
     /// Access the archived root object using the default header.
     pub fn access<'a, T, S>(storage: &'a S) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
     where
         T: Archive + 'a,
-        S: Storage<Mode = StaticMode> + 'a,
+        S: Storage<Mode = StaticMode> + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S>::access(storage, ValidationConfig::default())
+        ZebinReader::<T, S::Cursor<'a>>::access(storage, ValidationConfig::default())
     }
 
     /// Decode and validate the archived root object using the default header directly into T.
-    pub fn deserialize<'a, T, S>(storage: S) -> Result<T, ZebinError>
+    pub fn deserialize<'a, T, S>(storage: &'a S) -> Result<T, ZebinError>
     where
         T: Archive + 'a,
-        S: Storage + 'a,
+        S: Storage + ?Sized + 'a,
         T::Archived: Access + 'a,
         for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
     {
-        ZebinReader::<T, S>::deserialize(storage)
+        let cursor = storage.cursor(0);
+        ZebinReader::<T, S::Cursor<'a>>::deserialize(cursor)
     }
 
     /// Validate an archive without exposing the archived view using the default header.
     pub fn validate<'a, T, S>(storage: &'a S) -> Result<(), ZebinError>
     where
         T: Archive,
-        S: Storage + 'a,
+        S: Storage + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), None)
+        ZebinReader::<T, S::Cursor<'a>>::validate(storage, ValidationConfig::default(), None)
     }
 
     /// Validate an archive with explicit runtime validation limits.
@@ -187,10 +189,10 @@ mod pub_fn {
     ) -> Result<(), ZebinError>
     where
         T: Archive,
-        S: Storage + 'a,
+        S: Storage + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S>::validate(storage, config, stack)
+        ZebinReader::<T, S::Cursor<'a>>::validate(storage, config, stack)
     }
 
     /// Validate an archive and capture the logical field/index path on failure.
@@ -200,10 +202,10 @@ mod pub_fn {
     ) -> Result<(), ZebinError>
     where
         T: Archive,
-        S: Storage + 'a,
+        S: Storage + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S>::validate(storage, ValidationConfig::default(), Some(stack))
+        ZebinReader::<T, S::Cursor<'a>>::validate(storage, ValidationConfig::default(), Some(stack))
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.

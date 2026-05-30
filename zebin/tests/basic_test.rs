@@ -4,9 +4,9 @@ use core::cell::Cell;
 use zebin::ZebinError;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{Buf, BufMut, StorageMut, ZebinWriter};
-#[cfg(feature = "alloc")]
-use zebin::reader;
+use zebin::prelude::{
+    Buf, BufMut, Storage, StorageMut, ValidationConfig, ZebinReader, ZebinWriter,
+};
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
@@ -352,16 +352,23 @@ fn test_sharded_storage_stream() {
     let shard1 = zebin::serialize(&u1).unwrap();
     let shard2 = zebin::serialize(&u2).unwrap();
 
-    let storage = ShardedStorage {
+    let mut storage = ShardedStorage {
         shards: vec![shard1, shard2],
         current_index: 0,
     };
 
-    let mut reader = reader::<UserProfile, _>(storage).unwrap();
+    let cursor = storage.cursor(0);
+    let mut reader =
+        ZebinReader::<UserProfile, _>::new(cursor, ValidationConfig::default()).unwrap();
 
     let r1 = reader.read().unwrap();
     assert_eq!(r1.id, 1);
     assert_eq!(unsafe { r1.username.as_str() }, "Alice");
+
+    storage.advance_sharder().unwrap();
+    let cursor = storage.cursor(0);
+    let mut reader =
+        ZebinReader::<UserProfile, _>::new(cursor, ValidationConfig::default()).unwrap();
 
     let r2 = reader.read().unwrap();
     assert_eq!(r2.id, 2);
