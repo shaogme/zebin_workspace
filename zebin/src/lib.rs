@@ -44,9 +44,9 @@ pub mod prelude {
         io::{
             Access, Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
             ArchivedLayout, Buf, BufMut, Cursor, CursorMut, Deserialize, FixedLayout, MeasureBody,
-            NoSharder, SchemaAware, Serialize, Serializer, Sharder, SinkProgress, SliceSerializer,
-            StaticMode, Storage, StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter,
-            deserialize, reader, writer,
+            SchemaAware, Serialize, Serializer, SinkProgress, SliceSerializer, StaticMode, Storage,
+            StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter, deserialize, reader,
+            writer,
         },
         schema::{FieldEncoding, FieldEntry, ObjectEncoding, SchemaRevision, StableSchemaKey},
         validation::{
@@ -100,9 +100,7 @@ pub mod io {
     pub use crate::io_impl::storage::mmap::MmapSerializer;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
-    pub use crate::io_impl::storage::{
-        NoSharder, Sharder, StaticMode, Storage, StorageMode, StorageMut, StreamMode,
-    };
+    pub use crate::io_impl::storage::{StaticMode, Storage, StorageMode, StorageMut, StreamMode};
     pub use crate::pub_fn::{deserialize, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{serialize, serialize_into};

@@ -19,34 +19,21 @@ impl StorageMode for StaticMode {}
 pub struct StreamMode;
 impl StorageMode for StreamMode {}
 
-/// Shard controller trait.
-pub trait Sharder {
-    fn advance(&mut self) -> Result<(), ZebinError>;
-}
+/// Unified storage layer: byte-backed read access contract.
+pub trait Storage {
+    type Mode: StorageMode;
+    type Cursor<'a>: Cursor<'a>
+    where
+        Self: 'a;
 
-/// No-op sharder for static storage.
-pub struct NoSharder;
-impl Sharder for NoSharder {
     #[inline]
-    fn advance(&mut self) -> Result<(), ZebinError> {
+    fn advance_sharder(&mut self) -> Result<(), ZebinError> {
         Err(ZebinError::BufferTooSmall {
             pos: 0,
             required: 1,
         })
     }
-}
 
-/// Unified storage layer: byte-backed read access contract.
-pub trait Storage {
-    type Mode: StorageMode;
-    type Sharder<'a>: Sharder
-    where
-        Self: 'a;
-    type Cursor<'a>: Cursor<'a>
-    where
-        Self: 'a;
-
-    fn sharder(&mut self) -> Self::Sharder<'_>;
     fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
     where
         Self: 'a;
@@ -61,18 +48,17 @@ pub trait StorageMut {
 
 impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
     type Mode = StaticMode;
-    type Sharder<'a>
-        = NoSharder
-    where
-        Self: 'a;
     type Cursor<'a>
         = S::Cursor<'a>
     where
         Self: 'a;
 
     #[inline]
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        NoSharder
+    fn advance_sharder(&mut self) -> Result<(), ZebinError> {
+        Err(ZebinError::BufferTooSmall {
+            pos: 0,
+            required: 1,
+        })
     }
 
     #[inline]
@@ -86,18 +72,14 @@ impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
 
 impl<S: Storage + ?Sized> Storage for &mut S {
     type Mode = S::Mode;
-    type Sharder<'a>
-        = S::Sharder<'a>
-    where
-        Self: 'a;
     type Cursor<'a>
         = S::Cursor<'a>
     where
         Self: 'a;
 
     #[inline]
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        (**self).sharder()
+    fn advance_sharder(&mut self) -> Result<(), ZebinError> {
+        (**self).advance_sharder()
     }
 
     #[inline]
@@ -128,19 +110,10 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
 
 impl Storage for [u8] {
     type Mode = StaticMode;
-    type Sharder<'a>
-        = NoSharder
-    where
-        Self: 'a;
     type Cursor<'a>
         = SliceCursor<'a>
     where
         Self: 'a;
-
-    #[inline]
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        NoSharder
-    }
 
     #[inline]
     fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
@@ -154,19 +127,10 @@ impl Storage for [u8] {
 #[cfg(feature = "alloc")]
 impl Storage for Vec<u8> {
     type Mode = StaticMode;
-    type Sharder<'a>
-        = NoSharder
-    where
-        Self: 'a;
     type Cursor<'a>
         = SliceCursor<'a>
     where
         Self: 'a;
-
-    #[inline]
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        NoSharder
-    }
 
     #[inline]
     fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>

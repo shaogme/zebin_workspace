@@ -1,5 +1,5 @@
 use crate::error::ParseHeaderError;
-use crate::io::{Sharder, Storage};
+use crate::io::Storage;
 use crate::prelude::*;
 
 /// Safe access layer output that keeps the validated byte slice alive.
@@ -62,7 +62,7 @@ where
         T::Archived: Access,
     {
         if self.is_finished() {
-            self.storage.sharder().advance()?;
+            self.storage.advance_sharder()?;
             self.offset = 0;
         }
 

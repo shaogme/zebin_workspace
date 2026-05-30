@@ -235,21 +235,6 @@ struct ShardedStorage {
 }
 
 #[cfg(feature = "alloc")]
-impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
-    fn advance(&mut self) -> Result<(), ZebinError> {
-        if self.current_index + 1 < self.shards.len() {
-            self.current_index += 1;
-            Ok(())
-        } else {
-            Err(ZebinError::BufferTooSmall {
-                pos: 0,
-                required: 1,
-            })
-        }
-    }
-}
-
-#[cfg(feature = "alloc")]
 struct ShardedStorageCursor<'a> {
     storage: &'a ShardedStorage,
     pos: usize,
@@ -319,17 +304,21 @@ where
 #[cfg(feature = "alloc")]
 impl zebin::io::Storage for ShardedStorage {
     type Mode = zebin::io::StreamMode;
-    type Sharder<'a>
-        = &'a mut ShardedStorage
-    where
-        Self: 'a;
     type Cursor<'a>
         = ShardedStorageCursor<'a>
     where
         Self: 'a;
 
-    fn sharder(&mut self) -> Self::Sharder<'_> {
-        self
+    fn advance_sharder(&mut self) -> Result<(), ZebinError> {
+        if self.current_index + 1 < self.shards.len() {
+            self.current_index += 1;
+            Ok(())
+        } else {
+            Err(ZebinError::BufferTooSmall {
+                pos: 0,
+                required: 1,
+            })
+        }
     }
 
     fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
