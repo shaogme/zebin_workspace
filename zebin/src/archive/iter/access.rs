@@ -255,24 +255,6 @@ where
     }
 
     #[inline]
-    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        self.advance(len, context)
-    }
-
-    #[inline]
-    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let start = self.pos;
-        self.advance(len, context)?;
-        Ok(Buf::new(&self.slice[start..self.pos]))
-    }
-
-    #[inline]
     fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
     where
         C: ValidationContext + ?Sized,
@@ -319,26 +301,6 @@ where
         let _ = self.cursor.peek_buf(new_len, context)?;
         self.peeked_len = new_len;
         Ok(())
-    }
-
-    #[inline]
-    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        self.advance(len, context)
-    }
-
-    #[inline]
-    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let start = self.peeked_len;
-        self.advance(len, context)?;
-        let full_buf = self.cursor.peek_buf(self.peeked_len, context)?;
-        let slice = &full_buf.into_slice()[start..self.peeked_len];
-        Ok(Buf::new(slice))
     }
 
     #[inline]

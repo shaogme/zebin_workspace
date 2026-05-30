@@ -11,15 +11,20 @@ pub trait Cursor<'a> {
     fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized;
-    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
-    where
-        C: ValidationContext + ?Sized;
+
     fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
     where
-        C: ValidationContext + ?Sized;
+        C: ValidationContext + ?Sized,
+    {
+        let buf = self.peek_buf(len, context)?;
+        self.advance(len, context)?;
+        Ok(buf)
+    }
+
     fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
     where
         C: ValidationContext + ?Sized;
+
     fn is_eof(&self) -> bool;
 
     #[inline]
@@ -185,24 +190,6 @@ where
         }
         self.pos = end;
         Ok(())
-    }
-
-    #[inline]
-    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        self.advance(len, context)
-    }
-
-    #[inline]
-    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let start = self.pos;
-        self.advance(len, context)?;
-        Ok(Buf::new(&self.slice[start..self.pos]))
     }
 
     #[inline]

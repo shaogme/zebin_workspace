@@ -290,29 +290,6 @@ where
     }
 
     #[inline]
-    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), zebin::prelude::AccessError>
-    where
-        C: zebin::validation::ValidationContext + ?Sized,
-    {
-        self.advance(len, context)
-    }
-
-    #[inline]
-    fn read_buf<C>(
-        &mut self,
-        len: usize,
-        context: &mut C,
-    ) -> Result<Buf<'b>, zebin::prelude::AccessError>
-    where
-        C: zebin::validation::ValidationContext + ?Sized,
-    {
-        let start = self.pos;
-        self.advance(len, context)?;
-        let shard = &self.storage.shards[self.storage.current_index];
-        Ok(Buf::new(&shard[start..self.pos]))
-    }
-
-    #[inline]
     fn peek_buf<C>(
         &self,
         len: usize,
