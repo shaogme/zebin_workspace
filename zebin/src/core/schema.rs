@@ -240,7 +240,7 @@ where
         let entry_pos = table_start + i * FieldEntry::SIZE;
         let payload_len = entry.payload_len as usize;
 
-        context.check_range(cursor.pos(), payload_len)?;
+        cursor.check_range(payload_len, context)?;
 
         let start_pos = cursor.pos();
         handler(entry, entry_pos, cursor, context)?;

@@ -45,7 +45,7 @@ where
         T::Archived: Access,
         S: Storage<Mode = StaticMode>,
     {
-        let mut validator = Validator::new(storage, config, None);
+        let mut validator = Validator::new(config, None);
         let mut cursor = storage.cursor(0);
         let header_bytes = cursor.peek_exact(H::SIZE, &mut validator)?;
         let header = H::parse(header_bytes)?;
@@ -66,7 +66,7 @@ where
             self.offset = 0;
         }
 
-        let mut validator = Validator::new(&self.storage, self.config, None);
+        let mut validator = Validator::new(self.config, None);
         let mut cursor = self.storage.cursor(self.offset);
         let header_bytes = cursor.peek_exact(H::SIZE, &mut validator)?;
         let header = H::parse(header_bytes)?;
@@ -98,7 +98,7 @@ where
         T: Archive,
         T::Archived: Access,
     {
-        let mut header_validator = Validator::new(storage, config, None);
+        let mut header_validator = Validator::new(config, None);
         let cursor = storage.cursor(0);
         let header_bytes = cursor.peek_exact(H::SIZE, &mut header_validator)?;
         let header = H::parse(header_bytes)?;
@@ -120,7 +120,7 @@ where
 {
     let mut cursor = storage.cursor(root_pos);
     let (result, error_path) = {
-        let mut validator = Validator::new(storage, config, stack.as_deref_mut());
+        let mut validator = Validator::new(config, stack.as_deref_mut());
         let res = T::Archived::validate(&mut cursor, &mut validator).and_then(|()| {
             if !cursor.is_eof() {
                 Err(validator.validation_error("Trailing bytes after root object", cursor.pos()))

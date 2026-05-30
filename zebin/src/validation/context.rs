@@ -29,8 +29,6 @@ pub trait ValidationContext {
         PathGuard::new(self, ValidationPathSegment::Variant(name))
     }
 
-    fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError>;
-
     fn check_alignment(&mut self, pos: usize, alignment: NonZeroUsize) -> Result<(), AccessError>;
 
     fn check_sequence_len(&mut self, len: usize, pos: usize) -> Result<(), AccessError>;
@@ -57,10 +55,6 @@ where
     pub fn new(context: &'a mut C) -> Result<Self, AccessError> {
         context.push_depth()?;
         Ok(Self { context })
-    }
-
-    pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
-        self.context.check_range(pos, size)
     }
 
     pub fn check_alignment(

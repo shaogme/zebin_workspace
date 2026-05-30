@@ -23,6 +23,14 @@ pub trait Cursor<'a> {
     fn is_eof(&self) -> bool;
 
     #[inline]
+    fn check_range<C>(&self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        self.peek_buf(len, context).map(|_| ())
+    }
+
+    #[inline]
     fn align<C>(&mut self, alignment: NonZeroUsize, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
