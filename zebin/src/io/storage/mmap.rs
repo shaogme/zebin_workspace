@@ -6,8 +6,9 @@ use std::{
 use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
-use crate::io::{Storage, StorageMut};
-use crate::utils::chunk::{Buf, BufMut, ChunkSource};
+use crate::io::{NoSharder, StaticMode, Storage, StorageMut};
+use crate::utils::chunk::BufMut;
+use crate::utils::cursor::SliceCursor;
 
 /// Memory-mapped storage backend for read-only archive access.
 pub struct Mmap {
@@ -38,37 +39,28 @@ impl Mmap {
     }
 }
 
-impl ChunkSource for Mmap {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        let end = pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-        if end > self.data.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos,
-                required: end - self.data.len(),
-            });
-        }
-        Ok(Buf::new(&self.data[pos..end]))
-    }
-
-    #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        pos >= self.data.len()
-    }
-}
-
 impl Storage for Mmap {
-    type Mode = crate::io::StaticMode;
+    type Mode = StaticMode;
     type Sharder<'a>
-        = crate::io::NoSharder
+        = NoSharder
+    where
+        Self: 'a;
+    type Cursor<'a>
+        = SliceCursor<'a>
     where
         Self: 'a;
 
     #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
-        crate::io::NoSharder
+        NoSharder
+    }
+
+    #[inline]
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a,
+    {
+        SliceCursor::new(self.as_slice(), pos)
     }
 }
 
@@ -166,27 +158,6 @@ impl MmapSerializer {
 
     pub fn flush(&self) -> Result<(), ZebinError> {
         self.mmap.flush().map_err(ZebinError::from)
-    }
-}
-
-impl ChunkSource for MmapSerializer {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        let end = pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-        if end > self.mmap.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos,
-                required: end - self.mmap.len(),
-            });
-        }
-        Ok(Buf::new(&self.mmap[pos..end]))
-    }
-
-    #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        pos >= self.mmap.len()
     }
 }
 

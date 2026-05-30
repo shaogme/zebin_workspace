@@ -109,12 +109,13 @@ macro_rules! impl_archive_for_primitive {
                 #[cfg(feature = "alloc")]
                 type AccessStrategy = crate::io::FixedSequenceStrategy;
 
-                fn access<'a, C>(
-                    cursor: &mut Cursor<'a>,
+                fn access<'a, C, Cr>(
+                    cursor: &mut Cr,
                     context: &mut C,
                 ) -> Result<Self::View<'a>, AccessError>
                 where
                     C: ValidationContext + ?Sized,
+                    Cr: Cursor<'a> + ?Sized,
                     Self: 'a
                 {
                     let bytes = cursor.read_exact(core::mem::size_of::<Self>(), context)?;
@@ -123,12 +124,13 @@ macro_rules! impl_archive_for_primitive {
                     Ok(<$t>::from_le_bytes(fixed))
                 }
 
-                fn validate<'a, C>(
-                    cursor: &mut Cursor<'a>,
+                fn validate<'a, C, Cr>(
+                    cursor: &mut Cr,
                     context: &mut C,
                 ) -> Result<(), AccessError>
                 where
                     C: ValidationContext + ?Sized,
+                    Cr: Cursor<'a> + ?Sized,
                 {
                     cursor.advance(core::mem::size_of::<Self>(), context)
                 }
@@ -210,12 +212,10 @@ impl Access for bool {
     #[cfg(feature = "alloc")]
     type AccessStrategy = FixedSequenceStrategy;
 
-    fn access<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a,
     {
         let pos = cursor.pos();
@@ -227,9 +227,10 @@ impl Access for bool {
         }
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         Self::access(cursor, context).map(|_| ())
     }
@@ -347,20 +348,19 @@ impl Access for () {
     #[cfg(feature = "alloc")]
     type AccessStrategy = FixedSequenceStrategy;
 
-    fn access<'a, C>(
-        _cursor: &mut Cursor<'a>,
-        _context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(_cursor: &mut Cr, _context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a,
     {
         Ok(())
     }
 
-    fn validate<'a, C>(_cursor: &mut Cursor<'a>, _context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(_cursor: &mut Cr, _context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         Ok(())
     }
@@ -600,12 +600,10 @@ impl<A: Access, B: Access> Access for (A, B) {
     #[cfg(feature = "alloc")]
     type AccessStrategy = crate::io::ForwardSequenceStrategy;
 
-    fn access<'a2, C>(
-        cursor: &mut Cursor<'a2>,
-        context: &mut C,
-    ) -> Result<Self::View<'a2>, AccessError>
+    fn access<'a2, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a2>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a2> + ?Sized,
         Self: 'a2,
     {
         let key = A::access(cursor, context)?;
@@ -613,9 +611,10 @@ impl<A: Access, B: Access> Access for (A, B) {
         Ok((key, value))
     }
 
-    fn validate<'a2, C>(cursor: &mut Cursor<'a2>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a2, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a2> + ?Sized,
     {
         A::validate(cursor, context)?;
         B::validate(cursor, context)?;

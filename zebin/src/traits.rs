@@ -53,35 +53,33 @@ pub trait Access: ArchivedLayout + Sized {
     #[cfg(feature = "alloc")]
     type AccessStrategy: SequenceAccessStrategy<Self>;
 
-    fn access<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a;
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
-        C: ValidationContext + ?Sized;
+        C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized;
 }
 
 /// Strategy for decoding and validating a sequence of elements.
 #[cfg(feature = "alloc")]
 pub trait SequenceAccessStrategy<T: Access> {
-    fn access_sequence<'a, C>(
-        cursor: &mut Cursor<'a>,
+    fn access_sequence<'a, C, Cr>(
+        cursor: &mut Cr,
         context: &mut C,
     ) -> Result<Vec<T::View<'a>>, AccessError>
     where
-        C: ValidationContext + ?Sized;
+        C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized;
 
-    fn validate_sequence<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<(), AccessError>
+    fn validate_sequence<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
-        C: ValidationContext + ?Sized;
+        C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized;
 }
 
 /// Strategy for fixed-size sequence elements (with alignment).
@@ -90,12 +88,13 @@ pub struct FixedSequenceStrategy;
 
 #[cfg(feature = "alloc")]
 impl<T: Access> SequenceAccessStrategy<T> for FixedSequenceStrategy {
-    fn access_sequence<'a, C>(
-        cursor: &mut Cursor<'a>,
+    fn access_sequence<'a, C, Cr>(
+        cursor: &mut Cr,
         context: &mut C,
     ) -> Result<Vec<T::View<'a>>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let mut items = Vec::new();
         let mut index = 0;
@@ -116,9 +115,10 @@ impl<T: Access> SequenceAccessStrategy<T> for FixedSequenceStrategy {
         Ok(items)
     }
 
-    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate_sequence<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let mut index = 0;
         loop {
@@ -145,12 +145,13 @@ pub struct ForwardSequenceStrategy;
 
 #[cfg(feature = "alloc")]
 impl<T: Access> SequenceAccessStrategy<T> for ForwardSequenceStrategy {
-    fn access_sequence<'a, C>(
-        cursor: &mut Cursor<'a>,
+    fn access_sequence<'a, C, Cr>(
+        cursor: &mut Cr,
         context: &mut C,
     ) -> Result<Vec<T::View<'a>>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let mut items = Vec::new();
         let mut index = 0;
@@ -170,9 +171,10 @@ impl<T: Access> SequenceAccessStrategy<T> for ForwardSequenceStrategy {
         Ok(items)
     }
 
-    fn validate_sequence<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate_sequence<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let mut index = 0;
         loop {

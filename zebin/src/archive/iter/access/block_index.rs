@@ -7,7 +7,7 @@ use crate::archive_impl::iter::BLOCK_INDEX_MAGIC;
 #[cfg(any(not(feature = "alloc"), test))]
 use crate::archive_impl::iter::DummyContext;
 #[cfg(not(feature = "alloc"))]
-use crate::utils::chunk::ChunkSource;
+use crate::utils::cursor::SliceCursor;
 
 /// Sparse block index for fast random access into archived sequences.
 ///
@@ -41,19 +41,15 @@ impl BlockIndex {
 
     /// Return the byte offset by re-parsing varint deltas on the fly (no_alloc path).
     #[cfg(not(feature = "alloc"))]
-    pub(crate) fn block_offset_from_bytes(
-        &self,
-        bytes: &dyn ChunkSource,
-        block_idx: usize,
-    ) -> Option<usize> {
+    pub(crate) fn block_offset_from_bytes(&self, bytes: &[u8], block_idx: usize) -> Option<usize> {
         if block_idx >= self.no_alloc_state.num_blocks {
             return None;
         }
-        let mut cursor = Cursor::new(bytes, self.no_alloc_state.raw_delta_start);
+        let mut cursor = SliceCursor::new(bytes, self.no_alloc_state.raw_delta_start);
         let mut ctx = DummyContext;
         let mut abs = 0usize;
         for i in 0..=block_idx {
-            match deserialize_u64::<usize, _>(&mut cursor, &mut ctx) {
+            match deserialize_u64::<usize, _, _>(&mut cursor, &mut ctx) {
                 Ok(delta) => {
                     abs += delta;
                 }
@@ -71,13 +67,14 @@ impl BlockIndex {
 ///
 /// Returns `None` when no index is present (fewer than `chunk_size + 1`
 /// elements, or the magic byte is absent).
-pub(crate) fn deserialize_block_index<C>(
-    cursor: &mut Cursor<'_>,
+pub(crate) fn deserialize_block_index<'a, C, Cr>(
+    cursor: &mut Cr,
     context: &mut C,
     len: usize,
 ) -> Result<Option<BlockIndex>, AccessError>
 where
     C: ValidationContext + ?Sized,
+    Cr: Cursor<'a> + ?Sized,
 {
     // Peek at the next byte – if we can't or it isn't the magic, there is no index.
     let peeked = match cursor.peek_exact(1, context) {
@@ -144,12 +141,13 @@ where
 /// Skip a block index section without storing it (used by
 /// `SequenceAccessStrategy` impls that eagerly deserialize everything).
 #[cfg(feature = "alloc")]
-pub(crate) fn skip_block_index<C>(
-    cursor: &mut Cursor<'_>,
+pub(crate) fn skip_block_index<'a, C, Cr>(
+    cursor: &mut Cr,
     context: &mut C,
 ) -> Result<(), AccessError>
 where
     C: ValidationContext + ?Sized,
+    Cr: Cursor<'a> + ?Sized,
 {
     let peeked = match cursor.peek_exact(1, context) {
         Ok(bytes) => bytes,
@@ -171,6 +169,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::cursor::SliceCursor;
 
     fn append_varint(value: u64, buf: &mut Vec<u8>) {
         use crate::archive_impl::varint::{serialize_u64, serialized_len_u64};
@@ -219,7 +218,7 @@ mod tests {
     fn test_deserialize_block_index_missing_magic() {
         let data = [0x00, 0x01, 0x02];
         let slice = &data[..];
-        let mut cursor = Cursor::new(&slice, 0);
+        let mut cursor = SliceCursor::new(&slice, 0);
         let mut ctx = DummyContext;
         let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_ok());
@@ -234,7 +233,7 @@ mod tests {
         append_varint(2, &mut data); // num_blocks = 2
 
         let slice = &data[..];
-        let mut cursor = Cursor::new(&slice, 0);
+        let mut cursor = SliceCursor::new(&slice, 0);
         let mut ctx = DummyContext;
         let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_err());
@@ -248,7 +247,7 @@ mod tests {
         append_varint(5, &mut data); // num_blocks = 5, but len = 10, expected blocks = 1
 
         let slice = &data[..];
-        let mut cursor = Cursor::new(&slice, 0);
+        let mut cursor = SliceCursor::new(&slice, 0);
         let mut ctx = DummyContext;
         let res = deserialize_block_index(&mut cursor, &mut ctx, 10);
         assert!(res.is_err());

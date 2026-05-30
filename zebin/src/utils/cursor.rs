@@ -1,91 +1,54 @@
+use core::num::NonZeroUsize;
+
 use crate::io::StorageMut;
 use crate::prelude::*;
-use crate::utils::chunk::ChunkSource;
+use crate::utils::chunk::Buf;
 use crate::utils::{byteops, padding_for_alignment};
+use crate::validation::ValidationContext;
 
-/// Borrowed cursor into an archive byte slice.
-pub struct Cursor<'a> {
-    source: &'a (dyn ChunkSource + 'a),
-    pos: usize,
-}
+pub trait Cursor<'a> {
+    fn pos(&self) -> usize;
+    fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized;
+    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized;
+    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
+    where
+        C: ValidationContext + ?Sized;
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
+    where
+        C: ValidationContext + ?Sized;
+    fn is_eof(&self) -> bool;
 
-impl<'a> Cursor<'a> {
-    pub fn new(source: &'a (dyn ChunkSource + 'a), pos: usize) -> Self {
-        Self { source, pos }
-    }
-
-    pub fn source(&self) -> &'a (dyn ChunkSource + 'a) {
-        self.source
-    }
-
-    pub fn pos(&self) -> usize {
-        self.pos
-    }
-
-    pub fn with_pos(&self, pos: usize) -> Self {
-        Self {
-            source: self.source,
-            pos,
-        }
-    }
-
-    pub fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    #[inline]
+    fn align<C>(&mut self, alignment: NonZeroUsize, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
     {
-        let end = self
-            .pos
-            .checked_add(len)
-            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
-        context.check_range(self.pos, len)?;
-        self.pos = end;
-        Ok(())
-    }
-
-    pub fn align<C>(
-        &mut self,
-        alignment: core::num::NonZeroUsize,
-        context: &mut C,
-    ) -> Result<(), AccessError>
-    where
-        C: ValidationContext + ?Sized,
-    {
-        let padding = padding_for_alignment(self.pos, alignment);
+        let padding = padding_for_alignment(self.pos(), alignment);
         self.advance(padding, context)
     }
 
-    pub fn read_exact<C>(&mut self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
+    #[inline]
+    fn read_exact<C>(&mut self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
     where
         C: ValidationContext + ?Sized,
     {
-        let start = self.pos;
-        self.advance(len, context)?;
-
-        let buf = (*self.source).get_buf(start, len).map_err(|_| {
-            context.validation_error(
-                "Requested range spans across non-contiguous chunks or out of bounds",
-                start,
-            )
-        })?;
-        Ok(buf.into_slice())
+        self.read_buf(len, context).map(|b| b.into_slice())
     }
 
-    pub fn peek_exact<C>(&self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
+    #[inline]
+    fn peek_exact<C>(&self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
     where
         C: ValidationContext + ?Sized,
     {
-        context.check_range(self.pos, len)?;
-
-        let buf = (*self.source).get_buf(self.pos, len).map_err(|_| {
-            context.validation_error(
-                "Requested range spans across non-contiguous chunks or out of bounds",
-                self.pos,
-            )
-        })?;
-        Ok(buf.into_slice())
+        self.peek_buf(len, context).map(|b| b.into_slice())
     }
 
-    pub fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], AccessError>
+    #[inline]
+    fn read_array<const N: usize, C>(&mut self, context: &mut C) -> Result<[u8; N], AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -95,7 +58,8 @@ impl<'a> Cursor<'a> {
         Ok(array)
     }
 
-    pub fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, AccessError>
+    #[inline]
+    fn read_u8<C>(&mut self, context: &mut C) -> Result<u8, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -103,7 +67,8 @@ impl<'a> Cursor<'a> {
         Ok(bytes[0])
     }
 
-    pub fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, AccessError>
+    #[inline]
+    fn read_u16<C>(&mut self, context: &mut C) -> Result<u16, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -113,7 +78,8 @@ impl<'a> Cursor<'a> {
         Ok(u16::from_le_bytes(array))
     }
 
-    pub fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, AccessError>
+    #[inline]
+    fn read_u32<C>(&mut self, context: &mut C) -> Result<u32, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -123,14 +89,16 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes(array))
     }
 
-    pub fn read_i8<C>(&mut self, context: &mut C) -> Result<i8, AccessError>
+    #[inline]
+    fn read_i8<C>(&mut self, context: &mut C) -> Result<i8, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
-        Ok(self.read_u8(context)? as i8)
+        self.read_u8(context).map(|b| b as i8)
     }
 
-    pub fn read_i16<C>(&mut self, context: &mut C) -> Result<i16, AccessError>
+    #[inline]
+    fn read_i16<C>(&mut self, context: &mut C) -> Result<i16, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -140,7 +108,8 @@ impl<'a> Cursor<'a> {
         Ok(i16::from_le_bytes(array))
     }
 
-    pub fn read_i32<C>(&mut self, context: &mut C) -> Result<i32, AccessError>
+    #[inline]
+    fn read_i32<C>(&mut self, context: &mut C) -> Result<i32, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -150,7 +119,8 @@ impl<'a> Cursor<'a> {
         Ok(i32::from_le_bytes(array))
     }
 
-    pub fn read_u64<C>(&mut self, context: &mut C) -> Result<u64, AccessError>
+    #[inline]
+    fn read_u64<C>(&mut self, context: &mut C) -> Result<u64, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -160,7 +130,8 @@ impl<'a> Cursor<'a> {
         Ok(u64::from_le_bytes(array))
     }
 
-    pub fn read_i64<C>(&mut self, context: &mut C) -> Result<i64, AccessError>
+    #[inline]
+    fn read_i64<C>(&mut self, context: &mut C) -> Result<i64, AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -168,6 +139,82 @@ impl<'a> Cursor<'a> {
         let mut array = [0u8; 8];
         byteops::copy_exact(&mut array, bytes);
         Ok(i64::from_le_bytes(array))
+    }
+}
+
+pub struct SliceCursor<'a> {
+    slice: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> SliceCursor<'a> {
+    #[inline]
+    pub fn new(slice: &'a [u8], pos: usize) -> Self {
+        Self { slice, pos }
+    }
+}
+
+impl<'a, 'b> Cursor<'b> for SliceCursor<'a>
+where
+    'a: 'b,
+{
+    #[inline]
+    fn pos(&self) -> usize {
+        self.pos
+    }
+
+    #[inline]
+    fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
+        if end > self.slice.len() {
+            return Err(context.validation_error("Pointer out of bounds", self.pos));
+        }
+        self.pos = end;
+        Ok(())
+    }
+
+    #[inline]
+    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        self.advance(len, context)
+    }
+
+    #[inline]
+    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start = self.pos;
+        self.advance(len, context)?;
+        Ok(Buf::new(&self.slice[start..self.pos]))
+    }
+
+    #[inline]
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
+        if end > self.slice.len() {
+            return Err(context.validation_error("Pointer out of bounds", self.pos));
+        }
+        Ok(Buf::new(&self.slice[self.pos..end]))
+    }
+
+    #[inline]
+    fn is_eof(&self) -> bool {
+        self.pos >= self.slice.len()
     }
 }
 
@@ -199,10 +246,7 @@ impl<'a> CursorMut<'a> {
         Ok(progress)
     }
 
-    pub fn align(
-        &mut self,
-        alignment: core::num::NonZeroUsize,
-    ) -> Result<SinkProgress, ZebinError> {
+    pub fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
         let padding = padding_for_alignment(self.pos(), alignment);
         self.skip(padding)
     }

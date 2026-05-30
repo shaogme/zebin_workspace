@@ -1,6 +1,9 @@
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::{error::ZebinError, prelude::*};
 
+#[cfg(any(feature = "alloc", feature = "std"))]
+use super::access::OffsetSliceCursor;
+
 #[cfg(feature = "alloc")]
 use alloc::{
     collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
@@ -14,9 +17,12 @@ use std::collections::{HashMap, HashSet};
 use super::{DummyContext, IterArchive, access::ArchivedIterView};
 
 #[cfg(feature = "alloc")]
-pub(crate) fn access_next_element<'a, T: Access>(
-    cursor: &mut Cursor<'a>,
-) -> Result<T::View<'a>, ZebinError> {
+pub(crate) fn access_next_element<'a, T: Access, Cr>(
+    cursor: &mut Cr,
+) -> Result<T::View<'a>, ZebinError>
+where
+    Cr: Cursor<'a> + ?Sized,
+{
     let mut context = DummyContext;
     let marker = cursor.read_u8(&mut context)?;
     if marker != 1 {
@@ -39,9 +45,9 @@ where
 {
     fn deserialize(&self) -> Result<Vec<U>, ZebinError> {
         let mut out = Vec::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         for _ in 0..self.len {
-            let view = access_next_element::<T>(&mut cursor)?;
+            let view = access_next_element::<T, _>(&mut cursor)?;
             out.push(view.deserialize()?);
         }
         Ok(out)
@@ -56,9 +62,9 @@ where
 {
     fn deserialize(&self) -> Result<VecDeque<U>, ZebinError> {
         let mut out = VecDeque::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         for _ in 0..self.len {
-            let view = access_next_element::<T>(&mut cursor)?;
+            let view = access_next_element::<T, _>(&mut cursor)?;
             out.push_back(view.deserialize()?);
         }
         Ok(out)
@@ -74,9 +80,9 @@ where
 {
     fn deserialize(&self) -> Result<BTreeSet<U>, ZebinError> {
         let mut out = BTreeSet::new();
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         for _ in 0..self.len {
-            let view = access_next_element::<T>(&mut cursor)?;
+            let view = access_next_element::<T, _>(&mut cursor)?;
             out.insert(view.deserialize()?);
         }
         Ok(out)
@@ -92,9 +98,9 @@ where
 {
     fn deserialize(&self) -> Result<BinaryHeap<U>, ZebinError> {
         let mut out = BinaryHeap::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         for _ in 0..self.len {
-            let view = access_next_element::<T>(&mut cursor)?;
+            let view = access_next_element::<T, _>(&mut cursor)?;
             out.push(view.deserialize()?);
         }
         Ok(out)
@@ -110,9 +116,9 @@ where
 {
     fn deserialize(&self) -> Result<HashSet<U>, ZebinError> {
         let mut out = HashSet::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         for _ in 0..self.len {
-            let view = access_next_element::<T>(&mut cursor)?;
+            let view = access_next_element::<T, _>(&mut cursor)?;
             out.insert(view.deserialize()?);
         }
         Ok(out)
@@ -138,9 +144,9 @@ where
 {
     fn deserialize(&self) -> Result<BTreeMap<UK, UV>, ZebinError> {
         let mut map = BTreeMap::new();
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         for _ in 0..self.len {
-            let view = access_next_element::<T>(&mut cursor)?;
+            let view = access_next_element::<T, _>(&mut cursor)?;
             let (k, v) = view.deserialize()?;
             map.insert(k, v);
         }
@@ -157,9 +163,9 @@ where
 {
     fn deserialize(&self) -> Result<HashMap<UK, UV>, ZebinError> {
         let mut map = HashMap::with_capacity(self.len);
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         for _ in 0..self.len {
-            let view = access_next_element::<T>(&mut cursor)?;
+            let view = access_next_element::<T, _>(&mut cursor)?;
             let (k, v) = view.deserialize()?;
             map.insert(k, v);
         }

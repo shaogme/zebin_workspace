@@ -1,5 +1,5 @@
 #[cfg(feature = "alloc")]
-use std::cell::Cell;
+use core::cell::Cell;
 #[cfg(feature = "alloc")]
 use zebin::ZebinError;
 use zebin::io::SliceSerializer;
@@ -7,8 +7,6 @@ use zebin::io::SliceSerializer;
 use zebin::prelude::{Buf, BufMut, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::reader;
-#[cfg(feature = "alloc")]
-use zebin::utils::chunk::ChunkSource;
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
@@ -62,24 +60,6 @@ fn test_chunked_writer_resume() {
         buf: Vec<u8>,
         limit: &'a Cell<usize>,
         write_pos: usize,
-    }
-
-    impl<'a> ChunkSource for LimitedSink<'a> {
-        fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-            let end = pos
-                .checked_add(len)
-                .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-            if end > self.buf.len() {
-                return Err(ZebinError::BufferTooSmall {
-                    pos,
-                    required: end - self.buf.len(),
-                });
-            }
-            Ok(Buf::new(&self.buf[pos..end]))
-        }
-        fn is_eof(&self, pos: usize) -> bool {
-            pos >= self.buf.len()
-        }
     }
 
     impl<'a> StorageMut for LimitedSink<'a> {
@@ -270,30 +250,92 @@ impl<'a> zebin::io::Sharder for &'a mut ShardedStorage {
 }
 
 #[cfg(feature = "alloc")]
-impl ChunkSource for ShardedStorage {
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        if self.current_index < self.shards.len() {
-            let shard = &self.shards[self.current_index];
-            let end = pos
-                .checked_add(len)
-                .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-            if end > shard.len() {
-                return Err(ZebinError::BufferTooSmall {
-                    pos,
-                    required: end - shard.len(),
-                });
-            }
-            Ok(Buf::new(&shard[pos..end]))
-        } else {
-            Err(ZebinError::BufferTooSmall { pos, required: len })
-        }
+struct ShardedStorageCursor<'a> {
+    storage: &'a ShardedStorage,
+    pos: usize,
+}
+
+#[cfg(feature = "alloc")]
+impl<'a> ShardedStorageCursor<'a> {
+    fn new(storage: &'a ShardedStorage, pos: usize) -> Self {
+        Self { storage, pos }
     }
-    fn is_eof(&self, pos: usize) -> bool {
-        if self.current_index < self.shards.len() {
-            pos >= self.shards[self.current_index].len()
-        } else {
-            true
+}
+
+#[cfg(feature = "alloc")]
+impl<'a, 'b> zebin::io::Cursor<'b> for ShardedStorageCursor<'a>
+where
+    'a: 'b,
+{
+    #[inline]
+    fn pos(&self) -> usize {
+        self.pos
+    }
+
+    #[inline]
+    fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), zebin::prelude::AccessError>
+    where
+        C: zebin::validation::ValidationContext + ?Sized,
+    {
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
+        let shard = &self.storage.shards[self.storage.current_index];
+        if end > shard.len() {
+            return Err(context.validation_error("Pointer out of bounds", self.pos));
         }
+        self.pos = end;
+        Ok(())
+    }
+
+    #[inline]
+    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), zebin::prelude::AccessError>
+    where
+        C: zebin::validation::ValidationContext + ?Sized,
+    {
+        self.advance(len, context)
+    }
+
+    #[inline]
+    fn read_buf<C>(
+        &mut self,
+        len: usize,
+        context: &mut C,
+    ) -> Result<Buf<'b>, zebin::prelude::AccessError>
+    where
+        C: zebin::validation::ValidationContext + ?Sized,
+    {
+        let start = self.pos;
+        self.advance(len, context)?;
+        let shard = &self.storage.shards[self.storage.current_index];
+        Ok(Buf::new(&shard[start..self.pos]))
+    }
+
+    #[inline]
+    fn peek_buf<C>(
+        &self,
+        len: usize,
+        context: &mut C,
+    ) -> Result<Buf<'b>, zebin::prelude::AccessError>
+    where
+        C: zebin::validation::ValidationContext + ?Sized,
+    {
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos))?;
+        let shard = &self.storage.shards[self.storage.current_index];
+        if end > shard.len() {
+            return Err(context.validation_error("Pointer out of bounds", self.pos));
+        }
+        Ok(Buf::new(&shard[self.pos..end]))
+    }
+
+    #[inline]
+    fn is_eof(&self) -> bool {
+        let shard = &self.storage.shards[self.storage.current_index];
+        self.pos >= shard.len()
     }
 }
 
@@ -304,9 +346,20 @@ impl zebin::io::Storage for ShardedStorage {
         = &'a mut ShardedStorage
     where
         Self: 'a;
+    type Cursor<'a>
+        = ShardedStorageCursor<'a>
+    where
+        Self: 'a;
 
     fn sharder(&mut self) -> Self::Sharder<'_> {
         self
+    }
+
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a,
+    {
+        ShardedStorageCursor::new(self, pos)
     }
 }
 

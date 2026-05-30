@@ -68,12 +68,10 @@ where
     #[cfg(feature = "alloc")]
     type AccessStrategy = ForwardSequenceStrategy;
 
-    fn access<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a,
     {
         let pos = cursor.pos();
@@ -90,9 +88,10 @@ where
         }
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let pos = cursor.pos();
         match cursor.read_u8(context)? {

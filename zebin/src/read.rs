@@ -1,20 +1,6 @@
+use crate::error::ParseHeaderError;
 use crate::io::{Sharder, Storage};
 use crate::prelude::*;
-use crate::utils::chunk::ChunkSource;
-
-fn get_contiguous_slice<S: ChunkSource + ?Sized>(
-    storage: &S,
-    offset: usize,
-    len: usize,
-) -> Result<&[u8], AccessError> {
-    let buf = storage
-        .get_buf(offset, len)
-        .map_err(|_| AccessError::ValidationError {
-            message: "Requested slice spans across non-contiguous chunks or out of bounds",
-            pos: offset,
-        })?;
-    Ok(buf.into_slice())
-}
 
 /// Safe access layer output that keeps the validated byte slice alive.
 pub struct ZebinReader<'a, T, S, H = ArchiveHeader>
@@ -47,7 +33,7 @@ where
     }
 
     pub fn is_finished(&self) -> bool {
-        self.storage.is_eof(self.offset)
+        self.storage.cursor(self.offset).is_eof()
     }
 
     pub fn access(
@@ -59,12 +45,13 @@ where
         T::Archived: Access,
         S: Storage<Mode = StaticMode>,
     {
-        let header_bytes = get_contiguous_slice(storage, 0, H::SIZE)?;
+        let mut validator = Validator::new(storage, config, None);
+        let mut cursor = storage.cursor(0);
+        let header_bytes = cursor.peek_exact(H::SIZE, &mut validator)?;
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
-        let mut validator = Validator::new(storage, config, None);
-        let mut cursor = Cursor::new(storage, H::SIZE);
+        cursor.advance(H::SIZE, &mut validator)?;
         let view = T::Archived::access(&mut cursor, &mut validator)?;
         Ok(view)
     }
@@ -79,12 +66,13 @@ where
             self.offset = 0;
         }
 
-        let header_bytes = get_contiguous_slice(&self.storage, self.offset, H::SIZE)?;
+        let mut validator = Validator::new(&self.storage, self.config, None);
+        let mut cursor = self.storage.cursor(self.offset);
+        let header_bytes = cursor.peek_exact(H::SIZE, &mut validator)?;
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
 
-        let mut validator = Validator::new(&self.storage, self.config, None);
-        let mut cursor = Cursor::new(&self.storage, self.offset + H::SIZE);
+        cursor.advance(H::SIZE, &mut validator)?;
         let view = T::Archived::access(&mut cursor, &mut validator)?;
         self.offset = cursor.pos();
         Ok(view)
@@ -110,7 +98,9 @@ where
         T: Archive,
         T::Archived: Access,
     {
-        let header_bytes = get_contiguous_slice(storage, 0, H::SIZE)?;
+        let mut header_validator = Validator::new(storage, config, None);
+        let cursor = storage.cursor(0);
+        let header_bytes = cursor.peek_exact(H::SIZE, &mut header_validator)?;
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
         validate_root::<T, S>(storage, H::SIZE, config, stack)
@@ -125,14 +115,14 @@ fn validate_root<T, S>(
 ) -> Result<(), ZebinError>
 where
     T: Archive,
-    S: ChunkSource,
+    S: Storage,
     T::Archived: Access,
 {
-    let mut cursor = Cursor::new(storage, root_pos);
+    let mut cursor = storage.cursor(root_pos);
     let (result, error_path) = {
         let mut validator = Validator::new(storage, config, stack.as_deref_mut());
         let res = T::Archived::validate(&mut cursor, &mut validator).and_then(|()| {
-            if !storage.is_eof(cursor.pos()) {
+            if !cursor.is_eof() {
                 Err(validator.validation_error("Trailing bytes after root object", cursor.pos()))
             } else {
                 Ok(())
@@ -155,7 +145,7 @@ where
     T::Archived: Access,
 {
     let actual = ObjectEncoding::from_byte(header.flags()).ok_or(
-        crate::error::ParseHeaderError::InvalidObjectEncoding {
+        ParseHeaderError::InvalidObjectEncoding {
             flags: header.flags(),
             pos: H::SIZE.saturating_sub(1),
         },

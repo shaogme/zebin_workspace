@@ -3,6 +3,8 @@
 pub mod mmap;
 
 use crate::error::ZebinError;
+use crate::utils::chunk::BufMut;
+use crate::utils::cursor::{Cursor, SliceCursor};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -34,16 +36,20 @@ impl Sharder for NoSharder {
     }
 }
 
-use crate::utils::chunk::{Buf, BufMut, ChunkSource};
-
 /// Unified storage layer: byte-backed read access contract.
-pub trait Storage: ChunkSource {
+pub trait Storage {
     type Mode: StorageMode;
     type Sharder<'a>: Sharder
     where
         Self: 'a;
+    type Cursor<'a>: Cursor<'a>
+    where
+        Self: 'a;
 
     fn sharder(&mut self) -> Self::Sharder<'_>;
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a;
 }
 
 /// Unified storage layer: byte-backed write access contract.
@@ -59,10 +65,22 @@ impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
         = NoSharder
     where
         Self: 'a;
+    type Cursor<'a>
+        = S::Cursor<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
         NoSharder
+    }
+
+    #[inline]
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a,
+    {
+        (**self).cursor(pos)
     }
 }
 
@@ -72,10 +90,22 @@ impl<S: Storage + ?Sized> Storage for &mut S {
         = S::Sharder<'a>
     where
         Self: 'a;
+    type Cursor<'a>
+        = S::Cursor<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
         (**self).sharder()
+    }
+
+    #[inline]
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a,
+    {
+        (**self).cursor(pos)
     }
 }
 
@@ -96,31 +126,14 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     }
 }
 
-impl ChunkSource for [u8] {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        let end = pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-        if end > self.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos,
-                required: end - self.len(),
-            });
-        }
-        Ok(Buf::new(&self[pos..end]))
-    }
-
-    #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        pos >= self.len()
-    }
-}
-
 impl Storage for [u8] {
     type Mode = StaticMode;
     type Sharder<'a>
         = NoSharder
+    where
+        Self: 'a;
+    type Cursor<'a>
+        = SliceCursor<'a>
     where
         Self: 'a;
 
@@ -128,27 +141,13 @@ impl Storage for [u8] {
     fn sharder(&mut self) -> Self::Sharder<'_> {
         NoSharder
     }
-}
-
-#[cfg(feature = "alloc")]
-impl ChunkSource for Vec<u8> {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        let end = pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-        if end > self.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos,
-                required: end - self.len(),
-            });
-        }
-        Ok(Buf::new(&self[pos..end]))
-    }
 
     #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        pos >= self.len()
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a,
+    {
+        SliceCursor::new(self, pos)
     }
 }
 
@@ -159,10 +158,22 @@ impl Storage for Vec<u8> {
         = NoSharder
     where
         Self: 'a;
+    type Cursor<'a>
+        = SliceCursor<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn sharder(&mut self) -> Self::Sharder<'_> {
         NoSharder
+    }
+
+    #[inline]
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a,
+    {
+        SliceCursor::new(self.as_slice(), pos)
     }
 }
 
@@ -186,27 +197,6 @@ impl<'a> SliceSerializer<'a> {
 
     pub fn written(&self) -> usize {
         self.written
-    }
-}
-
-impl<'a> ChunkSource for SliceSerializer<'a> {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        let end = pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-        if end > self.buf.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos,
-                required: end - self.buf.len(),
-            });
-        }
-        Ok(Buf::new(&self.buf[pos..end]))
-    }
-
-    #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        pos >= self.buf.len()
     }
 }
 
@@ -258,28 +248,6 @@ impl VecSerializer {
 
     pub fn into_inner(self) -> Vec<u8> {
         self.buf
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl ChunkSource for VecSerializer {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        let end = pos
-            .checked_add(len)
-            .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-        if end > self.buf.len() {
-            return Err(ZebinError::BufferTooSmall {
-                pos,
-                required: end - self.buf.len(),
-            });
-        }
-        Ok(Buf::new(&self.buf[pos..end]))
-    }
-
-    #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        pos >= self.buf.len()
     }
 }
 

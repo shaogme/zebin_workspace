@@ -78,12 +78,10 @@ where
     #[cfg(feature = "alloc")]
     type AccessStrategy = ForwardSequenceStrategy;
 
-    fn access<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a,
     {
         let mut out = core::mem::MaybeUninit::<[A::View<'a>; N]>::uninit();
@@ -111,9 +109,10 @@ where
         Ok(unsafe { out.assume_init() })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         for index in 0..N {
             let mut guard = context.push_index(index);

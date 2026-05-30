@@ -1,6 +1,8 @@
 use core::marker::PhantomData;
 
-use crate::utils::chunk::ChunkSource;
+#[cfg(feature = "alloc")]
+use crate::io::ForwardSequenceStrategy;
+use crate::utils::chunk::Buf;
 use crate::{prelude::*, validation::ValidationContext};
 
 use super::{DummyContext, MAX_SEQUENCE_LEN};
@@ -21,7 +23,7 @@ pub struct ArchivedIter<A> {
 /// The read view of an iterator-based collection.
 #[derive(Clone)]
 pub struct ArchivedIterView<'a, A> {
-    pub(crate) source: &'a dyn ChunkSource,
+    pub(crate) source: &'a [u8],
     pub(crate) start_pos: usize,
     pub(crate) len: usize,
     pub(crate) block_index: Option<BlockIndex>,
@@ -42,7 +44,7 @@ impl<'a, A> ArchivedIterView<'a, A> {
         A: Access,
     {
         ArchivedIterIter {
-            cursor: Cursor::new(self.source, self.start_pos),
+            cursor: OffsetSliceCursor::new(self.source, self.start_pos),
             remaining: self.len,
             _marker: PhantomData,
         }
@@ -75,8 +77,8 @@ impl<'a, A> ArchivedIterView<'a, A> {
             let block_start = bi.block_offset_from_bytes(self.source, block_idx);
 
             if let Some(offset) = block_start {
-                let abs_pos = self.start_pos + offset;
-                let mut cursor = Cursor::new(self.source, abs_pos);
+                let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
+                cursor.pos = offset;
                 let mut ctx = DummyContext;
                 // Skip `intra` elements, then deserialize the target.
                 for _ in 0..intra {
@@ -108,7 +110,7 @@ impl<'a, A> ArchivedIterView<'a, A> {
         }
 
         // Fallback: linear scan from the start.
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         let mut ctx = DummyContext;
         for _ in 0..index {
             let marker = cursor.read_u8(&mut ctx)?;
@@ -146,7 +148,7 @@ impl<'a, A> ArchivedIterView<'a, A> {
     {
         if start >= self.len {
             return ArchivedIterIter {
-                cursor: Cursor::new(self.source, self.start_pos),
+                cursor: OffsetSliceCursor::new(self.source, self.start_pos),
                 remaining: 0,
                 _marker: PhantomData,
             };
@@ -164,8 +166,8 @@ impl<'a, A> ArchivedIterView<'a, A> {
             let block_start = bi.block_offset_from_bytes(self.source, block_idx);
 
             if let Some(offset) = block_start {
-                let abs_pos = self.start_pos + offset;
-                let mut cursor = Cursor::new(self.source, abs_pos);
+                let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
+                cursor.pos = offset;
                 let mut ctx = DummyContext;
                 // Skip `intra` elements inside the block.
                 for _ in 0..intra {
@@ -185,7 +187,7 @@ impl<'a, A> ArchivedIterView<'a, A> {
         }
 
         // Fallback: linear skip.
-        let mut cursor = Cursor::new(self.source, self.start_pos);
+        let mut cursor = OffsetSliceCursor::new(self.source, self.start_pos);
         let mut ctx = DummyContext;
         for _ in 0..start {
             if let Ok(1) = cursor.read_u8(&mut ctx) {
@@ -210,6 +212,156 @@ where
     const OBJECT_ENCODING: ObjectEncoding = ObjectEncoding::Sequence;
 }
 
+pub struct OffsetSliceCursor<'a> {
+    slice: &'a [u8],
+    offset: usize,
+    pos: usize,
+}
+
+impl<'a> OffsetSliceCursor<'a> {
+    #[inline]
+    pub fn new(slice: &'a [u8], offset: usize) -> Self {
+        Self {
+            slice,
+            offset,
+            pos: 0,
+        }
+    }
+}
+
+impl<'a, 'b> Cursor<'b> for OffsetSliceCursor<'a>
+where
+    'a: 'b,
+{
+    #[inline]
+    fn pos(&self) -> usize {
+        self.pos + self.offset
+    }
+
+    #[inline]
+    fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos()))?;
+        if end > self.slice.len() {
+            return Err(context.validation_error("Pointer out of bounds", self.pos()));
+        }
+        self.pos = end;
+        Ok(())
+    }
+
+    #[inline]
+    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        self.advance(len, context)
+    }
+
+    #[inline]
+    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start = self.pos;
+        self.advance(len, context)?;
+        Ok(Buf::new(&self.slice[start..self.pos]))
+    }
+
+    #[inline]
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos()))?;
+        if end > self.slice.len() {
+            return Err(context.validation_error("Pointer out of bounds", self.pos()));
+        }
+        Ok(Buf::new(&self.slice[self.pos..end]))
+    }
+
+    #[inline]
+    fn is_eof(&self) -> bool {
+        self.pos >= self.slice.len()
+    }
+}
+
+struct PeekingCursor<'b, Cr: ?Sized> {
+    cursor: &'b mut Cr,
+    peeked_len: usize,
+}
+
+impl<'b, 'a, Cr> Cursor<'a> for PeekingCursor<'b, Cr>
+where
+    Cr: Cursor<'a> + ?Sized,
+{
+    #[inline]
+    fn pos(&self) -> usize {
+        self.cursor.pos() + self.peeked_len
+    }
+
+    #[inline]
+    fn advance<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let new_len = self
+            .peeked_len
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos()))?;
+        let _ = self.cursor.peek_buf(new_len, context)?;
+        self.peeked_len = new_len;
+        Ok(())
+    }
+
+    #[inline]
+    fn skip<C>(&mut self, len: usize, context: &mut C) -> Result<(), AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        self.advance(len, context)
+    }
+
+    #[inline]
+    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start = self.peeked_len;
+        self.advance(len, context)?;
+        let full_buf = self.cursor.peek_buf(self.peeked_len, context)?;
+        let slice = &full_buf.into_slice()[start..self.peeked_len];
+        Ok(Buf::new(slice))
+    }
+
+    #[inline]
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
+    where
+        C: ValidationContext + ?Sized,
+    {
+        let start = self.peeked_len;
+        let end = start
+            .checked_add(len)
+            .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos()))?;
+        let full_buf = self.cursor.peek_buf(end, context)?;
+        let slice = &full_buf.into_slice()[start..end];
+        Ok(Buf::new(slice))
+    }
+
+    #[inline]
+    fn is_eof(&self) -> bool {
+        let mut ctx = DummyContext;
+        self.cursor.peek_buf(self.peeked_len + 1, &mut ctx).is_err()
+    }
+}
+
 impl<A> Access for ArchivedIter<A>
 where
     A: Access,
@@ -220,24 +372,30 @@ where
         Self: 'a;
 
     #[cfg(feature = "alloc")]
-    type AccessStrategy = crate::io::ForwardSequenceStrategy;
+    type AccessStrategy = ForwardSequenceStrategy;
 
-    fn access<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a,
     {
         let start_pos = cursor.pos();
-        let len = Self::access_sequence_body(cursor, context)?;
+        let mut peeking_cursor = PeekingCursor {
+            cursor,
+            peeked_len: 0,
+        };
+        let len = Self::access_sequence_body(&mut peeking_cursor, context)?;
 
         // Try to parse trailing block index.
-        let block_index = deserialize_block_index(cursor, context, len)?;
+        let block_index = deserialize_block_index(&mut peeking_cursor, context, len)?;
+
+        let total_len = peeking_cursor.peeked_len;
+        let source_buf = cursor.read_buf(total_len, context)?;
+        let source = source_buf.into_slice();
 
         Ok(ArchivedIterView {
-            source: cursor.source(),
+            source,
             start_pos,
             len,
             block_index,
@@ -245,9 +403,10 @@ where
         })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let len = Self::access_sequence_body(cursor, context)?;
         // Also consume block index bytes during validation.
@@ -257,13 +416,14 @@ where
 }
 
 impl<A> ArchivedIter<A> {
-    fn access_sequence_body<'a, C>(
-        cursor: &mut Cursor<'a>,
+    fn access_sequence_body<'a, C, Cr>(
+        cursor: &mut Cr,
         context: &mut C,
     ) -> Result<usize, AccessError>
     where
         A: Access,
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let mut len = 0usize;
         loop {
@@ -295,7 +455,7 @@ impl<A> ArchivedIter<A> {
 
 /// Lazy decoding iterator over the elements of an `ArchivedIter`.
 pub struct ArchivedIterIter<'a, A> {
-    pub(crate) cursor: Cursor<'a>,
+    pub(crate) cursor: OffsetSliceCursor<'a>,
     pub(crate) remaining: usize,
     pub(crate) _marker: PhantomData<A>,
 }
@@ -340,7 +500,7 @@ mod tests {
         let bytes = [0x00u8];
         let slice: &[u8] = &bytes;
         let iter: ArchivedIterView<'_, u8> = ArchivedIterView {
-            source: &slice as &dyn ChunkSource,
+            source: slice,
             start_pos: 0,
             len: 0,
             block_index: None,
@@ -356,7 +516,7 @@ mod tests {
         let bytes = [0x02u8, 0x00u8]; // Invalid marker
         let slice: &[u8] = &bytes;
         let iter: ArchivedIterView<'_, u32> = ArchivedIterView {
-            source: &slice as &dyn ChunkSource,
+            source: slice,
             start_pos: 0,
             len: 1,
             block_index: None,

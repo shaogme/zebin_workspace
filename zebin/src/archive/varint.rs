@@ -170,13 +170,14 @@ pub(crate) fn serialize_u64(mut value: u64, out: &mut [u8]) {
     }
 }
 
-pub(crate) fn deserialize_u64<T, C>(
-    cursor: &mut Cursor<'_>,
+pub(crate) fn deserialize_u64<'a, T, C, Cr>(
+    cursor: &mut Cr,
     context: &mut C,
 ) -> Result<T, AccessError>
 where
     T: VarIntNumber,
     C: ValidationContext + ?Sized,
+    Cr: Cursor<'a> + ?Sized,
 {
     let start_pos = cursor.pos();
     let mut value = 0u64;
@@ -211,23 +212,22 @@ where
     #[cfg(feature = "alloc")]
     type AccessStrategy = ForwardSequenceStrategy;
 
-    fn access<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a,
     {
-        let value = deserialize_u64::<T, C>(cursor, context)?;
+        let value = deserialize_u64::<T, C, Cr>(cursor, context)?;
         Ok(VarIntView { value })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
-        deserialize_u64::<T, C>(cursor, context).map(|_| ())
+        deserialize_u64::<T, C, Cr>(cursor, context).map(|_| ())
     }
 }
 

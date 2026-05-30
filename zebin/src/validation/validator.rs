@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use crate::utils::chunk::ChunkSource;
+use crate::io::Storage;
 use crate::{prelude::*, validation::ValidationPathSegment};
 
 /// Runtime configuration for sequential archive validation.
@@ -20,7 +20,7 @@ impl Default for ValidationConfig {
 }
 
 /// Validator for byte streams to ensure safe sequential decoding.
-pub struct Validator<'a, 'p, S: ChunkSource + ?Sized> {
+pub struct Validator<'a, 'p, S: Storage + ?Sized> {
     source: &'a S,
     depth: usize,
     config: ValidationConfig,
@@ -28,7 +28,7 @@ pub struct Validator<'a, 'p, S: ChunkSource + ?Sized> {
     last_error_path: Option<ValidationPathStack>,
 }
 
-impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
+impl<'a, 'p, S: Storage + ?Sized> Validator<'a, 'p, S> {
     pub fn new(
         data: &'a S,
         config: ValidationConfig,
@@ -64,7 +64,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
 
     pub fn check_range(&mut self, pos: usize, size: usize) -> Result<(), AccessError> {
         if size == 0 {
-            if self.source.is_eof(pos) {
+            if self.source.cursor(pos).is_eof() {
                 return Ok(());
             }
             return Err(self.validation_error("Pointer out of bounds", pos));
@@ -73,7 +73,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
         let _ = pos
             .checked_add(size)
             .ok_or_else(|| self.validation_error("Pointer range overflow", pos))?;
-        if self.source.get_buf(pos, size).is_err() {
+        if self.source.cursor(pos).peek_buf(size, self).is_err() {
             return Err(self.validation_error("Pointer out of bounds", pos));
         }
         Ok(())
@@ -153,7 +153,7 @@ impl<'a, 'p, S: ChunkSource + ?Sized> Validator<'a, 'p, S> {
     }
 }
 
-impl<'a, 'p, S: ChunkSource + ?Sized> ValidationContext for Validator<'a, 'p, S> {
+impl<'a, 'p, S: Storage + ?Sized> ValidationContext for Validator<'a, 'p, S> {
     fn push_depth(&mut self) -> Result<(), AccessError> {
         self.push_depth()
     }

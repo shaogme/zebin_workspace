@@ -1,4 +1,4 @@
-use crate::error::ZebinError;
+use core::ops::{Deref, DerefMut};
 
 pub struct Buf<'a> {
     pub(crate) data: &'a [u8],
@@ -16,7 +16,7 @@ impl<'a> Buf<'a> {
     }
 }
 
-impl<'a> core::ops::Deref for Buf<'a> {
+impl<'a> Deref for Buf<'a> {
     type Target = [u8];
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -40,7 +40,7 @@ impl<'a> BufMut<'a> {
     }
 }
 
-impl<'a> core::ops::Deref for BufMut<'a> {
+impl<'a> Deref for BufMut<'a> {
     type Target = [u8];
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -48,39 +48,9 @@ impl<'a> core::ops::Deref for BufMut<'a> {
     }
 }
 
-impl<'a> core::ops::DerefMut for BufMut<'a> {
+impl<'a> DerefMut for BufMut<'a> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.data
-    }
-}
-
-pub trait ChunkSource {
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError>;
-    fn is_eof(&self, pos: usize) -> bool;
-}
-
-// Implement for references
-impl<S: ChunkSource + ?Sized> ChunkSource for &S {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        (**self).get_buf(pos, len)
-    }
-
-    #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        (**self).is_eof(pos)
-    }
-}
-
-impl<S: ChunkSource + ?Sized> ChunkSource for &mut S {
-    #[inline]
-    fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-        (**self).get_buf(pos, len)
-    }
-
-    #[inline]
-    fn is_eof(&self, pos: usize) -> bool {
-        (**self).is_eof(pos)
     }
 }

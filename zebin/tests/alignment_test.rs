@@ -1,10 +1,8 @@
 #[cfg(feature = "alloc")]
-use std::cell::Cell;
+use core::cell::Cell;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{Buf, BufMut, StorageMut, ZebinWriter};
-#[cfg(feature = "alloc")]
-use zebin::utils::chunk::ChunkSource;
+use zebin::prelude::{BufMut, StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize};
 use zebin::{access, writer};
@@ -46,24 +44,6 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
         buf: Vec<u8>,
         limit: &'a Cell<usize>,
         write_pos: usize,
-    }
-
-    impl<'a> ChunkSource for LimitedSink<'a> {
-        fn get_buf(&self, pos: usize, len: usize) -> Result<Buf<'_>, ZebinError> {
-            let end = pos
-                .checked_add(len)
-                .ok_or(ZebinError::ArithmeticOverflow { pos })?;
-            if end > self.buf.len() {
-                return Err(ZebinError::BufferTooSmall {
-                    pos,
-                    required: end - self.buf.len(),
-                });
-            }
-            Ok(Buf::new(&self.buf[pos..end]))
-        }
-        fn is_eof(&self, pos: usize) -> bool {
-            pos >= self.buf.len()
-        }
     }
 
     impl<'a> StorageMut for LimitedSink<'a> {

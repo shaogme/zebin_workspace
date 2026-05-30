@@ -85,12 +85,13 @@ impl FieldEntry {
         bytes
     }
 
-    pub fn access<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<Self, AccessError>
+    pub fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let entry_pos = cursor.pos();
-        let bytes = cursor.read_array::<{ Self::SIZE }, C>(context)?;
+        let bytes = cursor.read_array::<{ Self::SIZE }, _>(context)?;
 
         let field_id = u16::from_le_bytes([bytes[0], bytes[1]]);
         let encoding_byte = bytes[2];
@@ -170,16 +171,17 @@ pub struct SchemaObjectHeader {
 }
 
 impl SchemaObjectHeader {
-    pub fn access_and_verify<'a, C>(
-        cursor: &mut Cursor<'a>,
+    pub fn access_and_verify<'a, C, Cr>(
+        cursor: &mut Cr,
         context: &mut C,
         expected_key: StableSchemaKey,
     ) -> Result<Self, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let object_start = cursor.pos();
-        let bytes = cursor.read_array::<12, C>(context)?;
+        let bytes = cursor.read_array::<12, _>(context)?;
 
         let stable_schema_key = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         if stable_schema_key != expected_key {
@@ -209,19 +211,18 @@ impl SchemaObjectHeader {
 }
 
 /// Helper for processing schema-aware objects with forward field tables.
-pub fn process_forward_field_table<'a, C, F>(
-    cursor: &mut Cursor<'a>,
+pub fn process_forward_field_table<'a, C, Cr, F>(
+    cursor: &mut Cr,
     field_count: usize,
     context: &mut C,
     mut handler: F,
 ) -> Result<(), AccessError>
 where
     C: ValidationContext + ?Sized,
-    F: FnMut(FieldEntry, usize, Cursor<'a>, &mut C) -> Result<(), AccessError>,
+    Cr: Cursor<'a> + ?Sized,
+    F: FnMut(FieldEntry, usize, &mut Cr, &mut C) -> Result<(), AccessError>,
 {
     let table_start = cursor.pos();
-    let table_len = field_count * FieldEntry::SIZE;
-    let payloads_start = table_start + table_len;
 
     if field_count > MAX_SCHEMA_FIELDS {
         return Err(
@@ -229,20 +230,24 @@ where
         );
     }
 
-    let mut current_payload_pos = payloads_start;
-    for _ in 0..field_count {
-        let entry_pos = cursor.pos();
-        let entry = FieldEntry::access(cursor, context)?;
-        let payload_len = entry.payload_len as usize;
-
-        context.check_range(current_payload_pos, payload_len)?;
-        let field_cursor = cursor.with_pos(current_payload_pos);
-
-        handler(entry, entry_pos, field_cursor, context)?;
-
-        current_payload_pos += payload_len;
+    let mut entries = [FieldEntry::EMPTY; MAX_SCHEMA_FIELDS];
+    for i in 0..field_count {
+        entries[i] = FieldEntry::access(cursor, context)?;
     }
 
-    *cursor = cursor.with_pos(current_payload_pos);
+    for i in 0..field_count {
+        let entry = entries[i];
+        let entry_pos = table_start + i * FieldEntry::SIZE;
+        let payload_len = entry.payload_len as usize;
+
+        context.check_range(cursor.pos(), payload_len)?;
+
+        let start_pos = cursor.pos();
+        handler(entry, entry_pos, cursor, context)?;
+        let consumed = cursor.pos() - start_pos;
+
+        entry.check_payload_len(entry_pos, consumed, context)?;
+    }
+
     Ok(())
 }

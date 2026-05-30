@@ -118,10 +118,10 @@ fn field_handling_arm(
     let expected_encoding = field_encoding(field);
 
     let action = if is_validate {
-        quote! { <#archived_ty as zebin::Access>::validate(&mut __field_cursor, &mut *__field_guard)?; }
+        quote! { <#archived_ty as zebin::Access>::validate(__field_cursor, &mut *__field_guard)?; }
     } else {
         quote! {
-            let __value = <#archived_ty as zebin::Access>::access(&mut __field_cursor, &mut *__field_guard)?;
+            let __value = <#archived_ty as zebin::Access>::access(__field_cursor, &mut *__field_guard)?;
             #state_expr = ::core::option::Option::Some(__value);
         }
     };
@@ -265,9 +265,10 @@ fn record_access_impl(
                 #[cfg(feature = "alloc")]
                 type AccessStrategy = zebin::io::ForwardSequenceStrategy;
 
-                fn access<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
+                fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
+                    Cr: zebin::io::Cursor<'a> + ?Sized,
                     Self: 'a
                 {
                     let mut __guard = context.guard()?;
@@ -279,7 +280,7 @@ fn record_access_impl(
 
                     #(#var_decls)*
 
-                    zebin::schema::process_forward_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
+                    zebin::schema::process_forward_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __field_cursor, __guard| {
                         match __entry.field_id {
                             #(#field_arms,)*
                             _ => Ok(()),
@@ -297,9 +298,10 @@ fn record_access_impl(
                     })
                 }
 
-                fn validate<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::AccessError>
+                fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), zebin::error::AccessError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
+                    Cr: zebin::io::Cursor<'a> + ?Sized,
                 {
                     let mut __guard = context.guard()?;
                     let __object_start = cursor.pos();
@@ -309,7 +311,7 @@ fn record_access_impl(
 
                     #seen_var_decls
 
-                    zebin::schema::process_forward_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, mut __field_cursor, __guard| {
+                    zebin::schema::process_forward_field_table(cursor, __field_count, &mut *__guard, |__entry, __entry_pos, __field_cursor, __guard| {
                         match __entry.field_id {
                             #(#validate_field_arms,)*
                             _ => Ok(()),
@@ -373,9 +375,10 @@ fn record_access_impl(
                     Self: 'a;
                 #[cfg(feature = "alloc")]
                 type AccessStrategy = zebin::io::ForwardSequenceStrategy;
-                fn access<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
+                fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
+                    Cr: zebin::io::Cursor<'a> + ?Sized,
                     Self: 'a
                 {
                     let mut __guard = context.guard()?;
@@ -383,9 +386,10 @@ fn record_access_impl(
                     Ok(#construct)
                 }
 
-                fn validate<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::AccessError>
+                fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), zebin::error::AccessError>
                 where
                     C: zebin::validation::ValidationContext + ?Sized,
+                    Cr: zebin::io::Cursor<'a> + ?Sized,
                 {
                     let mut __guard = context.guard()?;
                     #(#validates)*
@@ -573,9 +577,10 @@ fn enum_impl(
                 Self: 'a;
             #[cfg(feature = "alloc")]
             type AccessStrategy = zebin::io::ForwardSequenceStrategy;
-            fn access<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
+            fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, zebin::error::AccessError>
             where
                 C: zebin::validation::ValidationContext + ?Sized,
+                Cr: zebin::io::Cursor<'a> + ?Sized,
                 Self: 'a
             {
                 let mut __guard = context.guard()?;
@@ -587,9 +592,10 @@ fn enum_impl(
                 }
             }
 
-            fn validate<'a, C>(cursor: &mut zebin::io::Cursor<'a>, context: &mut C) -> Result<(), zebin::error::AccessError>
+            fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), zebin::error::AccessError>
             where
                 C: zebin::validation::ValidationContext + ?Sized,
+                Cr: zebin::io::Cursor<'a> + ?Sized,
             {
                 let mut __guard = context.guard()?;
                 let __tag_pos = cursor.pos();

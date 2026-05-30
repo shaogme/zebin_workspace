@@ -108,31 +108,30 @@ impl<T: VarIntNumber> Access for ArchivedVarIntVec<T> {
         Self: 'a;
     type AccessStrategy = ForwardSequenceStrategy;
 
-    fn access<'a, C>(
-        cursor: &mut Cursor<'a>,
-        context: &mut C,
-    ) -> Result<Self::View<'a>, AccessError>
+    fn access<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<Self::View<'a>, AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
         Self: 'a,
     {
         let len = cursor.read_u32(context)? as usize;
         let mut values = Vec::with_capacity(len);
         for index in 0..len {
             let mut guard = context.push_index(index);
-            values.push(deserialize_u64::<T, _>(cursor, &mut *guard)?);
+            values.push(deserialize_u64::<T, _, _>(cursor, &mut *guard)?);
         }
         Ok(ArchivedVarIntVec { values })
     }
 
-    fn validate<'a, C>(cursor: &mut Cursor<'a>, context: &mut C) -> Result<(), AccessError>
+    fn validate<'a, C, Cr>(cursor: &mut Cr, context: &mut C) -> Result<(), AccessError>
     where
         C: ValidationContext + ?Sized,
+        Cr: Cursor<'a> + ?Sized,
     {
         let len = cursor.read_u32(context)? as usize;
         for index in 0..len {
             let mut guard = context.push_index(index);
-            let _ = deserialize_u64::<T, _>(cursor, &mut *guard)?;
+            let _ = deserialize_u64::<T, _, _>(cursor, &mut *guard)?;
         }
         Ok(())
     }
