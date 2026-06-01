@@ -8,20 +8,8 @@ use crate::utils::cursor::{Cursor, SliceCursor};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-/// Storage mode indicating if it supports stream sharding.
-pub trait StorageMode {}
-
-/// Static storage mode. Doesn't support advance_shard (or it's a no-op).
-pub struct StaticMode;
-impl StorageMode for StaticMode {}
-
-/// Stream storage mode. Supports advance_shard to load next chunks.
-pub struct StreamMode;
-impl StorageMode for StreamMode {}
-
 /// Unified storage layer: byte-backed read access contract.
 pub trait Storage {
-    type Mode: StorageMode;
     type Cursor<'a>: Cursor<'a>
     where
         Self: 'a;
@@ -46,20 +34,11 @@ pub trait StorageMut {
     fn advance(&mut self, len: usize);
 }
 
-impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
-    type Mode = StaticMode;
+impl<S: Storage + ?Sized> Storage for &S {
     type Cursor<'a>
         = S::Cursor<'a>
     where
         Self: 'a;
-
-    #[inline]
-    fn advance_sharder(&mut self) -> Result<(), ZebinError> {
-        Err(ZebinError::BufferTooSmall {
-            pos: 0,
-            required: 1,
-        })
-    }
 
     #[inline]
     fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
@@ -71,7 +50,6 @@ impl<S: Storage<Mode = StaticMode> + ?Sized> Storage for &S {
 }
 
 impl<S: Storage + ?Sized> Storage for &mut S {
-    type Mode = S::Mode;
     type Cursor<'a>
         = S::Cursor<'a>
     where
@@ -109,7 +87,6 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
 }
 
 impl Storage for [u8] {
-    type Mode = StaticMode;
     type Cursor<'a>
         = SliceCursor<'a>
     where
@@ -126,7 +103,6 @@ impl Storage for [u8] {
 
 #[cfg(feature = "alloc")]
 impl Storage for Vec<u8> {
-    type Mode = StaticMode;
     type Cursor<'a>
         = SliceCursor<'a>
     where

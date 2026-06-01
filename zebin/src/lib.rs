@@ -44,9 +44,8 @@ pub mod prelude {
         io::{
             Access, Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
             ArchivedLayout, Buf, BufMut, Cursor, CursorMut, Deserialize, FixedLayout, MeasureBody,
-            SchemaAware, Serialize, Serializer, SinkProgress, SliceSerializer, StaticMode, Storage,
-            StorageMode, StorageMut, StreamMode, ZebinReader, ZebinWriter, deserialize, reader,
-            writer,
+            SchemaAware, Serialize, Serializer, SinkProgress, SliceSerializer, Storage, StorageMut,
+            ZebinReader, ZebinWriter, deserialize, reader, writer,
         },
         schema::{FieldEncoding, FieldEntry, ObjectEncoding, SchemaRevision, StableSchemaKey},
         validation::{
@@ -100,7 +99,7 @@ pub mod io {
     pub use crate::io_impl::storage::mmap::MmapSerializer;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
-    pub use crate::io_impl::storage::{StaticMode, Storage, StorageMode, StorageMut, StreamMode};
+    pub use crate::io_impl::storage::{Storage, StorageMut};
     pub use crate::pub_fn::{deserialize, reader, writer};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{serialize, serialize_into};
@@ -153,7 +152,7 @@ mod pub_fn {
     pub fn access<'a, T, S>(storage: &'a S) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
     where
         T: Archive + 'a,
-        S: Storage<Mode = StaticMode> + ?Sized + 'a,
+        S: Storage + ?Sized + 'a,
         T::Archived: Access,
     {
         ZebinReader::<T, S::Cursor<'a>>::access(storage.cursor(0), ValidationConfig::default())

@@ -303,7 +303,6 @@ where
 
 #[cfg(feature = "alloc")]
 impl zebin::io::Storage for ShardedStorage {
-    type Mode = zebin::io::StreamMode;
     type Cursor<'a>
         = ShardedStorageCursor<'a>
     where
