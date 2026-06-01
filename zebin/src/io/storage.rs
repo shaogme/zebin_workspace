@@ -14,7 +14,7 @@ pub trait Storage {
     where
         Self: 'a;
 
-    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self) -> Self::Cursor<'a>
     where
         Self: 'a;
 }
@@ -50,11 +50,11 @@ impl<'b> Storage for &'b [u8] {
         Self: 'a;
 
     #[inline]
-    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self) -> Self::Cursor<'a>
     where
         Self: 'a,
     {
-        SliceCursor::new(self, pos)
+        SliceCursor::new(self, 0)
     }
 }
 
@@ -66,11 +66,11 @@ impl<'b> Storage for &'b Vec<u8> {
         Self: 'a;
 
     #[inline]
-    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self) -> Self::Cursor<'a>
     where
         Self: 'a,
     {
-        SliceCursor::new(self.as_slice(), pos)
+        SliceCursor::new(self.as_slice(), 0)
     }
 }
 

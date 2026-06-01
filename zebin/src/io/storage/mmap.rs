@@ -46,11 +46,11 @@ impl<'b> Storage for &'b Mmap {
         Self: 'a;
 
     #[inline]
-    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self) -> Self::Cursor<'a>
     where
         Self: 'a,
     {
-        SliceCursor::new(self.as_slice(), pos)
+        SliceCursor::new(self.as_slice(), 0)
     }
 }
 

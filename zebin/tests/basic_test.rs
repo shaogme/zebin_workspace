@@ -240,8 +240,8 @@ struct ShardedStorageCursor<'a> {
 
 #[cfg(feature = "alloc")]
 impl<'a> ShardedStorageCursor<'a> {
-    fn new(storage: &'a ShardedStorage, pos: usize) -> Self {
-        Self { storage, pos }
+    fn new(storage: &'a ShardedStorage) -> Self {
+        Self { storage, pos: 0 }
     }
 }
 
@@ -306,11 +306,11 @@ impl<'b> zebin::io::Storage for &'b ShardedStorage {
     where
         Self: 'a;
 
-    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self) -> Self::Cursor<'a>
     where
         Self: 'a,
     {
-        ShardedStorageCursor::new(self, pos)
+        ShardedStorageCursor::new(self)
     }
 }
 
@@ -354,7 +354,7 @@ fn test_sharded_storage_stream() {
         current_index: 0,
     };
 
-    let cursor = (&storage).into_cursor(0);
+    let cursor = (&storage).into_cursor();
     let mut reader =
         ZebinReader::<UserProfile, _>::new(cursor, ValidationConfig::default()).unwrap();
 
@@ -363,7 +363,7 @@ fn test_sharded_storage_stream() {
     assert_eq!(unsafe { r1.username.as_str() }, "Alice");
 
     storage.advance_sharder().unwrap();
-    let cursor = (&storage).into_cursor(0);
+    let cursor = (&storage).into_cursor();
     let mut reader =
         ZebinReader::<UserProfile, _>::new(cursor, ValidationConfig::default()).unwrap();
 

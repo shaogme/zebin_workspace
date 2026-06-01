@@ -144,7 +144,7 @@ mod pub_fn {
         S: Storage + 'a,
         T::Archived: Access,
     {
-        let cursor = storage.into_cursor(0);
+        let cursor = storage.into_cursor();
         ZebinReader::new(cursor, ValidationConfig::default())
     }
 
@@ -155,7 +155,8 @@ mod pub_fn {
         S: Storage + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::access(storage.into_cursor(0), ValidationConfig::default())
+        let cursor = storage.into_cursor();
+        ZebinReader::<T, S::Cursor<'a>>::access(cursor, ValidationConfig::default())
     }
 
     /// Decode and validate the archived root object using the default header directly into T.
@@ -166,7 +167,7 @@ mod pub_fn {
         T::Archived: Access + 'a,
         for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
     {
-        let cursor = storage.into_cursor(0);
+        let cursor = storage.into_cursor();
         ZebinReader::<T, S::Cursor<'a>>::deserialize(cursor)
     }
 
@@ -177,11 +178,8 @@ mod pub_fn {
         S: Storage + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::validate(
-            storage.into_cursor(0),
-            ValidationConfig::default(),
-            None,
-        )
+        let cursor = storage.into_cursor();
+        ZebinReader::<T, S::Cursor<'a>>::validate(cursor, ValidationConfig::default(), None)
     }
 
     /// Validate an archive with explicit runtime validation limits.
@@ -195,7 +193,8 @@ mod pub_fn {
         S: Storage + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::validate(storage.into_cursor(0), config, stack)
+        let cursor = storage.into_cursor();
+        ZebinReader::<T, S::Cursor<'a>>::validate(cursor, config, stack)
     }
 
     /// Validate an archive and capture the logical field/index path on failure.
@@ -208,11 +207,8 @@ mod pub_fn {
         S: Storage + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::validate(
-            storage.into_cursor(0),
-            ValidationConfig::default(),
-            Some(stack),
-        )
+        let cursor = storage.into_cursor();
+        ZebinReader::<T, S::Cursor<'a>>::validate(cursor, ValidationConfig::default(), Some(stack))
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.
