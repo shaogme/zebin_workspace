@@ -2,7 +2,7 @@
 use core::cell::Cell;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{BufMut, StorageMut, ZebinWriter};
+use zebin::prelude::{StorageMut, ZebinWriter};
 #[cfg(feature = "alloc")]
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize};
 use zebin::{access, writer};
@@ -51,18 +51,18 @@ fn test_aligned_containers_chunked_writer_matches_full_serialize() {
             self.write_pos
         }
 
-        fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
             let pos = self.write_pos;
             let available = self.limit.get().saturating_sub(pos);
             let count = len.min(available);
             if count == 0 && len > 0 {
-                return Ok(BufMut::new(&mut []));
+                return Ok(&mut []);
             }
             let end = pos + count;
             if end > self.buf.len() {
                 self.buf.resize(end, 0);
             }
-            Ok(BufMut::new(&mut self.buf[pos..end]))
+            Ok(&mut self.buf[pos..end])
         }
 
         fn advance(&mut self, len: usize) {

@@ -2,7 +2,6 @@ use core::num::NonZeroUsize;
 
 use crate::io::StorageMut;
 use crate::prelude::*;
-use crate::utils::chunk::Buf;
 use crate::utils::{byteops, padding_for_alignment};
 use crate::validation::ValidationContext;
 
@@ -12,7 +11,7 @@ pub trait Cursor<'a> {
     where
         C: ValidationContext + ?Sized;
 
-    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
+    fn read_buf<C>(&mut self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -21,7 +20,7 @@ pub trait Cursor<'a> {
         Ok(buf)
     }
 
-    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
     where
         C: ValidationContext + ?Sized;
 
@@ -49,7 +48,7 @@ pub trait Cursor<'a> {
     where
         C: ValidationContext + ?Sized,
     {
-        self.read_buf(len, context).map(|b| b.into_slice())
+        self.read_buf(len, context)
     }
 
     #[inline]
@@ -57,7 +56,7 @@ pub trait Cursor<'a> {
     where
         C: ValidationContext + ?Sized,
     {
-        self.peek_buf(len, context).map(|b| b.into_slice())
+        self.peek_buf(len, context)
     }
 
     #[inline]
@@ -193,7 +192,7 @@ where
     }
 
     #[inline]
-    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<&'b [u8], AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -204,7 +203,7 @@ where
         if end > self.slice.len() {
             return Err(context.validation_error("Pointer out of bounds", self.pos));
         }
-        Ok(Buf::new(&self.slice[self.pos..end]))
+        Ok(&self.slice[self.pos..end])
     }
 
     #[inline]
@@ -234,7 +233,7 @@ impl<'a> CursorMut<'a> {
         let buf = (*self.source).peek_buf_mut(bytes.len())?;
         let accepted = buf.len();
         if accepted > 0 {
-            byteops::copy_exact(buf.into_mut_slice(), &bytes[..accepted]);
+            byteops::copy_exact(buf, &bytes[..accepted]);
             self.source.advance(accepted);
         }
         let progress = SinkProgress::from_accepted(bytes.len(), accepted);
@@ -253,7 +252,7 @@ impl<'a> CursorMut<'a> {
         let buf = (*self.source).peek_buf_mut(len)?;
         let accepted = buf.len();
         if accepted > 0 {
-            byteops::fill(buf.into_mut_slice(), 0);
+            byteops::fill(buf, 0);
             self.source.advance(accepted);
         }
         let progress = SinkProgress::from_accepted(len, accepted);

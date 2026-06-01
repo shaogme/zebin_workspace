@@ -4,7 +4,6 @@ pub mod byteops;
 #[doc(hidden)]
 pub mod macro_helpers;
 
-pub mod chunk;
 pub mod cursor;
 
 pub(crate) fn padding_for_alignment(pos: usize, alignment: core::num::NonZeroUsize) -> usize {

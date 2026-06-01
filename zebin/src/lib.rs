@@ -43,9 +43,9 @@ pub mod prelude {
         error::{AccessError, ArchiveError, ZebinError},
         io::{
             Access, Archive, ArchiveHeader, ArchiveHeaderTrait, ArchivedDefault, ArchivedField,
-            ArchivedLayout, Buf, BufMut, Cursor, CursorMut, Deserialize, FixedLayout, MeasureBody,
-            SchemaAware, Serialize, Serializer, SinkProgress, SliceSerializer, Storage, StorageMut,
-            ZebinReader, ZebinWriter, deserialize, reader, writer,
+            ArchivedLayout, Cursor, CursorMut, Deserialize, FixedLayout, MeasureBody, SchemaAware,
+            Serialize, Serializer, SinkProgress, SliceSerializer, Storage, StorageMut, ZebinReader,
+            ZebinWriter, deserialize, reader, writer,
         },
         schema::{FieldEncoding, FieldEntry, ObjectEncoding, SchemaRevision, StableSchemaKey},
         validation::{
@@ -113,7 +113,6 @@ pub mod io {
     pub use crate::traits_impl::{
         FixedSequenceStrategy, ForwardSequenceStrategy, SequenceAccessStrategy,
     };
-    pub use crate::utils::chunk::{Buf, BufMut};
     pub use crate::utils::cursor::Cursor;
     pub use crate::utils::cursor::CursorMut;
     pub use crate::write::{ArchiveWriter, ZebinWriter};

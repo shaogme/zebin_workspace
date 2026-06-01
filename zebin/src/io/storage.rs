@@ -3,7 +3,6 @@
 pub mod mmap;
 
 use crate::error::ZebinError;
-use crate::utils::chunk::BufMut;
 use crate::utils::cursor::{Cursor, SliceCursor};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -22,7 +21,7 @@ pub trait Storage {
 /// Unified storage layer: byte-backed write access contract.
 pub trait StorageMut {
     fn pos(&self) -> usize;
-    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError>;
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError>;
     fn advance(&mut self, len: usize);
 }
 
@@ -33,7 +32,7 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     }
 
     #[inline]
-    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
         (**self).peek_buf_mut(len)
     }
 
@@ -104,15 +103,15 @@ impl<'a> StorageMut for SliceSerializer<'a> {
     }
 
     #[inline]
-    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
         let pos = self.write_pos;
         let remaining = self.buf.len().saturating_sub(pos);
         let count = remaining.min(len);
         if count == 0 && len > 0 {
-            return Ok(BufMut::new(&mut []));
+            return Ok(&mut []);
         }
         let end = pos + count;
-        Ok(BufMut::new(&mut self.buf[pos..end]))
+        Ok(&mut self.buf[pos..end])
     }
 
     #[inline]
@@ -156,7 +155,7 @@ impl StorageMut for VecSerializer {
     }
 
     #[inline]
-    fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
         let pos = self.archive_pos;
         let end = pos
             .checked_add(len)
@@ -164,7 +163,7 @@ impl StorageMut for VecSerializer {
         if end > self.buf.len() {
             self.buf.resize(end, 0);
         }
-        Ok(BufMut::new(&mut self.buf[pos..end]))
+        Ok(&mut self.buf[pos..end])
     }
 
     #[inline]

@@ -4,9 +4,7 @@ use core::cell::Cell;
 use zebin::ZebinError;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{
-    Buf, BufMut, Storage, StorageMut, ValidationConfig, ZebinReader, ZebinWriter,
-};
+use zebin::prelude::{Storage, StorageMut, ValidationConfig, ZebinReader, ZebinWriter};
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
@@ -67,18 +65,18 @@ fn test_chunked_writer_resume() {
             self.write_pos
         }
 
-        fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError> {
+        fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
             let pos = self.write_pos;
             let available = self.limit.get().saturating_sub(pos);
             let count = len.min(available);
             if count == 0 && len > 0 {
-                return Ok(BufMut::new(&mut []));
+                return Ok(&mut []);
             }
             let end = pos + count;
             if end > self.buf.len() {
                 self.buf.resize(end, 0);
             }
-            Ok(BufMut::new(&mut self.buf[pos..end]))
+            Ok(&mut self.buf[pos..end])
         }
 
         fn advance(&mut self, len: usize) {
@@ -277,7 +275,7 @@ where
         &self,
         len: usize,
         context: &mut C,
-    ) -> Result<Buf<'b>, zebin::prelude::AccessError>
+    ) -> Result<&'b [u8], zebin::prelude::AccessError>
     where
         C: zebin::validation::ValidationContext + ?Sized,
     {
@@ -289,7 +287,7 @@ where
         if end > shard.len() {
             return Err(context.validation_error("Pointer out of bounds", self.pos));
         }
-        Ok(Buf::new(&shard[self.pos..end]))
+        Ok(&shard[self.pos..end])
     }
 
     #[inline]

@@ -2,7 +2,6 @@ use core::marker::PhantomData;
 
 #[cfg(feature = "alloc")]
 use crate::io::ForwardSequenceStrategy;
-use crate::utils::chunk::Buf;
 use crate::{prelude::*, validation::ValidationContext};
 
 use super::{DummyContext, MAX_SEQUENCE_LEN};
@@ -255,7 +254,7 @@ where
     }
 
     #[inline]
-    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'b>, AccessError>
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<&'b [u8], AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -266,7 +265,7 @@ where
         if end > self.slice.len() {
             return Err(context.validation_error("Pointer out of bounds", self.pos()));
         }
-        Ok(Buf::new(&self.slice[self.pos..end]))
+        Ok(&self.slice[self.pos..end])
     }
 
     #[inline]
@@ -304,7 +303,7 @@ where
     }
 
     #[inline]
-    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<Buf<'a>, AccessError>
+    fn peek_buf<C>(&self, len: usize, context: &mut C) -> Result<&'a [u8], AccessError>
     where
         C: ValidationContext + ?Sized,
     {
@@ -313,8 +312,8 @@ where
             .checked_add(len)
             .ok_or_else(|| context.validation_error("Cursor position overflow", self.pos()))?;
         let full_buf = self.cursor.peek_buf(end, context)?;
-        let slice = &full_buf.into_slice()[start..end];
-        Ok(Buf::new(slice))
+        let slice = &full_buf[start..end];
+        Ok(slice)
     }
 
     #[inline]
@@ -353,8 +352,7 @@ where
         let block_index = deserialize_block_index(&mut peeking_cursor, context, len)?;
 
         let total_len = peeking_cursor.peeked_len;
-        let source_buf = cursor.read_buf(total_len, context)?;
-        let source = source_buf.into_slice();
+        let source = cursor.read_buf(total_len, context)?;
 
         Ok(ArchivedIterView {
             source,
