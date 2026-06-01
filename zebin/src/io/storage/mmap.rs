@@ -7,10 +7,7 @@ use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
 use crate::io::{Storage, StorageMut};
-use crate::traits_impl::SinkProgress;
-use crate::utils::byteops;
-use crate::utils::cursor::{CursorMut, SliceCursor};
-use core::num::NonZeroUsize;
+use crate::utils::cursor::{ChunkSerializer, SerializerCursor, SliceCursor};
 
 /// Memory-mapped storage backend for read-only archive access.
 pub struct Mmap {
@@ -174,69 +171,26 @@ impl MmapSerializer {
     }
 }
 
-pub struct MmapSerializerCursor<'a> {
-    serializer: &'a mut MmapSerializer,
-}
-
-impl<'a> MmapSerializerCursor<'a> {
-    #[inline]
-    pub fn new(serializer: &'a mut MmapSerializer) -> Self {
-        Self { serializer }
-    }
-
-    #[inline]
-    pub fn into_inner(self) -> &'a mut MmapSerializer {
-        self.serializer
-    }
-}
-
-impl<'a, 'b> CursorMut<'b> for MmapSerializerCursor<'a>
-where
-    'a: 'b,
-{
+impl ChunkSerializer for MmapSerializer {
     #[inline]
     fn pos(&self) -> usize {
-        self.serializer.pos()
+        self.pos()
     }
 
     #[inline]
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        if bytes.is_empty() {
-            return Ok(SinkProgress::Complete);
-        }
-        let mut buf = self.serializer.peek_buf_mut(bytes.len())?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::copy_exact(&mut buf, &bytes[..accepted]);
-            self.serializer.advance(accepted);
-        }
-        Ok(SinkProgress::from_accepted(bytes.len(), accepted))
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
+        self.peek_buf_mut(len)
     }
 
     #[inline]
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-        let padding = crate::utils::padding_for_alignment(self.pos(), alignment);
-        self.skip(padding)
-    }
-
-    #[inline]
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        if len == 0 {
-            return Ok(SinkProgress::Complete);
-        }
-        let mut buf = self.serializer.peek_buf_mut(len)?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::fill(&mut buf, 0);
-            self.serializer.advance(accepted);
-        }
-        Ok(SinkProgress::from_accepted(len, accepted))
+    fn advance(&mut self, len: usize) {
+        self.advance(len);
     }
 }
 
 impl<'b> StorageMut for &'b mut MmapSerializer {
     type CursorMut<'a>
-        = MmapSerializerCursor<'a>
+        = SerializerCursor<'a, MmapSerializer>
     where
         Self: 'a;
 
@@ -245,6 +199,6 @@ impl<'b> StorageMut for &'b mut MmapSerializer {
     where
         Self: 'a,
     {
-        MmapSerializerCursor::new(self)
+        SerializerCursor::new(self)
     }
 }

@@ -1,12 +1,11 @@
 #[cfg(feature = "alloc")]
 use core::cell::Cell;
-use core::num::NonZeroUsize;
 #[cfg(feature = "alloc")]
 use zebin::ZebinError;
-use zebin::io::{CursorMut, SinkProgress, SliceSerializer};
+use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
 use zebin::prelude::{Storage, StorageMut, ValidationConfig, ZebinReader, ZebinWriter};
-use zebin::utils::padding_for_alignment;
+use zebin::utils::cursor::{ChunkSerializer, SerializerCursor};
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
@@ -62,56 +61,30 @@ fn test_chunked_writer_resume() {
         write_pos: usize,
     }
 
-    impl<'a, 'c> CursorMut<'c> for LimitedSink<'a> {
+    impl<'a> ChunkSerializer for LimitedSink<'a> {
         fn pos(&self) -> usize {
             self.write_pos
         }
 
-        fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-            if bytes.is_empty() {
-                return Ok(SinkProgress::Complete);
-            }
-            let pos = self.write_pos;
-            let available = self.limit.get().saturating_sub(pos);
-            let count = bytes.len().min(available);
-            if count > 0 {
-                let end = pos + count;
-                if end > self.buf.len() {
-                    self.buf.resize(end, 0);
-                }
-                self.buf[pos..end].copy_from_slice(&bytes[..count]);
-                self.write_pos += count;
-            }
-            Ok(SinkProgress::from_accepted(bytes.len(), count))
-        }
-
-        fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-            let padding = padding_for_alignment(self.pos(), alignment);
-            self.skip(padding)
-        }
-
-        fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-            if len == 0 {
-                return Ok(SinkProgress::Complete);
-            }
+        fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
             let pos = self.write_pos;
             let available = self.limit.get().saturating_sub(pos);
             let count = len.min(available);
-            if count > 0 {
-                let end = pos + count;
-                if end > self.buf.len() {
-                    self.buf.resize(end, 0);
-                }
-                self.buf[pos..end].fill(0);
-                self.write_pos += count;
+            let end = pos + count;
+            if end > self.buf.len() {
+                self.buf.resize(end, 0);
             }
-            Ok(SinkProgress::from_accepted(len, count))
+            Ok(&mut self.buf[pos..end])
+        }
+
+        fn advance(&mut self, len: usize) {
+            self.write_pos += len;
         }
     }
 
     impl<'b, 'a> StorageMut for &'b mut LimitedSink<'a> {
         type CursorMut<'c>
-            = &'c mut LimitedSink<'a>
+            = SerializerCursor<'c, LimitedSink<'a>>
         where
             Self: 'c;
 
@@ -119,7 +92,7 @@ fn test_chunked_writer_resume() {
         where
             Self: 'c,
         {
-            self
+            SerializerCursor::new(self)
         }
     }
 
@@ -129,7 +102,8 @@ fn test_chunked_writer_resume() {
         write_pos: 0,
     };
 
-    let mut writer_obj = ZebinWriter::<&UserProfile, &mut LimitedSink>::new(&mut sink).unwrap();
+    let mut writer_obj =
+        ZebinWriter::<&UserProfile, &mut LimitedSink>::new((&mut sink).into_cursor_mut()).unwrap();
 
     while !writer_obj.is_finished() {
         limit.set(limit.get() + 5);

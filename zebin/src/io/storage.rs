@@ -3,7 +3,7 @@
 pub mod mmap;
 
 use crate::error::ZebinError;
-use crate::utils::cursor::{Cursor, SliceCursor};
+use crate::utils::cursor::{ChunkSerializer, Cursor, CursorMut, SerializerCursor, SliceCursor};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -29,132 +29,38 @@ pub trait StorageMut {
         Self: 'a;
 }
 
-use crate::traits_impl::SinkProgress;
-use crate::utils::byteops;
-use crate::utils::cursor::CursorMut;
-use crate::utils::padding_for_alignment;
-use core::num::NonZeroUsize;
-
-pub struct SliceSerializerCursor<'a, 'b> {
-    serializer: &'a mut SliceSerializer<'b>,
-}
-
-impl<'a, 'b> SliceSerializerCursor<'a, 'b> {
-    #[inline]
-    pub fn new(serializer: &'a mut SliceSerializer<'b>) -> Self {
-        Self { serializer }
-    }
-
-    #[inline]
-    pub fn into_inner(self) -> &'a mut SliceSerializer<'b> {
-        self.serializer
-    }
-}
-
-impl<'a, 'b, 'c> CursorMut<'c> for SliceSerializerCursor<'a, 'b>
-where
-    'a: 'c,
-{
+impl<'a> ChunkSerializer for SliceSerializer<'a> {
     #[inline]
     fn pos(&self) -> usize {
-        self.serializer.pos()
+        self.pos()
     }
 
     #[inline]
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        if bytes.is_empty() {
-            return Ok(SinkProgress::Complete);
-        }
-        let buf = self.serializer.peek_buf_mut(bytes.len())?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::copy_exact(buf, &bytes[..accepted]);
-            self.serializer.advance(accepted);
-        }
-        Ok(SinkProgress::from_accepted(bytes.len(), accepted))
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
+        self.peek_buf_mut(len)
     }
 
     #[inline]
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-        let padding = padding_for_alignment(self.pos(), alignment);
-        self.skip(padding)
-    }
-
-    #[inline]
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        if len == 0 {
-            return Ok(SinkProgress::Complete);
-        }
-        let buf = self.serializer.peek_buf_mut(len)?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::fill(buf, 0);
-            self.serializer.advance(accepted);
-        }
-        Ok(SinkProgress::from_accepted(len, accepted))
+    fn advance(&mut self, len: usize) {
+        self.advance(len);
     }
 }
 
 #[cfg(feature = "alloc")]
-pub struct VecSerializerCursor<'a> {
-    serializer: &'a mut VecSerializer,
-}
-
-#[cfg(feature = "alloc")]
-impl<'a> VecSerializerCursor<'a> {
-    #[inline]
-    pub fn new(serializer: &'a mut VecSerializer) -> Self {
-        Self { serializer }
-    }
-
-    #[inline]
-    pub fn into_inner(self) -> &'a mut VecSerializer {
-        self.serializer
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<'a, 'b> CursorMut<'b> for VecSerializerCursor<'a>
-where
-    'a: 'b,
-{
+impl ChunkSerializer for VecSerializer {
     #[inline]
     fn pos(&self) -> usize {
-        self.serializer.pos()
+        self.pos()
     }
 
     #[inline]
-    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        if bytes.is_empty() {
-            return Ok(SinkProgress::Complete);
-        }
-        let buf = self.serializer.peek_buf_mut(bytes.len())?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::copy_exact(buf, &bytes[..accepted]);
-            self.serializer.advance(accepted);
-        }
-        Ok(SinkProgress::from_accepted(bytes.len(), accepted))
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
+        self.peek_buf_mut(len)
     }
 
     #[inline]
-    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-        let padding = padding_for_alignment(self.pos(), alignment);
-        self.skip(padding)
-    }
-
-    #[inline]
-    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        if len == 0 {
-            return Ok(SinkProgress::Complete);
-        }
-        let buf = self.serializer.peek_buf_mut(len)?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::fill(buf, 0);
-            self.serializer.advance(accepted);
-        }
-        Ok(SinkProgress::from_accepted(len, accepted))
+    fn advance(&mut self, len: usize) {
+        self.advance(len);
     }
 }
 
@@ -242,7 +148,7 @@ impl<'a> SliceSerializer<'a> {
 
 impl<'b, 'c> StorageMut for &'b mut SliceSerializer<'c> {
     type CursorMut<'a>
-        = SliceSerializerCursor<'a, 'c>
+        = SerializerCursor<'a, SliceSerializer<'c>>
     where
         Self: 'a;
 
@@ -251,7 +157,7 @@ impl<'b, 'c> StorageMut for &'b mut SliceSerializer<'c> {
     where
         Self: 'a,
     {
-        SliceSerializerCursor::new(self)
+        SerializerCursor::new(self)
     }
 }
 
@@ -301,7 +207,7 @@ impl VecSerializer {
 #[cfg(feature = "alloc")]
 impl<'b> StorageMut for &'b mut VecSerializer {
     type CursorMut<'a>
-        = VecSerializerCursor<'a>
+        = SerializerCursor<'a, VecSerializer>
     where
         Self: 'a;
 
@@ -310,6 +216,6 @@ impl<'b> StorageMut for &'b mut VecSerializer {
     where
         Self: 'a,
     {
-        VecSerializerCursor::new(self)
+        SerializerCursor::new(self)
     }
 }

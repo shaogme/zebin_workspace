@@ -1,6 +1,8 @@
 use core::num::NonZeroUsize;
 
+use crate::error::ZebinError;
 use crate::prelude::*;
+use crate::traits_impl::SinkProgress;
 use crate::utils::{byteops, padding_for_alignment};
 use crate::validation::ValidationContext;
 
@@ -238,5 +240,71 @@ impl<'a, C: CursorMut<'a> + ?Sized> CursorMut<'a> for &mut C {
     #[inline]
     fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
         (**self).skip(len)
+    }
+}
+
+pub trait ChunkSerializer {
+    fn pos(&self) -> usize;
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError>;
+    fn advance(&mut self, len: usize);
+}
+
+pub struct SerializerCursor<'a, S> {
+    serializer: &'a mut S,
+}
+
+impl<'a, S> SerializerCursor<'a, S> {
+    #[inline]
+    pub fn new(serializer: &'a mut S) -> Self {
+        Self { serializer }
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> &'a mut S {
+        self.serializer
+    }
+}
+
+impl<'a, 'b, S: ChunkSerializer> CursorMut<'b> for SerializerCursor<'a, S>
+where
+    'a: 'b,
+{
+    #[inline]
+    fn pos(&self) -> usize {
+        self.serializer.pos()
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        if bytes.is_empty() {
+            return Ok(SinkProgress::Complete);
+        }
+        let buf = self.serializer.peek_buf_mut(bytes.len())?;
+        let accepted = buf.len();
+        if accepted > 0 {
+            byteops::copy_exact(buf, &bytes[..accepted]);
+            self.serializer.advance(accepted);
+        }
+        Ok(SinkProgress::from_accepted(bytes.len(), accepted))
+    }
+
+    #[inline]
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+        let padding = padding_for_alignment(self.pos(), alignment);
+        self.skip(padding)
+    }
+
+    #[inline]
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+        if len == 0 {
+            return Ok(SinkProgress::Complete);
+        }
+        let buf = self.serializer.peek_buf_mut(len)?;
+        let accepted = buf.len();
+        if accepted > 0 {
+            byteops::fill(buf, 0);
+            self.serializer.advance(accepted);
+        }
+        Ok(SinkProgress::from_accepted(len, accepted))
     }
 }
