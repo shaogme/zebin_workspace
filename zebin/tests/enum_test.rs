@@ -1,14 +1,16 @@
 use zebin::io::SliceSerializer;
-use zebin::{ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize, access, writer};
+use zebin::{
+    ZebinAccess, ZebinDeserialize, ZebinError, ZebinSerialize, access, deserialize, writer,
+};
 
-#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 enum UnitMode {
     Idle,
     Busy,
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 enum TuplePacket {
     Empty,
     #[zebin(schema_key = 573785173)]
@@ -16,7 +18,7 @@ enum TuplePacket {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 enum StructPacket {
     Ping,
     #[zebin(schema_key = 1432778632)]
@@ -29,7 +31,7 @@ enum StructPacket {
 }
 
 #[cfg(feature = "alloc")]
-#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Clone)]
+#[derive(ZebinAccess, ZebinDeserialize, ZebinSerialize, Debug, PartialEq, Clone)]
 enum RecursiveNode {
     Leaf,
     Branch { children: Vec<RecursiveNode> },
@@ -158,4 +160,50 @@ fn test_enum_layout_mismatch_rejected() {
         err,
         ZebinError::Access(zebin::error::AccessError::UnexpectedFieldEncoding { .. })
     ));
+}
+
+#[test]
+fn test_unit_enum_deserialize() {
+    let value = UnitMode::Busy;
+    let mut buf = [0u8; 64];
+    let mut serializer = SliceSerializer::new(&mut buf, 0);
+    let mut writer_obj = writer::<UnitMode, _>(&mut serializer).unwrap();
+    writer_obj.write_all(value.clone()).unwrap();
+    let written = serializer.written();
+
+    let deserialized: UnitMode = deserialize::<UnitMode, _>(&buf[..written]).unwrap();
+    assert_eq!(deserialized, value);
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn test_tuple_enum_deserialize() {
+    let value = TuplePacket::Data(7, "packet".to_string());
+    let buf = zebin::serialize(value.clone()).unwrap();
+    let deserialized: TuplePacket = deserialize::<TuplePacket, _>(&buf).unwrap();
+    assert_eq!(deserialized, value);
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn test_struct_enum_deserialize() {
+    let value = StructPacket::Data {
+        code: 42,
+        label: "hello".to_string(),
+    };
+    let buf = zebin::serialize(value.clone()).unwrap();
+    let deserialized: StructPacket = deserialize::<StructPacket, _>(&buf).unwrap();
+    assert_eq!(deserialized, value);
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn test_enum_std_io_deserialize() {
+    use std::io::Cursor;
+    let value = UnitMode::Busy;
+    let mut write_buf = Vec::new();
+    zebin::prelude::serialize_to(&value, &mut write_buf).unwrap();
+    let read_stream = Cursor::new(write_buf);
+    let deserialized: UnitMode = zebin::prelude::deserialize_from(read_stream).unwrap();
+    assert_eq!(deserialized, value);
 }
