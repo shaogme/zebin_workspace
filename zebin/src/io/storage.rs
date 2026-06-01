@@ -14,14 +14,6 @@ pub trait Storage {
     where
         Self: 'a;
 
-    #[inline]
-    fn advance_sharder(&mut self) -> Result<(), ZebinError> {
-        Err(ZebinError::BufferTooSmall {
-            pos: 0,
-            required: 1,
-        })
-    }
-
     fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
     where
         Self: 'a;
@@ -54,11 +46,6 @@ impl<S: Storage + ?Sized> Storage for &mut S {
         = S::Cursor<'a>
     where
         Self: 'a;
-
-    #[inline]
-    fn advance_sharder(&mut self) -> Result<(), ZebinError> {
-        (**self).advance_sharder()
-    }
 
     #[inline]
     fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>

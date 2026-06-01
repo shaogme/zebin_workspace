@@ -308,6 +308,16 @@ impl zebin::io::Storage for ShardedStorage {
     where
         Self: 'a;
 
+    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    where
+        Self: 'a,
+    {
+        ShardedStorageCursor::new(self, pos)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl ShardedStorage {
     fn advance_sharder(&mut self) -> Result<(), ZebinError> {
         if self.current_index + 1 < self.shards.len() {
             self.current_index += 1;
@@ -318,13 +328,6 @@ impl zebin::io::Storage for ShardedStorage {
                 required: 1,
             })
         }
-    }
-
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
-    where
-        Self: 'a,
-    {
-        ShardedStorageCursor::new(self, pos)
     }
 }
 
