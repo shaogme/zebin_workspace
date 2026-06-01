@@ -79,7 +79,7 @@ where
     T::Archived: ArchivedLayout,
 {
     #[inline]
-    fn try_align(&mut self, sink: &mut CursorMut<'_>) -> Result<bool, ZebinError> {
+    fn try_align(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<bool, ZebinError> {
         if <T::Archived as ArchivedLayout>::FIXED_SIZE.is_none() || self.aligned {
             return Ok(true);
         }
@@ -123,7 +123,7 @@ where
         }
     }
 
-    pub fn finish_ref(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn finish_ref(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if !self.finished {
             if self.next_item.is_some() || self.has_active_serializer || self.marker_cursor < 1 {
                 return Err(ZebinError::SerializeError {
@@ -207,7 +207,7 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         if self.finished {
             return Err(ZebinError::SerializeError {
@@ -247,7 +247,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         loop {
             // ── Phase 1: flush the 1-byte sequence marker ──────────────────
             if self.marker_cursor < 1 {
@@ -342,7 +342,7 @@ where
         }
     }
 
-    fn finish(mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         let _ = self.finish_ref(sink)?;
         self.item_serializer.finish(sink)
     }
@@ -360,12 +360,11 @@ mod tests {
         let mut serializer: SeqSerializer<'_, u32> = SeqSerializer::new();
 
         // Feed first item
-        let mut writer = CursorMut::new(&mut sink);
+        let mut writer = sink.into_cursor_mut();
         let poll_res = serializer.input(42, &mut writer);
         assert!(poll_res.is_ok());
 
         // Try feeding again while busy
-        let mut writer = CursorMut::new(&mut sink);
         let poll_err = serializer.input(43, &mut writer);
         assert!(poll_err.is_err());
     }
@@ -376,9 +375,8 @@ mod tests {
         let mut sink = SliceSerializer::new(&mut buf, 0);
         let mut serializer: SeqSerializer<'_, u32> = SeqSerializer::new();
 
-        let mut writer = CursorMut::new(&mut sink);
+        let mut writer = sink.into_cursor_mut();
         let _ = serializer.finish_ref(&mut writer);
-        let mut writer = CursorMut::new(&mut sink);
         let res = serializer.input(42, &mut writer);
         assert!(res.is_err());
     }

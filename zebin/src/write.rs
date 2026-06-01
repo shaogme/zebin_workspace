@@ -4,7 +4,7 @@ use crate::io_impl::storage::SliceSerializer;
 use crate::prelude::*;
 
 #[cfg(feature = "alloc")]
-use crate::io_impl::storage::VecSerializer;
+use crate::io_impl::storage::{VecSerializer, VecSerializerCursor};
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -28,37 +28,38 @@ where
     },
 }
 
-pub type ZebinWriter<'a, T, S = SliceSerializer<'a>> = ArchiveWriter<'a, T, S, ArchiveHeader>;
+pub type ZebinWriter<'a, T, S = SliceSerializer<'a>> =
+    ArchiveWriter<'a, T, <S as StorageMut>::CursorMut<'a>, ArchiveHeader>;
 
 /// Stateful archive writer that can stream into caller-provided buffers.
 ///
 /// Owns the value being archived; the value is moved into the body serializer on
 /// the first `write` that enters the `Body` phase, after which the writer holds
 /// no reference to the original allocation.
-pub struct ArchiveWriter<'a, T, S, H = ArchiveHeader>
+pub struct ArchiveWriter<'a, T, C, H = ArchiveHeader>
 where
     T: Serialize + Archive + 'a,
-    S: StorageMut,
+    C: CursorMut<'a>,
     H: ArchiveHeaderTrait,
 {
-    storage_mut: S,
+    cursor_mut: C,
     value: Option<<T as Serialize>::Input<'a>>,
     phase: SerializePhase<'a, T, H>,
     pos: usize,
 }
 
-impl<'a, T, S, H> ArchiveWriter<'a, T, S, H>
+impl<'a, T, C, H> ArchiveWriter<'a, T, C, H>
 where
     T: Serialize + Archive + 'a,
-    S: StorageMut,
+    C: CursorMut<'a>,
     H: ArchiveHeaderTrait,
     T::Archived: ArchivedLayout,
 {
-    pub fn new(storage_mut: S) -> Result<Self, ZebinError> {
+    pub fn new(cursor_mut: C) -> Result<Self, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
-        let pos = storage_mut.pos();
+        let pos = cursor_mut.pos();
         Ok(Self {
-            storage_mut,
+            cursor_mut,
             value: None,
             phase: SerializePhase::Header {
                 bytes: header.serialize(),
@@ -87,7 +88,7 @@ where
     }
 
     fn drive(&mut self) -> Result<usize, ZebinError> {
-        let mut writer = CursorMut::new(&mut self.storage_mut);
+        let mut writer = &mut self.cursor_mut;
         let start_pos = writer.pos();
         loop {
             match &mut self.phase {
@@ -198,7 +199,7 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<'a, T, H> ArchiveWriter<'a, T, VecSerializer, H>
+impl<'a, T, H> ArchiveWriter<'a, T, VecSerializerCursor<'a>, H>
 where
     T: Serialize + Archive + 'a,
     H: ArchiveHeaderTrait,
@@ -207,14 +208,16 @@ where
     pub fn serialize(value: <T as Serialize>::Input<'a>) -> Result<Vec<u8>, ZebinError> {
         let header = H::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         let mut serializer = VecSerializer::new(0);
-        let mut writer = CursorMut::new(&mut serializer);
-        writer.write(header.serialize().as_ref())?;
+        {
+            let mut writer = (&mut serializer).into_cursor_mut();
+            writer.write(header.serialize().as_ref())?;
 
-        let mut body_serializer = T::serializer();
-        if body_serializer.input(value, &mut writer)?.is_pending() {
-            while body_serializer.poll_pending(&mut writer)?.is_pending() {}
+            let mut body_serializer = T::serializer();
+            if body_serializer.input(value, &mut writer)?.is_pending() {
+                while body_serializer.poll_pending(&mut writer)?.is_pending() {}
+            }
+            let _ = body_serializer.finish(&mut writer)?;
         }
-        let _ = body_serializer.finish(&mut writer)?;
         Ok(serializer.into_inner())
     }
 

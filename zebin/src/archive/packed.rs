@@ -418,7 +418,7 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let (len, bytes) = item.to_packed_view_info();
         self.len_prefix = (len as u32).to_le_bytes();
@@ -428,7 +428,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let remaining = 4 - self.prefix_cursor;
             if sink
@@ -454,7 +454,7 @@ where
         Ok(Poll::Ready(()))
     }
 
-    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

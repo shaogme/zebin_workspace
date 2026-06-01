@@ -167,7 +167,7 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         match item {
             Some(inner) => {
@@ -188,7 +188,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.prefix.len() {
             let remaining = self.prefix.len() - self.prefix_cursor;
             if sink
@@ -221,7 +221,7 @@ where
         }
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }

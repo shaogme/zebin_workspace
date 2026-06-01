@@ -240,7 +240,7 @@ fn record_state_input_impl(
     quote! {
         impl<'a> zebin::io::Serializer for #state_name<'a> {
             type Input = #input_ty;
-            fn input(&mut self, item: Self::Input, sink: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn input(&mut self, item: Self::Input, sink: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #[allow(irrefutable_let_patterns)]
                 let #pattern = item else {
                     unsafe { ::core::hint::unreachable_unchecked() }
@@ -248,10 +248,10 @@ fn record_state_input_impl(
                 #(#measure_and_store)*
                 self.poll_pending(sink)
             }
-            fn poll_pending(&mut self, serializer: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending(&mut self, serializer: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #logic
             }
-            fn finish(self, sink: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn finish(self, sink: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 #(#finishes)*
                 Ok(::core::task::Poll::Ready(()))
             }
@@ -458,19 +458,19 @@ fn enum_impl(
 
         impl<'a> zebin::io::Serializer for #payload_state<'a> {
             type Input = #name;
-            fn input(&mut self, item: Self::Input, sink: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn input(&mut self, item: Self::Input, sink: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
                     #(#payload_input_arms,)*
                 }
             }
-            fn poll_pending(&mut self, serializer: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending(&mut self, serializer: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
                     #(#payload_polls,)*
                 }
             }
-            fn finish(self, sink: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn finish(self, sink: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 match self {
                     #payload_state::__Never(_) => Ok(::core::task::Poll::Ready(())),
                     #(#payload_finishes,)*
@@ -484,17 +484,17 @@ fn enum_impl(
 
         impl<'a> zebin::io::Serializer for #enum_state<'a> {
             type Input = #name;
-            fn input(&mut self, item: Self::Input, sink: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn input(&mut self, item: Self::Input, sink: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 let (tag_val, payload_val) = match &item {
                     #(#begin_matches,)*
                 };
                 self.inner.fill(tag_val, payload_val, item);
                 self.poll_pending(sink)
             }
-            fn poll_pending(&mut self, serializer: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn poll_pending(&mut self, serializer: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.inner.poll_write_pending(serializer)
             }
-            fn finish(self, sink: &mut zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
+            fn finish(self, sink: &mut dyn zebin::io::CursorMut<'_>) -> Result<::core::task::Poll<()>, zebin::ZebinError> {
                 self.inner.finish_inner(sink)
             }
         }

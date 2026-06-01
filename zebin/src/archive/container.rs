@@ -41,17 +41,17 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let inner: T = *item;
         self.inner.input(inner, sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -119,16 +119,16 @@ impl Serializer for BoxStrSerializer {
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.input(StringBytes::OwnedBoxStr(item), sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -194,16 +194,16 @@ impl Serializer for RcStrSerializer {
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.input(StringBytes::OwnedRcStr(item), sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -261,17 +261,17 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let value: T = (*item).clone();
         self.inner.input(value, sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -285,17 +285,17 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let value: T = (*item).clone();
         self.inner.input(value, sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -343,17 +343,17 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let owned = item.into_owned();
         self.inner.input(owned, sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }
@@ -467,16 +467,16 @@ impl Serializer for ArcStrSerializer {
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.inner.input(StringBytes::OwnedArcStr(item), sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }

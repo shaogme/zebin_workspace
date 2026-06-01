@@ -298,16 +298,16 @@ pub trait Serializer {
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError>;
 
     /// Advances and flushes any state/data previously accumulated inside the serializer due to insufficient `CursorMut` space.
     ///
     /// Regardless of whether it is a one-off or step-by-step input, this method can be called to advance the remaining encoding progress until it returns `Poll::Ready(())`.
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError>;
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError>;
 
     /// Finishes the encoding process, writing any necessary alignments, paddings, or trailing metadata.
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError>;
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError>;
 }
 
 /// Trait for types that can create resumable archive states.
@@ -372,17 +372,17 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let value: T = (*item).clone();
         self.inner.input(value, sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.poll_pending(sink)
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.inner.finish(sink)
     }
 }

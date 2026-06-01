@@ -156,7 +156,7 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<core::task::Poll<()>, ZebinError> {
         self.items = Some(item.into_iter());
         self.started = true;
@@ -166,7 +166,7 @@ where
 
     fn poll_pending(
         &mut self,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<core::task::Poll<()>, ZebinError> {
         if !self.started {
             return Err(ZebinError::SerializeError {
@@ -203,7 +203,7 @@ where
         }
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<core::task::Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<core::task::Poll<()>, ZebinError> {
         self.item_serializer.finish(sink)
     }
 }
@@ -300,13 +300,13 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.iter = Some(item.into_iter());
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         let iter = self.iter.as_mut().ok_or(ZebinError::SerializeError {
             pos: sink.pos(),
             message: "RefIterSerializer polled before input",
@@ -334,7 +334,7 @@ where
         }
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.seq_serializer.finish(sink)
     }
 }

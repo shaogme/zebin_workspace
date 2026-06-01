@@ -182,7 +182,7 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         self.state = match item {
             Ok(inner) => ResultSerializerState::Ok {
@@ -199,7 +199,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         match &mut self.state {
             ResultSerializerState::Uninitialized => Ok(Poll::Ready(())),
             ResultSerializerState::Ok {
@@ -259,7 +259,7 @@ where
         }
     }
 
-    fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         match self.state {
             ResultSerializerState::Uninitialized => Ok(Poll::Ready(())),
             ResultSerializerState::Ok { .. } => self.ok_serializer.finish(sink),

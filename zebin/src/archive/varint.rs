@@ -281,7 +281,7 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let val = item.to_varint_number().to_u64();
         let len = serialized_len_u64(val);
@@ -292,7 +292,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         let mut cursor = self.cursor as usize;
         let len = self.len as usize;
         let remaining = len - cursor;
@@ -303,7 +303,7 @@ where
         Ok(progress)
     }
 
-    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

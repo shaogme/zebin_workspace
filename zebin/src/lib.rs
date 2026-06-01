@@ -214,10 +214,11 @@ mod pub_fn {
     pub fn writer<'a, T, S>(sink: S) -> Result<ZebinWriter<'a, T, S>, ZebinError>
     where
         T: Serialize + Archive + 'a,
-        S: StorageMut,
+        S: StorageMut + 'a,
         T::Archived: ArchivedLayout,
     {
-        ZebinWriter::new(sink)
+        let cursor = sink.into_cursor_mut();
+        crate::write::ArchiveWriter::new(cursor)
     }
 
     #[cfg(feature = "alloc")]
@@ -231,7 +232,7 @@ mod pub_fn {
         T::Archived: ArchivedLayout,
         T: Serialize<Input<'a> = T>,
     {
-        ZebinWriter::<'a, T, VecSerializer>::serialize(value)
+        ZebinWriter::<'a, T, &mut VecSerializer>::serialize(value)
     }
 
     /// Archive a value into an existing vector using the default header.
@@ -242,6 +243,6 @@ mod pub_fn {
         T::Archived: ArchivedLayout,
         T: Serialize<Input<'a> = T>,
     {
-        ZebinWriter::<'a, T, VecSerializer>::serialize_into(value, buf)
+        ZebinWriter::<'a, T, &mut VecSerializer>::serialize_into(value, buf)
     }
 }

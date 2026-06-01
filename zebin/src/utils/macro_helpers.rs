@@ -19,7 +19,7 @@ impl FieldEntrySerializer {
     #[inline]
     pub fn poll_write(
         &mut self,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
         field_id: u16,
         encoding: FieldEncoding,
         payload_len: u32,
@@ -66,7 +66,7 @@ impl TagSerializer {
     }
 
     #[inline]
-    pub fn poll_write(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn poll_write(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.cursor < 4 {
             let remaining = 4 - self.cursor;
             if sink
@@ -104,7 +104,7 @@ impl<E: Serializer> FieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn poll_write(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if !self.started {
             let val = self
                 .slot
@@ -129,7 +129,7 @@ impl<E: Serializer> FieldState<E> {
     }
 
     #[inline]
-    pub fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.serializer.finish(sink)
     }
 }
@@ -199,7 +199,7 @@ impl<E: Serializer> SchemaFieldState<E> {
     #[inline]
     pub fn poll_write_entry(
         &mut self,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
         field_id: u16,
         encoding: FieldEncoding,
     ) -> Result<Poll<()>, ZebinError> {
@@ -208,12 +208,12 @@ impl<E: Serializer> SchemaFieldState<E> {
     }
 
     #[inline]
-    pub fn poll_write(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn poll_write(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.state.poll_write(sink)
     }
 
     #[inline]
-    pub fn finish(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn finish(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         self.state.serializer.finish(sink)
     }
 }
@@ -278,7 +278,10 @@ impl<P: Serializer> EnumSerializer<P> {
     }
 
     #[inline]
-    pub fn poll_write_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn poll_write_pending(
+        &mut self,
+        sink: &mut dyn CursorMut<'_>,
+    ) -> Result<Poll<()>, ZebinError> {
         if self.tag_serializer.poll_write(sink)?.is_pending() {
             return Ok(Poll::Pending);
         }
@@ -299,7 +302,7 @@ impl<P: Serializer> EnumSerializer<P> {
     }
 
     #[inline]
-    pub fn finish_inner(self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn finish_inner(self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if let Some(payload) = self.payload {
             payload.finish(sink)
         } else {
@@ -358,7 +361,7 @@ impl SchemaObjectSerializer {
     #[inline]
     pub fn poll_write_header(
         &mut self,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
         stable_schema_key: u32,
         schema_revision: u32,
         field_count: u16,
@@ -382,10 +385,13 @@ impl SchemaObjectSerializer {
     }
 
     #[inline]
-    pub fn mark_table_start(&mut self, _sink: &mut CursorMut<'_>) {}
+    pub fn mark_table_start(&mut self, _sink: &mut dyn CursorMut<'_>) {}
 
     #[inline]
-    pub fn poll_write_footer(&mut self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    pub fn poll_write_footer(
+        &mut self,
+        _sink: &mut dyn CursorMut<'_>,
+    ) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }

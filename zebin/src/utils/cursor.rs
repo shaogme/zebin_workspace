@@ -1,6 +1,5 @@
 use core::num::NonZeroUsize;
 
-use crate::io::StorageMut;
 use crate::prelude::*;
 use crate::utils::{byteops, padding_for_alignment};
 use crate::validation::ValidationContext;
@@ -213,49 +212,31 @@ where
 }
 
 /// Writable cursor into an archive chunked view.
-pub struct CursorMut<'a> {
-    source: &'a mut (dyn StorageMut + 'a),
+pub trait CursorMut<'a> {
+    fn pos(&self) -> usize;
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError>;
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError>;
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError>;
 }
 
-impl<'a> CursorMut<'a> {
-    pub fn new(source: &'a mut (dyn StorageMut + 'a)) -> Self {
-        Self { source }
+impl<'a, C: CursorMut<'a> + ?Sized> CursorMut<'a> for &mut C {
+    #[inline]
+    fn pos(&self) -> usize {
+        (**self).pos()
     }
 
-    pub fn pos(&self) -> usize {
-        self.source.pos()
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
+        (**self).write(bytes)
     }
 
-    pub fn write(&mut self, bytes: &[u8]) -> Result<SinkProgress, ZebinError> {
-        if bytes.is_empty() {
-            return Ok(SinkProgress::Complete);
-        }
-        let buf = (*self.source).peek_buf_mut(bytes.len())?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::copy_exact(buf, &bytes[..accepted]);
-            self.source.advance(accepted);
-        }
-        let progress = SinkProgress::from_accepted(bytes.len(), accepted);
-        Ok(progress)
+    #[inline]
+    fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
+        (**self).align(alignment)
     }
 
-    pub fn align(&mut self, alignment: NonZeroUsize) -> Result<SinkProgress, ZebinError> {
-        let padding = padding_for_alignment(self.pos(), alignment);
-        self.skip(padding)
-    }
-
-    pub fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
-        if len == 0 {
-            return Ok(SinkProgress::Complete);
-        }
-        let buf = (*self.source).peek_buf_mut(len)?;
-        let accepted = buf.len();
-        if accepted > 0 {
-            byteops::fill(buf, 0);
-            self.source.advance(accepted);
-        }
-        let progress = SinkProgress::from_accepted(len, accepted);
-        Ok(progress)
+    #[inline]
+    fn skip(&mut self, len: usize) -> Result<SinkProgress, ZebinError> {
+        (**self).skip(len)
     }
 }

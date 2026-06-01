@@ -123,7 +123,7 @@ where
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let (data, bits) = item.to_packed_data();
         let len = match data {
@@ -143,7 +143,7 @@ where
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < self.len_prefix.len() {
             let remaining = self.len_prefix.len() - self.prefix_cursor;
             if sink
@@ -174,7 +174,7 @@ where
         }
     }
 
-    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -327,7 +327,7 @@ impl Serializer for PackedBoolVecSerializer {
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let len = item.values().len() as u32;
         // Eagerly pack into a Vec<u8>. Avoids the self-referential lifetime
@@ -347,7 +347,7 @@ impl Serializer for PackedBoolVecSerializer {
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let remaining = 4 - self.prefix_cursor;
             if sink
@@ -364,7 +364,7 @@ impl Serializer for PackedBoolVecSerializer {
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
@@ -424,7 +424,7 @@ impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
     fn input(
         &mut self,
         item: Self::Input,
-        sink: &mut CursorMut<'_>,
+        sink: &mut dyn CursorMut<'_>,
     ) -> Result<Poll<()>, ZebinError> {
         let len = item.values().len() as u32;
         let bits_per_value = BITS as usize;
@@ -464,7 +464,7 @@ impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
         self.poll_pending(sink)
     }
 
-    fn poll_pending(&mut self, sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn poll_pending(&mut self, sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         if self.prefix_cursor < 4 {
             let remaining = 4 - self.prefix_cursor;
             if sink
@@ -481,7 +481,7 @@ impl<const BITS: u8> Serializer for PackedU8VecSerializer<BITS> {
             .advance_cursor(&mut self.cursor, remaining))
     }
 
-    fn finish(self, _sink: &mut CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
+    fn finish(self, _sink: &mut dyn CursorMut<'_>) -> Result<Poll<()>, ZebinError> {
         Ok(Poll::Ready(()))
     }
 }
