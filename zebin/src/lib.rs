@@ -138,47 +138,47 @@ pub use pub_fn::*;
 mod pub_fn {
     use super::prelude::*;
     /// Create a reader for the archived root object using the default header.
-    pub fn reader<'a, T, S>(storage: &'a S) -> Result<ZebinReader<'a, T, S::Cursor<'a>>, ZebinError>
+    pub fn reader<'a, T, S>(storage: S) -> Result<ZebinReader<'a, T, S::Cursor<'a>>, ZebinError>
     where
         T: Archive,
-        S: Storage + ?Sized,
+        S: Storage + 'a,
         T::Archived: Access,
     {
-        let cursor = storage.cursor(0);
+        let cursor = storage.into_cursor(0);
         ZebinReader::new(cursor, ValidationConfig::default())
     }
 
     /// Access the archived root object using the default header.
-    pub fn access<'a, T, S>(storage: &'a S) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
+    pub fn access<'a, T, S>(storage: S) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
     where
         T: Archive + 'a,
-        S: Storage + ?Sized + 'a,
+        S: Storage + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::access(storage.cursor(0), ValidationConfig::default())
+        ZebinReader::<T, S::Cursor<'a>>::access(storage.into_cursor(0), ValidationConfig::default())
     }
 
     /// Decode and validate the archived root object using the default header directly into T.
-    pub fn deserialize<'a, T, S>(storage: &'a S) -> Result<T, ZebinError>
+    pub fn deserialize<'a, T, S>(storage: S) -> Result<T, ZebinError>
     where
         T: Archive + 'a,
-        S: Storage + ?Sized + 'a,
+        S: Storage + 'a,
         T::Archived: Access + 'a,
         for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
     {
-        let cursor = storage.cursor(0);
+        let cursor = storage.into_cursor(0);
         ZebinReader::<T, S::Cursor<'a>>::deserialize(cursor)
     }
 
     /// Validate an archive without exposing the archived view using the default header.
-    pub fn validate<'a, T, S>(storage: &'a S) -> Result<(), ZebinError>
+    pub fn validate<'a, T, S>(storage: S) -> Result<(), ZebinError>
     where
         T: Archive,
-        S: Storage + ?Sized + 'a,
+        S: Storage + 'a,
         T::Archived: Access,
     {
         ZebinReader::<T, S::Cursor<'a>>::validate(
-            storage.cursor(0),
+            storage.into_cursor(0),
             ValidationConfig::default(),
             None,
         )
@@ -186,30 +186,30 @@ mod pub_fn {
 
     /// Validate an archive with explicit runtime validation limits.
     pub fn validate_with_config<'a, T, S>(
-        storage: &'a S,
+        storage: S,
         config: ValidationConfig,
         stack: Option<&mut ValidationPathStack>,
     ) -> Result<(), ZebinError>
     where
         T: Archive,
-        S: Storage + ?Sized + 'a,
+        S: Storage + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::validate(storage.cursor(0), config, stack)
+        ZebinReader::<T, S::Cursor<'a>>::validate(storage.into_cursor(0), config, stack)
     }
 
     /// Validate an archive and capture the logical field/index path on failure.
     pub fn validate_detailed<'a, T, S>(
-        storage: &'a S,
+        storage: S,
         stack: &mut ValidationPathStack,
     ) -> Result<(), ZebinError>
     where
         T: Archive,
-        S: Storage + ?Sized + 'a,
+        S: Storage + 'a,
         T::Archived: Access,
     {
         ZebinReader::<T, S::Cursor<'a>>::validate(
-            storage.cursor(0),
+            storage.into_cursor(0),
             ValidationConfig::default(),
             Some(stack),
         )

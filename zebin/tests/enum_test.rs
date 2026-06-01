@@ -47,8 +47,7 @@ fn test_unit_enum_round_trip() {
     writer_obj.write_all(value).unwrap();
     let written = serializer.written();
 
-    let slice = &buf[..written];
-    let archived = access::<UnitMode, _>(&slice).unwrap();
+    let archived = access::<UnitMode, _>(&buf[..written]).unwrap();
     assert!(archived.is_busy());
     assert!(!archived.is_idle());
     assert_eq!(archived.tag(), 1);
@@ -61,8 +60,7 @@ fn test_tuple_enum_round_trip() {
     assert!(matches!(empty, TuplePacket::Empty));
     let value = TuplePacket::Data(7, "packet".to_string());
     let buf = zebin::serialize(value).unwrap();
-    let slice = &buf;
-    let archived = access::<TuplePacket, _>(&slice).unwrap();
+    let archived = access::<TuplePacket, _>(&buf).unwrap();
     assert!(!archived.is_empty());
     assert_eq!(archived.tag(), 1);
 
@@ -83,8 +81,7 @@ fn test_struct_enum_round_trip() {
         label: "hello".to_string(),
     };
     let buf = zebin::serialize(value).unwrap();
-    let slice = &buf;
-    let archived = access::<StructPacket, _>(&slice).unwrap();
+    let archived = access::<StructPacket, _>(&buf).unwrap();
     assert_eq!(archived.tag(), 1);
 
     // StructPacket::Data variant has a schema_key
@@ -107,7 +104,7 @@ fn test_invalid_enum_discriminant() {
     let root_offset = 4usize;
     buf[root_offset..root_offset + 4].copy_from_slice(&99u32.to_le_bytes());
 
-    let err = zebin::validate::<UnitMode, _>(&&buf[..written]).unwrap_err();
+    let err = zebin::validate::<UnitMode, _>(&buf[..written]).unwrap_err();
     match err {
         ZebinError::Access(zebin::error::AccessError::ValidationError { .. }) => {}
         other => panic!("expected validation error, got {other:?}"),

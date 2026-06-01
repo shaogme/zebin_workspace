@@ -6,7 +6,7 @@ use std::{
 use memmap2::{Mmap as RawMmap, MmapMut as RawMmapMut, MmapOptions};
 
 use crate::error::ZebinError;
-use crate::io::{StaticMode, Storage, StorageMut};
+use crate::io::{Storage, StorageMut};
 use crate::utils::chunk::BufMut;
 use crate::utils::cursor::SliceCursor;
 
@@ -39,15 +39,14 @@ impl Mmap {
     }
 }
 
-impl Storage for Mmap {
-    type Mode = StaticMode;
+impl<'b> Storage for &'b Mmap {
     type Cursor<'a>
         = SliceCursor<'a>
     where
         Self: 'a;
 
     #[inline]
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
     where
         Self: 'a,
     {

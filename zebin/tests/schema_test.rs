@@ -142,8 +142,8 @@ fn test_safe_access_no_alloc() {
     writer.write_all(sensor).unwrap();
     let written = serializer.written();
 
-    let slice = &buf[..written];
-    let reader = zebin::access::<VersionedSensor, _>(&slice).expect("Failed to validate archive");
+    let reader =
+        zebin::access::<VersionedSensor, _>(&buf[..written]).expect("Failed to validate archive");
     assert_eq!(reader.stable_schema_key(), 987654321);
     assert_eq!(reader.id().unwrap(), &101);
     assert_eq!(reader.value().unwrap(), &30);

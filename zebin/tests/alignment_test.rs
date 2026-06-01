@@ -111,7 +111,7 @@ fn test_root_array_u64_round_trip() {
     writer_obj.write_all(value).unwrap();
     let written = serializer.written();
 
-    let archived = access::<[u64; 3], _>(&&buf[..written]).unwrap();
+    let archived = access::<[u64; 3], _>(&buf[..written]).unwrap();
 
     assert_eq!(archived, [8, 16, 32]);
 }

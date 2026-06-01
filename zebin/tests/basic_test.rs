@@ -118,8 +118,7 @@ fn test_basic_no_alloc() {
     let mut writer_obj = writer::<SimpleUser, _>(&mut serializer).unwrap();
     writer_obj.write_all(user).unwrap();
     let written = serializer.written();
-    let slice = &buf[..written];
-    let archived = zebin::access::<SimpleUser, _>(&slice).unwrap();
+    let archived = zebin::access::<SimpleUser, _>(&buf[..written]).unwrap();
     assert_eq!(archived.id, 42);
 }
 
@@ -133,8 +132,7 @@ fn test_iter_archive_no_alloc() {
     let mut writer_obj = writer::<IterArchive<[u64; 3], u64>, _>(&mut serializer).unwrap();
     writer_obj.write_all(wrapped).unwrap();
     let written = serializer.written();
-    let slice = &buf[..written];
-    let archived_iter = zebin::access::<IterArchive<[u64; 3], u64>, _>(&slice).unwrap();
+    let archived_iter = zebin::access::<IterArchive<[u64; 3], u64>, _>(&buf[..written]).unwrap();
     assert_eq!(archived_iter.len(), 3);
     let mut iter = archived_iter.iter();
     assert_eq!(iter.next().unwrap().unwrap(), 10);
@@ -302,13 +300,13 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl zebin::io::Storage for ShardedStorage {
+impl<'b> zebin::io::Storage for &'b ShardedStorage {
     type Cursor<'a>
         = ShardedStorageCursor<'a>
     where
         Self: 'a;
 
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
     where
         Self: 'a,
     {
@@ -336,11 +334,8 @@ impl ShardedStorage {
 fn test_sharded_storage_stream() {
     // Compile-time checks for Storage bounds
     fn assert_storage<S: zebin::io::Storage + ?Sized>() {}
-    assert_storage::<[u8]>();
     assert_storage::<&[u8]>();
-    assert_storage::<ShardedStorage>();
-    // Uncommenting the line below must fail to compile:
-    // assert_storage::<&ShardedStorage>();
+    assert_storage::<&ShardedStorage>();
 
     let u1 = UserProfile {
         id: 1,
@@ -359,7 +354,7 @@ fn test_sharded_storage_stream() {
         current_index: 0,
     };
 
-    let cursor = storage.cursor(0);
+    let cursor = (&storage).into_cursor(0);
     let mut reader =
         ZebinReader::<UserProfile, _>::new(cursor, ValidationConfig::default()).unwrap();
 
@@ -368,7 +363,7 @@ fn test_sharded_storage_stream() {
     assert_eq!(unsafe { r1.username.as_str() }, "Alice");
 
     storage.advance_sharder().unwrap();
-    let cursor = storage.cursor(0);
+    let cursor = (&storage).into_cursor(0);
     let mut reader =
         ZebinReader::<UserProfile, _>::new(cursor, ValidationConfig::default()).unwrap();
 

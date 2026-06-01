@@ -14,7 +14,7 @@ pub trait Storage {
     where
         Self: 'a;
 
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
     where
         Self: 'a;
 }
@@ -24,36 +24,6 @@ pub trait StorageMut {
     fn pos(&self) -> usize;
     fn peek_buf_mut(&mut self, len: usize) -> Result<BufMut<'_>, ZebinError>;
     fn advance(&mut self, len: usize);
-}
-
-impl<S: Storage + ?Sized> Storage for &S {
-    type Cursor<'a>
-        = S::Cursor<'a>
-    where
-        Self: 'a;
-
-    #[inline]
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
-    where
-        Self: 'a,
-    {
-        (**self).cursor(pos)
-    }
-}
-
-impl<S: Storage + ?Sized> Storage for &mut S {
-    type Cursor<'a>
-        = S::Cursor<'a>
-    where
-        Self: 'a;
-
-    #[inline]
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
-    where
-        Self: 'a,
-    {
-        (**self).cursor(pos)
-    }
 }
 
 impl<S: StorageMut + ?Sized> StorageMut for &mut S {
@@ -73,14 +43,14 @@ impl<S: StorageMut + ?Sized> StorageMut for &mut S {
     }
 }
 
-impl Storage for [u8] {
+impl<'b> Storage for &'b [u8] {
     type Cursor<'a>
         = SliceCursor<'a>
     where
         Self: 'a;
 
     #[inline]
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
     where
         Self: 'a,
     {
@@ -89,14 +59,14 @@ impl Storage for [u8] {
 }
 
 #[cfg(feature = "alloc")]
-impl Storage for Vec<u8> {
+impl<'b> Storage for &'b Vec<u8> {
     type Cursor<'a>
         = SliceCursor<'a>
     where
         Self: 'a;
 
     #[inline]
-    fn cursor<'a>(&'a self, pos: usize) -> Self::Cursor<'a>
+    fn into_cursor<'a>(self, pos: usize) -> Self::Cursor<'a>
     where
         Self: 'a,
     {
