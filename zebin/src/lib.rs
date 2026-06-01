@@ -35,6 +35,8 @@ pub mod prelude {
     pub use crate::io::VecSerializer;
     #[cfg(feature = "mmap")]
     pub use crate::io::{Mmap, MmapMut, MmapSerializer};
+    #[cfg(feature = "std")]
+    pub use crate::io::{WriteSerializer, deserialize_from, serialize_to};
     pub use crate::{
         archive::{
             ArchivedPackedBoolSlice, ArchivedPackedU8Slice, IterArchive, PackedBoolSlice,
@@ -95,12 +97,16 @@ pub mod io {
     pub use crate::io_impl::storage::SliceSerializer;
     #[cfg(feature = "alloc")]
     pub use crate::io_impl::storage::VecSerializer;
+    #[cfg(feature = "std")]
+    pub use crate::io_impl::storage::WriteSerializer;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::MmapSerializer;
     #[cfg(feature = "mmap")]
     pub use crate::io_impl::storage::mmap::{Mmap, MmapMut};
     pub use crate::io_impl::storage::{Storage, StorageMut};
     pub use crate::pub_fn::{deserialize, reader, writer};
+    #[cfg(feature = "std")]
+    pub use crate::pub_fn::{deserialize_from, serialize_to};
     #[cfg(feature = "alloc")]
     pub use crate::pub_fn::{serialize, serialize_into};
     pub use crate::read_impl::ZebinReader;
@@ -244,5 +250,55 @@ mod pub_fn {
         T: Serialize<Input<'a> = T>,
     {
         ZebinWriter::<'a, T, &mut VecSerializer>::serialize_into(value, buf)
+    }
+
+    #[cfg(feature = "std")]
+    pub fn serialize_to<'a, T, W>(value: T, writer: W) -> Result<usize, ZebinError>
+    where
+        T: Serialize + Archive + 'a,
+        T::Archived: ArchivedLayout,
+        T: Serialize<Input<'a> = T>,
+        W: std::io::Write,
+    {
+        use crate::utils::cursor::ChunkSerializer;
+
+        let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
+        let mut serializer = WriteSerializer::new(writer, 0);
+        {
+            let mut writer_cursor = (&mut serializer).into_cursor_mut();
+            writer_cursor.write(header.serialize().as_ref())?;
+
+            let mut body_serializer = T::serializer();
+            if body_serializer
+                .input(value, &mut writer_cursor)?
+                .is_pending()
+            {
+                while body_serializer
+                    .poll_pending(&mut writer_cursor)?
+                    .is_pending()
+                {}
+            }
+            let _ = body_serializer.finish(&mut writer_cursor)?;
+        }
+        Ok(serializer.pos())
+    }
+
+    /// Deserialize and decode a value from a std::io::Read stream.
+    #[cfg(feature = "std")]
+    pub fn deserialize_from<R, T>(mut reader: R) -> Result<T, ZebinError>
+    where
+        R: std::io::Read,
+        T: Archive,
+        T::Archived: Access,
+        for<'b> <T::Archived as Access>::View<'b>: Deserialize<T>,
+    {
+        let mut buf = Vec::new();
+        reader
+            .read_to_end(&mut buf)
+            .map_err(|_| ZebinError::SerializeError {
+                pos: 0,
+                message: "Failed to read from std::io::Read stream",
+            })?;
+        crate::pub_fn::deserialize::<T, _>(&buf)
     }
 }

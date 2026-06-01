@@ -146,6 +146,28 @@ impl<'a> SliceSerializer<'a> {
     }
 }
 
+#[cfg(feature = "std")]
+impl<'a> std::io::Write for SliceSerializer<'a> {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let pos = self.write_pos;
+        let remaining = self.buf.len().saturating_sub(pos);
+        let count = remaining.min(buf.len());
+        if count > 0 {
+            crate::utils::byteops::copy_exact(&mut self.buf[pos..pos + count], &buf[..count]);
+            self.write_pos += count;
+            self.archive_pos += count;
+            self.written = self.written.max(self.write_pos);
+        }
+        Ok(count)
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl<'b, 'c> StorageMut for &'b mut SliceSerializer<'c> {
     type CursorMut<'a>
         = SerializerCursor<'a, SliceSerializer<'c>>
@@ -204,10 +226,89 @@ impl VecSerializer {
     }
 }
 
+#[cfg(feature = "std")]
+impl std::io::Write for VecSerializer {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.buf.extend_from_slice(buf);
+        self.archive_pos += buf.len();
+        Ok(buf.len())
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 #[cfg(feature = "alloc")]
 impl<'b> StorageMut for &'b mut VecSerializer {
     type CursorMut<'a>
         = SerializerCursor<'a, VecSerializer>
+    where
+        Self: 'a;
+
+    #[inline]
+    fn into_cursor_mut<'a>(self) -> Self::CursorMut<'a>
+    where
+        Self: 'a,
+    {
+        SerializerCursor::new(self)
+    }
+}
+
+#[cfg(feature = "std")]
+pub struct WriteSerializer<W: std::io::Write> {
+    writer: W,
+    buf: Vec<u8>,
+    archive_pos: usize,
+}
+
+#[cfg(feature = "std")]
+impl<W: std::io::Write> WriteSerializer<W> {
+    pub fn new(writer: W, archive_pos: usize) -> Self {
+        Self {
+            writer,
+            buf: Vec::new(),
+            archive_pos,
+        }
+    }
+
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+}
+
+#[cfg(feature = "std")]
+impl<W: std::io::Write> ChunkSerializer for WriteSerializer<W> {
+    #[inline]
+    fn pos(&self) -> usize {
+        self.archive_pos
+    }
+
+    #[inline]
+    fn peek_buf_mut(&mut self, len: usize) -> Result<&mut [u8], ZebinError> {
+        if self.buf.len() < len {
+            self.buf.resize(len, 0);
+        }
+        Ok(&mut self.buf[..len])
+    }
+
+    #[inline]
+    fn advance(&mut self, len: usize) {
+        if len > 0 {
+            if self.writer.write_all(&self.buf[..len]).is_ok() {
+                self.archive_pos += len;
+                self.buf.drain(..len);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'b, W: std::io::Write> StorageMut for &'b mut WriteSerializer<W> {
+    type CursorMut<'a>
+        = SerializerCursor<'a, WriteSerializer<W>>
     where
         Self: 'a;
 

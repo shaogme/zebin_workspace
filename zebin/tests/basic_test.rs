@@ -381,3 +381,34 @@ fn test_sharded_storage_stream() {
 
     assert!(reader.read().is_err());
 }
+
+#[cfg(feature = "std")]
+#[test]
+fn test_std_io_read_write() {
+    use std::io::{Cursor, Read};
+    use zebin::prelude::Storage;
+
+    let user = UserProfile {
+        id: 777,
+        username: "StandardIO".to_string(),
+    };
+
+    // 1. 测试 serialize_to (写入到 std::io::Write 中，这里使用 Vec<u8>)
+    let mut write_buf = Vec::new();
+    let written = zebin::prelude::serialize_to(&user, &mut write_buf).unwrap();
+    assert!(written > 0);
+    assert_eq!(write_buf.len(), written);
+
+    // 2. 测试 SliceCursor 实现 std::io::Read
+    let storage = write_buf.as_slice();
+    let mut slice_cursor = storage.into_cursor();
+    let mut read_back_buf = vec![0u8; write_buf.len()];
+    slice_cursor.read_exact(&mut read_back_buf).unwrap();
+    assert_eq!(read_back_buf, write_buf);
+
+    // 3. 测试 deserialize_from (从 std::io::Read 中反序列化，这里使用 std::io::Cursor)
+    let read_stream = Cursor::new(write_buf);
+    let deserialized: UserProfile = zebin::prelude::deserialize_from(read_stream).unwrap();
+    assert_eq!(deserialized.id, 777);
+    assert_eq!(deserialized.username, "StandardIO");
+}

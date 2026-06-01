@@ -213,6 +213,23 @@ where
     }
 }
 
+#[cfg(feature = "std")]
+impl<'a> std::io::Read for SliceCursor<'a> {
+    #[inline]
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = &self.slice[self.pos..];
+        let bytes_to_read = remaining.len().min(buf.len());
+        if bytes_to_read > 0 {
+            self.pos += bytes_to_read;
+            crate::utils::byteops::copy_exact(
+                &mut buf[..bytes_to_read],
+                &remaining[..bytes_to_read],
+            );
+        }
+        Ok(bytes_to_read)
+    }
+}
+
 /// Writable cursor into an archive chunked view.
 pub trait CursorMut<'a> {
     fn pos(&self) -> usize;
