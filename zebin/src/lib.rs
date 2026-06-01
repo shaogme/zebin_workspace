@@ -156,7 +156,7 @@ mod pub_fn {
         S: Storage<Mode = StaticMode> + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::access(storage, ValidationConfig::default())
+        ZebinReader::<T, S::Cursor<'a>>::access(storage.cursor(0), ValidationConfig::default())
     }
 
     /// Decode and validate the archived root object using the default header directly into T.
@@ -178,7 +178,11 @@ mod pub_fn {
         S: Storage + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::validate(storage, ValidationConfig::default(), None)
+        ZebinReader::<T, S::Cursor<'a>>::validate(
+            storage.cursor(0),
+            ValidationConfig::default(),
+            None,
+        )
     }
 
     /// Validate an archive with explicit runtime validation limits.
@@ -192,7 +196,7 @@ mod pub_fn {
         S: Storage + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::validate(storage, config, stack)
+        ZebinReader::<T, S::Cursor<'a>>::validate(storage.cursor(0), config, stack)
     }
 
     /// Validate an archive and capture the logical field/index path on failure.
@@ -205,7 +209,11 @@ mod pub_fn {
         S: Storage + ?Sized + 'a,
         T::Archived: Access,
     {
-        ZebinReader::<T, S::Cursor<'a>>::validate(storage, ValidationConfig::default(), Some(stack))
+        ZebinReader::<T, S::Cursor<'a>>::validate(
+            storage.cursor(0),
+            ValidationConfig::default(),
+            Some(stack),
+        )
     }
 
     /// Create a chunked archive writer that can be resumed with caller-provided buffers.

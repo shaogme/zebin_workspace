@@ -1,5 +1,4 @@
 use crate::error::ParseHeaderError;
-use crate::io::Storage;
 use crate::prelude::*;
 
 /// Safe access layer output that keeps the validated byte slice alive.
@@ -34,17 +33,15 @@ where
         self.cursor.is_eof()
     }
 
-    pub fn access<S>(
-        storage: &'a S,
+    pub fn access(
+        mut cursor: C,
         config: ValidationConfig,
     ) -> Result<<T::Archived as Access>::View<'a>, ZebinError>
     where
         T: Archive,
         T::Archived: Access,
-        S: Storage<Mode = StaticMode> + ?Sized,
     {
         let mut validator = Validator::new(config, None);
-        let mut cursor = storage.cursor(0);
         let header_bytes = cursor.peek_exact(H::SIZE, &mut validator)?;
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
@@ -80,23 +77,21 @@ where
         view.deserialize()
     }
 
-    pub fn validate<S>(
-        storage: &'a S,
+    pub fn validate(
+        mut cursor: C,
         config: ValidationConfig,
         stack: Option<&mut ValidationPathStack>,
     ) -> Result<(), ZebinError>
     where
         T: Archive,
         T::Archived: Access,
-        S: Storage + ?Sized,
     {
         let mut header_validator = Validator::new(config, None);
-        let mut cursor = storage.cursor(0);
         let header_bytes = cursor.peek_exact(H::SIZE, &mut header_validator)?;
         let header = H::parse(header_bytes)?;
         validate_root_object_encoding::<T, H>(&header)?;
         cursor.advance(H::SIZE, &mut header_validator)?;
-        validate_root::<T, S::Cursor<'a>>(cursor, config, stack)
+        validate_root::<T, C>(cursor, config, stack)
     }
 }
 
