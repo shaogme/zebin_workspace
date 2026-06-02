@@ -3,7 +3,7 @@
 pub mod mmap;
 
 use crate::error::ZebinError;
-use crate::utils::cursor::{ChunkSerializer, Cursor, CursorMut, SerializerCursor, SliceCursor};
+use crate::utils::cursor::{Cursor, CursorMut, SliceCursor};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -29,7 +29,7 @@ pub trait StorageMut {
         Self: 'a;
 }
 
-impl<'a> ChunkSerializer for SliceSerializer<'a> {
+impl<'a, 'b> CursorMut<'b> for SliceSerializer<'a> {
     #[inline]
     fn pos(&self) -> usize {
         self.pos()
@@ -47,7 +47,7 @@ impl<'a> ChunkSerializer for SliceSerializer<'a> {
 }
 
 #[cfg(feature = "alloc")]
-impl ChunkSerializer for VecSerializer {
+impl<'a> CursorMut<'a> for VecSerializer {
     #[inline]
     fn pos(&self) -> usize {
         self.pos()
@@ -170,7 +170,7 @@ impl<'a> std::io::Write for SliceSerializer<'a> {
 
 impl<'b, 'c> StorageMut for &'b mut SliceSerializer<'c> {
     type CursorMut<'a>
-        = SerializerCursor<'a, SliceSerializer<'c>>
+        = &'a mut SliceSerializer<'c>
     where
         Self: 'a;
 
@@ -179,7 +179,7 @@ impl<'b, 'c> StorageMut for &'b mut SliceSerializer<'c> {
     where
         Self: 'a,
     {
-        SerializerCursor::new(self)
+        self
     }
 }
 
@@ -244,7 +244,7 @@ impl std::io::Write for VecSerializer {
 #[cfg(feature = "alloc")]
 impl<'b> StorageMut for &'b mut VecSerializer {
     type CursorMut<'a>
-        = SerializerCursor<'a, VecSerializer>
+        = &'a mut VecSerializer
     where
         Self: 'a;
 
@@ -253,7 +253,7 @@ impl<'b> StorageMut for &'b mut VecSerializer {
     where
         Self: 'a,
     {
-        SerializerCursor::new(self)
+        self
     }
 }
 
@@ -277,10 +277,15 @@ impl<W: std::io::Write> WriteSerializer<W> {
     pub fn into_inner(self) -> W {
         self.writer
     }
+
+    #[inline]
+    pub fn pos(&self) -> usize {
+        self.archive_pos
+    }
 }
 
 #[cfg(feature = "std")]
-impl<W: std::io::Write> ChunkSerializer for WriteSerializer<W> {
+impl<'a, W: std::io::Write> CursorMut<'a> for WriteSerializer<W> {
     #[inline]
     fn pos(&self) -> usize {
         self.archive_pos
@@ -308,7 +313,7 @@ impl<W: std::io::Write> ChunkSerializer for WriteSerializer<W> {
 #[cfg(feature = "std")]
 impl<'b, W: std::io::Write> StorageMut for &'b mut WriteSerializer<W> {
     type CursorMut<'a>
-        = SerializerCursor<'a, WriteSerializer<W>>
+        = &'a mut WriteSerializer<W>
     where
         Self: 'a;
 
@@ -317,6 +322,6 @@ impl<'b, W: std::io::Write> StorageMut for &'b mut WriteSerializer<W> {
     where
         Self: 'a,
     {
-        SerializerCursor::new(self)
+        self
     }
 }

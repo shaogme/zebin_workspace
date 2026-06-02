@@ -5,8 +5,6 @@ use crate::prelude::*;
 
 #[cfg(feature = "alloc")]
 use crate::io_impl::storage::VecSerializer;
-#[cfg(feature = "alloc")]
-use crate::utils::cursor::SerializerCursor;
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -201,7 +199,7 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<'a, T, H> ArchiveWriter<'a, T, SerializerCursor<'a, VecSerializer>, H>
+impl<'a, T, H> ArchiveWriter<'a, T, &'a mut VecSerializer, H>
 where
     T: Serialize + Archive + 'a,
     H: ArchiveHeaderTrait,

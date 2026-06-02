@@ -4,8 +4,7 @@ use core::cell::Cell;
 use zebin::ZebinError;
 use zebin::io::SliceSerializer;
 #[cfg(feature = "alloc")]
-use zebin::prelude::{Storage, StorageMut, ValidationConfig, ZebinReader, ZebinWriter};
-use zebin::utils::cursor::{ChunkSerializer, SerializerCursor};
+use zebin::prelude::{CursorMut, Storage, StorageMut, ValidationConfig, ZebinReader, ZebinWriter};
 use zebin::{ZebinAccess, ZebinDeserialize, ZebinSerialize, writer};
 
 #[cfg(feature = "alloc")]
@@ -61,7 +60,7 @@ fn test_chunked_writer_resume() {
         write_pos: usize,
     }
 
-    impl<'a> ChunkSerializer for LimitedSink<'a> {
+    impl<'a, 'b> CursorMut<'b> for LimitedSink<'a> {
         fn pos(&self) -> usize {
             self.write_pos
         }
@@ -84,7 +83,7 @@ fn test_chunked_writer_resume() {
 
     impl<'b, 'a> StorageMut for &'b mut LimitedSink<'a> {
         type CursorMut<'c>
-            = SerializerCursor<'c, LimitedSink<'a>>
+            = &'c mut LimitedSink<'a>
         where
             Self: 'c;
 
@@ -92,7 +91,7 @@ fn test_chunked_writer_resume() {
         where
             Self: 'c,
         {
-            SerializerCursor::new(self)
+            self
         }
     }
 

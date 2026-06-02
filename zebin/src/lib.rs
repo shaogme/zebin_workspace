@@ -260,8 +260,6 @@ mod pub_fn {
         T: Serialize<Input<'a> = T>,
         W: std::io::Write,
     {
-        use crate::utils::cursor::ChunkSerializer;
-
         let header = ArchiveHeader::create(<T::Archived as ArchivedLayout>::OBJECT_ENCODING as u8);
         let mut serializer = WriteSerializer::new(writer, 0);
         {
